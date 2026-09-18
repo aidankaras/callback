@@ -15,12 +15,31 @@ jobs:
       - run: uv run ruff format --check .
       - run: uv run pyright
       - run: uv run pytest -v
+      - run: uv run --with pip-audit pip-audit
   secrets:
     runs-on: ubuntu-latest
     steps:
+      # fetch-depth: 0 pulls full history: gitleaks/gitleaks-action (dropped
+      # below) builds its scan range as `<before>^..<after>`, and on a
+      # branch's first push falls back to the repository's root commit --
+      # whose `^` doesn't resolve, so the action scanned ~0 bytes and failed
+      # on every such push regardless of content. Running gitleaks directly
+      # over full history avoids that range computation entirely.
       - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955  # v4.3.0
         with:
           fetch-depth: 0
-      - uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7  # v2.3.9
+      - name: Install gitleaks
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_VERSION: "8.30.1"
+          GITLEAKS_SHA256: "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb"
+        run: |
+          set -euo pipefail
+          curl -sSLO "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          echo "${GITLEAKS_SHA256}  gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" | sha256sum -c -
+          tar xzf "gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" gitleaks
+      - name: Scan full history for secrets
+        # `detect` (not `dir`) because the point of this job is catching a
+        # secret that was committed and later removed -- a tree scan of the
+        # checked-out worktree would never see it. No `--log-opts` override:
+        # gitleaks' default already walks every commit reachable from HEAD.
+        run: ./gitleaks detect --source . -v
