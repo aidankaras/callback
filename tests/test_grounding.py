@@ -414,7 +414,7 @@ def test_hyphen_range_accepts_both_endpoints_as_years() -> None:
 
 def test_en_dash_range_accepts_both_endpoints_as_years() -> None:
     f = fact("y3", dates=Dates(start="2018", end="2024"))
-    verdict, findings = check_bullet("Employed 2018 – 2024 as an analyst", [f])
+    verdict, findings = check_bullet("Employed 2018 – 2024 as an analyst", [f])  # noqa: RUF001
     assert verdict is Verdict.PASS
     assert findings == []
 

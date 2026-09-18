@@ -115,8 +115,13 @@ _PREP_BEFORE = re.compile(r"(?:from|since|until|through|thru|in|during)\s+$", re
 _MONTH_BEFORE = re.compile(
     r"(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+$", re.IGNORECASE
 )
-_RANGE_AFTER = re.compile(r"^\s*(?:-|–|—|to|through)\s*(?:19|20)\d{2}\b", re.IGNORECASE)
-_RANGE_BEFORE = re.compile(r"(?:19|20)\d{2}\s*(?:-|–|—|to|through)\s*$", re.IGNORECASE)
+# The en dash literal in each pattern is a real range separator a resume may
+# use (e.g. two years written with a spaced en dash), not a stand-in for a
+# hyphen ruff mistook it for.
+_RANGE_AFTER_RE = r"^\s*(?:-|–|—|to|through)\s*(?:19|20)\d{2}\b"  # noqa: RUF001
+_RANGE_BEFORE_RE = r"(?:19|20)\d{2}\s*(?:-|–|—|to|through)\s*$"  # noqa: RUF001
+_RANGE_AFTER = re.compile(_RANGE_AFTER_RE, re.IGNORECASE)
+_RANGE_BEFORE = re.compile(_RANGE_BEFORE_RE, re.IGNORECASE)
 
 
 class Verdict(StrEnum):
