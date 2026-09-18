@@ -27,15 +27,39 @@ def callback_home() -> Path:
 
 
 def ensure_home() -> Path:
-    """Create the data home and its standard subdirectories with mode 0700."""
+    """Create the data home and its standard subdirectories with mode 0700.
+
+    Any missing parent directories of the data home are also created at 0700 —
+    `Path.mkdir(parents=True)` alone would leave those at the umask default, which
+    would contradict the private-by-default requirement for anything under the
+    home. Parents that already existed are left untouched.
+    """
     home = callback_home()
-    home.mkdir(mode=DIR_MODE, parents=True, exist_ok=True)
+    _create_missing_parents(home)
+    home.mkdir(mode=DIR_MODE, exist_ok=True)
     home.chmod(DIR_MODE)
     for name in ("inbox", "outputs", "targets", "briefs", "base"):
         sub = home / name
         sub.mkdir(mode=DIR_MODE, exist_ok=True)
         sub.chmod(DIR_MODE)
     return home
+
+
+def _create_missing_parents(path: Path) -> None:
+    """Create any missing ancestor directories of `path` at mode 0700.
+
+    Only chmods directories this call actually creates. An ancestor that already
+    exists is left exactly as it was — it belongs to whoever put it there, not to
+    this tool.
+    """
+    missing: list[Path] = []
+    ancestor = path.parent
+    while not ancestor.exists():
+        missing.append(ancestor)
+        ancestor = ancestor.parent
+    for directory in reversed(missing):
+        directory.mkdir(mode=DIR_MODE)
+        directory.chmod(DIR_MODE)
 
 
 def resolve_inside(relative: str) -> Path:
@@ -55,3 +79,33 @@ def write_private(path: Path, text: str) -> None:
     """Write `text` to `path` and restrict it to mode 0600."""
     path.write_text(text, encoding="utf-8")
     path.chmod(FILE_MODE)
+
+
+def delete_all() -> list[Path]:
+    """Remove every file and directory under the data home; return what was removed.
+
+    Only descends into the resolved home and never follows a symlink out of it: any
+    symlink encountered (file or directory) is unlinked directly rather than resolved
+    and traversed. The home directory itself is left in place, empty, rather than
+    removed outright, so a subsequent `ensure_home()` has nothing to recreate.
+
+    Does not manage the SQLite index this tool will later introduce; that feature
+    owns its own cleanup.
+    """
+    home = callback_home().resolve()
+    removed: list[Path] = []
+    if not home.is_dir():
+        return removed
+
+    def _walk(directory: Path) -> None:
+        for entry in sorted(directory.iterdir()):
+            if entry.is_symlink() or entry.is_file():
+                entry.unlink()
+                removed.append(entry)
+            elif entry.is_dir():
+                _walk(entry)
+                entry.rmdir()
+                removed.append(entry)
+
+    _walk(home)
+    return removed

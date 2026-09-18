@@ -66,3 +66,36 @@ def test_cli_init_creates_private_home(tmp_path: Path, monkeypatch: pytest.Monke
     )
     assert home.is_dir()
     assert str(home) in out.stdout
+
+
+def test_cli_delete_all_removes_everything_under_home(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`callback delete-all` must remove every file under the home and report each one."""
+    home = tmp_path / "cb"
+    monkeypatch.setenv("CALLBACK_HOME", str(home))
+    nested_dir = home / "outputs" / "job" / "draft"
+    nested_dir.mkdir(parents=True)
+    nested_file = nested_dir / "resume.pdf"
+    nested_file.write_text("draft pdf")
+    top_file = home / "notes.yaml"
+    top_file.write_text("notes")
+
+    out = subprocess.run(
+        [sys.executable, "-m", "core.cli", "delete-all"],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+
+    assert home.is_dir()
+    assert list(home.iterdir()) == []
+    expected_removed = {
+        str(nested_file),
+        str(nested_dir),
+        str(nested_dir.parent),  # outputs/job
+        str(nested_dir.parent.parent),  # outputs
+        str(top_file),
+    }
+    printed = set(out.stdout.splitlines())
+    assert printed == expected_removed

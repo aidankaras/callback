@@ -17,6 +17,11 @@ def build_parser() -> argparse.ArgumentParser:
     init = sub.add_parser("init", help="create the private data directory")
     init.set_defaults(handler=_cmd_init)
 
+    delete_all = sub.add_parser(
+        "delete-all", help="permanently remove everything under the private data directory"
+    )
+    delete_all.set_defaults(handler=_cmd_delete_all)
+
     return parser
 
 
@@ -25,6 +30,14 @@ def _cmd_init(_args: argparse.Namespace) -> int:
 
     home = ensure_home()
     print(f"initialised {home}")
+    return 0
+
+
+def _cmd_delete_all(_args: argparse.Namespace) -> int:
+    from core.paths import delete_all
+
+    for removed in delete_all():
+        print(removed)
     return 0
 
 
