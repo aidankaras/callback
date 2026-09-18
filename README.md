@@ -21,21 +21,28 @@ store rather than trusted on its face.
   (`core/checks`). This is a traceability guarantee, not an absolute one — an invented product or
   tool name that is neither a known alias nor identifier-shaped currently passes grounding
   unchecked. See `docs/limitations.md` for the full list of what grounding does and does not catch.
+- **Deterministic rendering** — a structured document (`core/resume`) is compiled to PDF with Typst
+  (`core/render`) under conditions chosen so the same input always produces the same bytes: system
+  fonts are ignored in favour of a vendored, licensed font family, any compiler warning (including a
+  silently substituted font) is a hard failure rather than advisory, and the document's embedded
+  timestamp is fixed rather than left to wall-clock time. This is the rendering step the layout gates
+  below will measure; it does not itself check the result's structure or content.
 - A minimal CLI (`callback init`, `callback delete-all`) for managing the private data directory.
 
 ## Planned
 
-Document rendering, the parseability gate, the hidden-channels gate, additional layout gates, and a
-ledger of what was generated and from which facts are not built yet:
+The parseability gate, the hidden-channels gate, additional layout gates, and a ledger of what was
+generated and from which facts are not built yet:
 
-- **Machine-parseable** — documents will be rendered from a structured source, then re-extracted with
-  a pessimistic parser and diffed against the source to catch ambiguous reading order or broken
-  field segmentation before the candidate sees a review comment about it.
+- **Machine-parseable** — the rendered PDF will be re-extracted with a pessimistic parser and diffed
+  against the structured source to catch ambiguous reading order or broken field segmentation before
+  the candidate sees a review comment about it.
 - **Free of hidden channels** — extracted text will be checked against visible text, and document
   metadata will be constrained to carry nothing beyond title and author.
 
-`pyproject.toml` already pins the rendering and extraction dependencies these will use (`typst`,
-`pdfplumber`, `pypdf`); none of them is called from `core/` yet.
+`pyproject.toml` already pins the extraction dependency these will use (`pdfplumber`); it is not
+called from `core/` yet. `pypdf` is already used, but only by rendering itself, to verify the fonts
+it embedded — not yet for the broader text-and-structure extraction these gates will need.
 
 See `docs/limitations.md` for what the verification gates do and do not guarantee.
 

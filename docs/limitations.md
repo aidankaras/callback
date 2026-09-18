@@ -10,11 +10,17 @@ explicitly out of scope rather than merely unimplemented.
   supplied. This is a claim about traceability, not about truthfulness of the underlying facts —
   `callback` cannot verify that a fact the candidate entered is itself accurate — and it does not
   catch every kind of invented content; see Known constraints below for the specific gap.
+- **Deterministic rendering**: a structured document renders to PDF such that the same input always
+  produces the same bytes, on any machine — system fonts are never substituted for the vendored
+  family, a compiler warning always aborts the render rather than producing a silently-different
+  result, and the document's embedded timestamp is fixed. This is a guarantee about the rendering
+  step itself, not about the rendered document's structure or content; the checks below that will
+  measure that PDF are not built yet.
 
 ## Planned, not yet built
 
-No document rendering, text extraction, or metadata inspection exists in `core/` yet, so neither of
-the following is checked today:
+Text extraction and metadata inspection do not exist in `core/` yet, so neither of the following is
+checked today:
 
 - **Parseability**: a document's rendered layout will be checked against an independent,
   deliberately pessimistic text extraction to confirm its field structure and reading order survive
