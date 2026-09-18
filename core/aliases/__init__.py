@@ -28,6 +28,13 @@ def _load() -> tuple[dict[str, str], dict[str, set[str]]]:
     return alias_to_canonical, canonical_to_aliases
 
 
+# The lookup table sits above the functions that use it, per convention. It is
+# built once from `_load`'s cached result, so every caller (this module's own
+# `canonicalize`/`synonyms`, and `core.checks.grounding`, which imports it
+# directly) shares the same dict rather than re-parsing the table file.
+ALIAS_TABLE: dict[str, str] = _load()[0]
+
+
 def canonicalize(entity: str) -> str:
     """Return the canonical form of an entity, or the entity unchanged if not aliased.
 
@@ -41,9 +48,9 @@ def synonyms(canonical: str) -> set[str]:
     """Return all known forms (canonical + aliases) of a canonical entity name.
 
     Returns a set containing only the canonical form if it is not in the table.
+    Always a fresh copy: the cached table backs every caller, so returning the
+    stored set itself would let one caller's mutation corrupt what every later
+    call sees.
     """
     _, canonical_to_aliases = _load()
-    return canonical_to_aliases.get(canonical, {canonical})
-
-
-ALIAS_TABLE: dict[str, str] = _load()[0]
+    return set(canonical_to_aliases.get(canonical, {canonical}))

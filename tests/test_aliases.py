@@ -24,6 +24,16 @@ def test_synonyms_include_the_canonical_form() -> None:
     assert {"postgresql", "postgres"} <= {s.lower() for s in synonyms("PostgreSQL")}
 
 
+def test_synonyms_returns_a_copy_not_the_shared_cached_set() -> None:
+    """`synonyms` is backed by a `functools.cache`d table shared by every
+    caller. Returning the cached set object itself would let one caller's
+    mutation corrupt what every later call (and every later caller) sees;
+    returning a copy keeps the cache immutable from the outside."""
+    first = synonyms("PostgreSQL")
+    first.add("not-a-real-alias")
+    assert "not-a-real-alias" not in synonyms("PostgreSQL")
+
+
 def test_canonical_names_are_case_insensitively_sorted() -> None:
     """Verify table.yaml canonical names are sorted case-insensitively.
 
