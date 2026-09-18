@@ -30,6 +30,13 @@ functionality that is explicitly out of scope rather than merely unimplemented.
   cannot parse reliably will fail the parseability gate rather than pass silently.
 - The grounding check operates on the facts and derivations it is given; it cannot detect a fact
   that is internally consistent but factually false.
+- The grounding check's entity matching is narrow by design: a word in generated text is checked
+  against the cited facts only when it is a known technology (matched case-insensitively against
+  the alias table) or "identifier-shaped" — it contains a digit, `+`, `#` or `.`, or is 2-6 letters
+  that are all capitals — and starts with a capital letter. An invented tool or product name that is
+  neither a known alias nor identifier-shaped (a plausible-looking but nonexistent name in ordinary
+  title case) passes through unchecked; catching that class of fabrication is a job for later
+  review, not for this gate.
 - The sensitive-attribute screen on fact storage is a heuristic refusal of self-attributed
   protected attributes (e.g. "I am married", "Date of birth: ..."), not a general PII classifier;
   it may occasionally refuse legitimate text that happens to match a pattern, and the remedy is to
