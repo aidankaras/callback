@@ -170,6 +170,18 @@ def test_provenance_trust_cannot_be_mutated_after_construction() -> None:
         provenance.trust = Trust.USER_CONFIRMED
 
 
+def test_fact_provenance_cannot_be_replaced_wholesale() -> None:
+    """Freezing `Provenance` alone does not close this: replacing the whole
+    `provenance` field with a differently-trusted one flips `selectable()`
+    just as completely as mutating `trust` in place did. `Fact` itself must
+    be frozen too.
+    """
+    fact = _fact(provenance=Provenance(source="import:resume.pdf", trust=Trust.IMPORT_UNCONFIRMED))
+    assert not fact.selectable()
+    with pytest.raises(ValueError):
+        fact.provenance = Provenance(source="onboarding_answer", trust=Trust.USER_CONFIRMED)
+
+
 def test_sensitive_entity_is_rejected() -> None:
     with pytest.raises(SensitiveFieldError) as exc:
         add_fact(_fact(id="pii.3", entities=["Python", "SSN 123-45-6789"]))

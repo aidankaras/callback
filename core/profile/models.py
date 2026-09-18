@@ -107,9 +107,17 @@ class Fact(BaseModel):
 
     Facts are stored keyed by `id`; the identifier is not repeated in the
     stored body (see `core.profile.store`).
+
+    Frozen: freezing `Provenance` alone stops `fact.provenance.trust = ...`,
+    but leaves `fact.provenance = Provenance(...)` free to replace the whole
+    field with a differently-trusted one, which flips `selectable()` just as
+    completely. Freezing `Fact` closes that path too. Callers that need a
+    changed fact use `model_copy(update=...)`, which still works on a frozen
+    model and is how `core.profile.store.add_fact` produces its
+    canonicalised copy.
     """
 
-    model_config = {"extra": "forbid", "populate_by_name": True}
+    model_config = {"extra": "forbid", "populate_by_name": True, "frozen": True}
 
     id: str
     kind: FactKind
