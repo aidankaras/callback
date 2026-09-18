@@ -122,6 +122,23 @@ def test_unconfirmed_import_cannot_back_a_bullet() -> None:
     assert findings[0].kind == "unselectable_fact"
 
 
+def test_web_sourced_fact_cannot_back_a_bullet() -> None:
+    """No test previously drove `check_bullet` with a `trust=web` fact, so a
+    regression letting web-sourced content back generated text would have
+    passed every other test in this file."""
+    f = Fact.model_validate(
+        {
+            "id": "web1",
+            "kind": FactKind.EXPERIENCE_DETAIL,
+            "text": "x",
+            "provenance": Provenance(source="web:https://example.com", trust=Trust.WEB),
+        }
+    )
+    verdict, findings = check_bullet("Shipped the service", [f])
+    assert verdict is Verdict.FAIL
+    assert findings[0].kind == "unselectable_fact"
+
+
 def test_false_positive_rate_on_the_measured_seven() -> None:
     """A prior containment-based rule failed six of these seven; only the last is a fabrication."""
     cases = [
@@ -518,6 +535,44 @@ def test_plain_count_that_looks_like_a_year_is_not_accepted() -> None:
     verdict, findings = check_bullet("Shipped 1950 units", [f])
     assert verdict is Verdict.FAIL
     assert findings[0].kind == "unresolved_number"
+
+
+# --- values_match's zero branch, exercised through the gate, not just the
+# unit test in test_numbers.py -----------------------------------------------
+
+
+def test_a_stored_zero_grounds_a_claimed_reduction_to_zero() -> None:
+    """`values_match` falls back to an absolute check when `source == 0`,
+    since the relative-tolerance formula divides by it. No grounding-level
+    fixture previously drove a fact with a zero-valued number through
+    `check_bullet`, so a regression in that branch would only have been
+    caught by the unit test, not by the gate that actually depends on it."""
+    f = fact("z1", numbers={"errors": Quantity(value=0)})
+    verdict, findings = check_bullet("Cut the error count to 0", [f])
+    assert verdict is Verdict.PASS
+    assert findings == []
+
+
+# --- documented verdict priority: derived over alias over plain pass --------
+
+
+def test_derived_and_alias_together_prefers_derived_verified() -> None:
+    """A bullet that both uses an alias of a cited entity and relies on a
+    recomputed derivation must report DERIVED_VERIFIED, per the priority
+    `check_bullet` documents -- not ALIAS_MATCH, and not a tie."""
+    f = fact(
+        "z2",
+        entities=["PostgreSQL"],
+        numbers={"before": Quantity(value=500), "after": Quantity(value=300)},
+        derived=[
+            Derivation.model_validate(
+                {"label": "cut", "op": "pct_change", "from": ["before", "after"]}
+            )
+        ],
+    )
+    verdict, findings = check_bullet("Tuned Postgres and cut load time 40%", [f])
+    assert verdict is Verdict.DERIVED_VERIFIED
+    assert findings == []
 
 
 # --- malformed derivations never raise --------------------------------------
