@@ -193,10 +193,10 @@ def date_hull(facts: Sequence[Fact]) -> tuple[str | None, str | None]:
     behind that year-only date is actually later.
 
     A fact whose own `end` precedes its own `start` is not detected or
-    corrected here; that per-fact invariant is the model layer's
-    responsibility (`Dates`), not this function's — it only takes the min
-    of every start and the max of every end it is handed, whatever those
-    values are.
+    corrected here, nor anywhere else in this codebase — `Dates` does not
+    enforce that invariant either. This function only takes the min of
+    every start and the max of every end it is handed, whatever those
+    values are; a caller must not assume a fact's own dates arrive in order.
     """
     starts = [fact.dates.start for fact in facts if fact.dates and fact.dates.start]
     ends = [fact.dates.end for fact in facts if fact.dates and fact.dates.end]

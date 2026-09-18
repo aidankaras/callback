@@ -248,10 +248,10 @@ def test_date_hull_with_undated_facts_returns_none_pair() -> None:
 
 
 def test_date_hull_does_not_validate_a_facts_own_start_after_end() -> None:
-    # Per-fact date validity (an end before its own start) is the model
-    # layer's job, not date_hull's — this test pins the actual behavior
-    # (min of starts, max of ends, taken independently) rather than
-    # asserting it is "correct": considered and deliberately not
-    # validated here, not an oversight.
+    # Per-fact date validity (an end before its own start) is not enforced
+    # anywhere in this codebase, `Dates` included — this test pins the
+    # actual behavior (min of starts, max of ends, taken independently)
+    # rather than asserting it is "correct": a caller must not assume a
+    # fact's own dates arrive in order.
     fact = _fact("backwards", dates=Dates(start="2024-08", end="2024-06"))
     assert date_hull([fact]) == ("2024-08", "2024-06")
