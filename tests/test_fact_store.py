@@ -5,9 +5,11 @@ import pytest
 from core.paths import ensure_home
 from core.profile.models import Dates, Derivation, Fact, FactKind, Provenance, Quantity, Trust
 from core.profile.store import (
+    FACTS_FILE,
     SENSITIVE_PATTERNS,
     DuplicateFactError,
     SensitiveFieldError,
+    StoreError,
     add_fact,
     load_facts,
     screen_sensitive,
@@ -64,6 +66,68 @@ def test_duplicate_id_is_rejected() -> None:
     add_fact(_fact())
     with pytest.raises(DuplicateFactError):
         add_fact(_fact())
+
+
+# --- StoreError: every failure that reaches disk or the filesystem boundary
+# must surface as this one declared type, never the underlying exception. ---
+
+
+def test_duplicate_fact_error_is_a_store_error() -> None:
+    """`DuplicateFactError` must itself satisfy the "one type" promise."""
+    add_fact(_fact())
+    with pytest.raises(StoreError):
+        add_fact(_fact())
+
+
+def test_sensitive_field_error_is_a_store_error() -> None:
+    with pytest.raises(StoreError):
+        add_fact(_fact(id="pii.store-error", text="SSN 123-45-6789"))
+
+
+def test_add_fact_wraps_a_missing_data_home_as_store_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`add_fact` must not leak the bare `OSError`/`FileNotFoundError` that
+    `write_private` raises when the data home was never created with
+    `ensure_home()`. The `home` fixture already created one data home; this
+    test points `CALLBACK_HOME` at a second, never-created directory."""
+    monkeypatch.setenv("CALLBACK_HOME", str(tmp_path / "never-created"))
+    with pytest.raises(StoreError):
+        add_fact(_fact())
+
+
+def test_load_facts_wraps_malformed_yaml_as_store_error() -> None:
+    from core.paths import resolve_inside
+
+    path = resolve_inside(FACTS_FILE)
+    path.write_text("exp.lab.1: [unterminated flow sequence\n", encoding="utf-8")
+    with pytest.raises(StoreError):
+        load_facts()
+
+
+def test_load_facts_rejects_a_non_mapping_top_level() -> None:
+    """A facts file whose top level is a sequence, not a mapping, is a
+    corrupt store -- it must be reported, not silently misread."""
+    from core.paths import resolve_inside
+
+    path = resolve_inside(FACTS_FILE)
+    path.write_text("- not\n- a\n- mapping\n", encoding="utf-8")
+    with pytest.raises(StoreError):
+        load_facts()
+
+
+def test_load_facts_rejects_a_falsy_non_mapping_top_level() -> None:
+    """`yaml.safe_load(...) or {}` previously read a falsy-but-wrong-type top
+    level (e.g. an empty list) as "no facts yet", masking store corruption as
+    an empty store. An empty *mapping* must still mean no facts."""
+    from core.paths import resolve_inside
+
+    path = resolve_inside(FACTS_FILE)
+    path.write_text("[]\n", encoding="utf-8")
+    with pytest.raises(StoreError):
+        load_facts()
+    path.write_text("{}\n", encoding="utf-8")
+    assert load_facts() == {}
 
 
 def test_sensitive_content_is_rejected() -> None:

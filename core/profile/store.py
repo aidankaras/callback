@@ -2,18 +2,24 @@
 
 Two invariants are enforced here rather than by convention:
 facts that would record a legally sensitive attribute are refused, and an
-identifier is never silently overwritten.
+identifier is never silently overwritten. Every way `add_fact` and
+`load_facts` can fail -- an escape outside the data home, a missing or
+unreadable file, invalid YAML, a malformed fact, a duplicate id, a sensitive
+field -- surfaces as `StoreError`, so a caller can catch one type and know it
+has seen every failure; see `StoreError` for the full list this closes.
 """
 
 from __future__ import annotations
 
 import re
 from collections.abc import Iterator
+from typing import cast
 
 import yaml
+from pydantic import ValidationError
 
 from core.aliases import canonicalize
-from core.paths import resolve_inside, write_private
+from core.paths import OutsideHomeError, resolve_inside, write_private
 from core.profile.models import Fact
 
 FACTS_FILE = "facts.yaml"
@@ -72,11 +78,25 @@ SENSITIVE_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
 )
 
 
-class SensitiveFieldError(ValueError):
+class StoreError(Exception):
+    """The only exception type `add_fact` and `load_facts` let escape.
+
+    Both functions cross a filesystem and a parsing boundary: `resolve_inside`
+    can raise `OutsideHomeError`, reading and parsing the facts file can raise
+    `OSError` or `yaml.YAMLError`, a malformed fact can raise pydantic's
+    `ValidationError`, and writing can raise `OSError` again. None of those
+    types is declared by this module, so every one of those paths is caught
+    and re-raised as `StoreError`, with the original preserved as `__cause__`
+    rather than swallowed. `core.checks.derive.DerivationError` is the model
+    this follows.
+    """
+
+
+class SensitiveFieldError(StoreError):
     """Raised when a fact would record an attribute callback refuses to store."""
 
 
-class DuplicateFactError(ValueError):
+class DuplicateFactError(StoreError):
     """Raised when a fact identifier already exists."""
 
 
@@ -109,22 +129,65 @@ def _free_text_fields(fact: Fact) -> Iterator[tuple[str, str]]:
 
 
 def load_facts() -> dict[str, Fact]:
-    """Load every stored fact, keyed by id. Returns an empty dict if none exist yet."""
-    path = resolve_inside(FACTS_FILE)
+    """Load every stored fact, keyed by id. Returns an empty dict if none exist yet.
+
+    Raises `StoreError` -- and only `StoreError` -- for every way this can
+    fail: the data home cannot be resolved, the file cannot be read, its
+    content is not valid YAML, its top level is not a mapping of id to fact
+    body (a plausible-looking value, such as an empty list, is a corrupt
+    store, not an empty one, so it is rejected rather than coerced into
+    `{}`), or a stored body no longer validates as a `Fact`.
+    """
+    try:
+        path = resolve_inside(FACTS_FILE)
+    except OutsideHomeError as exc:
+        raise StoreError(f"cannot resolve {FACTS_FILE!r} inside the data home: {exc}") from exc
     if not path.exists():
         return {}
-    raw: dict[str, dict[str, object]] = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-    return {fid: Fact.model_validate(body | {"id": fid}) for fid, body in raw.items()}
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise StoreError(f"could not read {path}: {exc}") from exc
+    try:
+        parsed = yaml.safe_load(text)
+    except yaml.YAMLError as exc:
+        raise StoreError(f"{path} is not valid YAML: {exc}") from exc
+    if parsed is None:
+        parsed = {}
+    elif not isinstance(parsed, dict):
+        raise StoreError(
+            f"{path} must contain a mapping of fact id to fact body, "
+            f"found {type(parsed).__name__}: {parsed!r}"
+        )
+    # `yaml.safe_load` returns `Any`, and `isinstance(parsed, dict)` above only
+    # narrows pyright to the parameterless `dict[Unknown, Unknown]` -- the cast
+    # is the documented boundary where this module starts trusting the file's
+    # shape; `Fact.model_validate` is what actually checks it, just below.
+    raw = cast("dict[str, dict[str, object]]", parsed)
+    try:
+        return {fid: Fact.model_validate(body | {"id": fid}) for fid, body in raw.items()}
+    except ValidationError as exc:
+        raise StoreError(f"{path} contains a fact that no longer validates: {exc}") from exc
 
 
 def save_facts(facts: dict[str, Fact]) -> None:
-    """Write every fact to disk, keyed by id, in a stable (sorted) order."""
-    path = resolve_inside(FACTS_FILE)
+    """Write every fact to disk, keyed by id, in a stable (sorted) order.
+
+    Raises `StoreError` -- and only `StoreError` -- if the data home cannot
+    be resolved or the write itself fails.
+    """
+    try:
+        path = resolve_inside(FACTS_FILE)
+    except OutsideHomeError as exc:
+        raise StoreError(f"cannot resolve {FACTS_FILE!r} inside the data home: {exc}") from exc
     body = {
         fid: fact.model_dump(mode="json", by_alias=True, exclude={"id"})
         for fid, fact in sorted(facts.items())
     }
-    write_private(path, yaml.safe_dump(body, sort_keys=False, allow_unicode=True))
+    try:
+        write_private(path, yaml.safe_dump(body, sort_keys=False, allow_unicode=True))
+    except OSError as exc:
+        raise StoreError(f"could not write {path}: {exc}") from exc
 
 
 def add_fact(fact: Fact) -> None:
