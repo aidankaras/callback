@@ -165,3 +165,8 @@ def test_generic_technical_bullets_are_not_rejected() -> None:
         "Reduced p99 latency by 40%",
     ):
         screen_sensitive(text, "text")
+
+
+def test_entities_are_canonicalised_on_write() -> None:
+    add_fact(_fact(id="exp.lab.2", entities=["postgres", "sklearn"]))
+    assert load_facts()["exp.lab.2"].entities == ["PostgreSQL", "scikit-learn"]

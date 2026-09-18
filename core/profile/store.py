@@ -12,6 +12,7 @@ from collections.abc import Iterator
 
 import yaml
 
+from core.aliases import canonicalize
 from core.paths import resolve_inside, write_private
 from core.profile.models import Fact
 
@@ -130,6 +131,7 @@ def add_fact(fact: Fact) -> None:
     """Admit `fact` into the store after screening its free text and checking for a duplicate id."""
     for field, value in _free_text_fields(fact):
         screen_sensitive(value, field)
+    fact = fact.model_copy(update={"entities": [canonicalize(e) for e in fact.entities]})
     facts = load_facts()
     if fact.id in facts:
         raise DuplicateFactError(f"fact {fact.id!r} already exists")
