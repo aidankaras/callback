@@ -130,6 +130,20 @@ def test_load_facts_rejects_a_falsy_non_mapping_top_level() -> None:
     assert load_facts() == {}
 
 
+def test_load_facts_wraps_a_non_mapping_fact_body_as_store_error() -> None:
+    """The top level can be a mapping while a single fact's own body is not
+    (e.g. a bare string under its id). Merging `{"id": fid}` into a non-dict
+    body raises a bare `TypeError`, not `ValidationError` -- a second,
+    distinct way a stored fact can fail to validate that must not leak
+    past this module either."""
+    from core.paths import resolve_inside
+
+    path = resolve_inside(FACTS_FILE)
+    path.write_text("exp.lab.1: just a string, not a fact body\n", encoding="utf-8")
+    with pytest.raises(StoreError):
+        load_facts()
+
+
 def test_sensitive_content_is_rejected() -> None:
     with pytest.raises(SensitiveFieldError) as exc:
         add_fact(_fact(id="pii.1", text="Date of birth: 12 March 2006"))

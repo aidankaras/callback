@@ -165,8 +165,12 @@ def load_facts() -> dict[str, Fact]:
     # shape; `Fact.model_validate` is what actually checks it, just below.
     raw = cast("dict[str, dict[str, object]]", parsed)
     try:
+        # `body | {"id": fid}` raises a bare `TypeError` when a fact's own
+        # body isn't a mapping either (e.g. a bare string under its id) --
+        # the top-level check above only establishes that `raw` itself is a
+        # mapping, not that every value in it is.
         return {fid: Fact.model_validate(body | {"id": fid}) for fid, body in raw.items()}
-    except ValidationError as exc:
+    except (ValidationError, TypeError) as exc:
         raise StoreError(f"{path} contains a fact that no longer validates: {exc}") from exc
 
 
