@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from core.paths import ensure_home
+from core.paths import ensure_home, resolve_inside
 from core.profile.models import Dates, Derivation, Fact, FactKind, Provenance, Quantity, Trust
 from core.profile.store import (
     FACTS_FILE,
@@ -97,8 +97,6 @@ def test_add_fact_wraps_a_missing_data_home_as_store_error(
 
 
 def test_load_facts_wraps_malformed_yaml_as_store_error() -> None:
-    from core.paths import resolve_inside
-
     path = resolve_inside(FACTS_FILE)
     path.write_text("exp.lab.1: [unterminated flow sequence\n", encoding="utf-8")
     with pytest.raises(StoreError):
@@ -108,8 +106,6 @@ def test_load_facts_wraps_malformed_yaml_as_store_error() -> None:
 def test_load_facts_rejects_a_non_mapping_top_level() -> None:
     """A facts file whose top level is a sequence, not a mapping, is a
     corrupt store -- it must be reported, not silently misread."""
-    from core.paths import resolve_inside
-
     path = resolve_inside(FACTS_FILE)
     path.write_text("- not\n- a\n- mapping\n", encoding="utf-8")
     with pytest.raises(StoreError):
@@ -120,8 +116,6 @@ def test_load_facts_rejects_a_falsy_non_mapping_top_level() -> None:
     """`yaml.safe_load(...) or {}` previously read a falsy-but-wrong-type top
     level (e.g. an empty list) as "no facts yet", masking store corruption as
     an empty store. An empty *mapping* must still mean no facts."""
-    from core.paths import resolve_inside
-
     path = resolve_inside(FACTS_FILE)
     path.write_text("[]\n", encoding="utf-8")
     with pytest.raises(StoreError):
@@ -136,8 +130,6 @@ def test_load_facts_wraps_a_non_mapping_fact_body_as_store_error() -> None:
     body raises a bare `TypeError`, not `ValidationError` -- a second,
     distinct way a stored fact can fail to validate that must not leak
     past this module either."""
-    from core.paths import resolve_inside
-
     path = resolve_inside(FACTS_FILE)
     path.write_text("exp.lab.1: just a string, not a fact body\n", encoding="utf-8")
     with pytest.raises(StoreError):
