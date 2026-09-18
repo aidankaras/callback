@@ -145,6 +145,42 @@ def test_pct_change_zero_baseline_raises_derivation_error() -> None:
         compute(fact.derived[0], [fact])
 
 
+# --- Cross-fact label collisions: two cited facts must not silently define
+# the same number label, even when only one of the two is disjoint-safe. ---
+
+
+def test_compute_rejects_cross_fact_label_collision() -> None:
+    one = _fact("fact-one", numbers={"before": Quantity(value=500)})
+    two = _fact("fact-two", numbers={"before": Quantity(value=100), "after": Quantity(value=50)})
+    derivation = Derivation.model_validate(
+        {"label": "cut", "op": "pct_change", "from": ["before", "after"]}
+    )
+    with pytest.raises(DerivationError) as exc_info:
+        compute(derivation, [one, two])
+    message = str(exc_info.value)
+    assert "before" in message
+    assert "fact-one" in message
+    assert "fact-two" in message
+
+
+def test_compute_rejects_collision_even_on_a_label_the_derivation_ignores() -> None:
+    # `cut` only references `before`/`after`, but the two cited facts also
+    # each define an unrelated `shared` label. That collision must still be
+    # rejected: whether it fires cannot depend on which derivation happens
+    # to run first over this same pair of facts.
+    one = _fact("fact-a", numbers={"before": Quantity(value=1.0), "shared": Quantity(value=10.0)})
+    two = _fact("fact-b", numbers={"after": Quantity(value=2.0), "shared": Quantity(value=20.0)})
+    derivation = Derivation.model_validate(
+        {"label": "cut", "op": "pct_change", "from": ["before", "after"]}
+    )
+    with pytest.raises(DerivationError) as exc_info:
+        compute(derivation, [one, two])
+    message = str(exc_info.value)
+    assert "shared" in message
+    assert "fact-a" in message
+    assert "fact-b" in message
+
+
 # --- date_hull: mixed precision and partial ranges ---
 
 

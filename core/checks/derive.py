@@ -6,9 +6,10 @@ Treating those as unsourced would reject correct bullets, so each derivation
 names an operation which is recomputed here from the cited facts. The model
 supplies the operation and its inputs; the value itself is never taken on
 faith, and every way the inputs can be malformed — a missing label, an
-operation with the wrong number of arguments, a zero divisor — surfaces as
-`DerivationError` so a caller can catch one exception type and know it has
-seen every way recomputation can fail.
+ambiguous one defined by more than one cited fact, an operation with the
+wrong number of arguments, a zero divisor — surfaces as `DerivationError`
+so a caller can catch one exception type and know it has seen every way
+recomputation can fail.
 """
 
 from __future__ import annotations
@@ -71,15 +72,32 @@ def available_values(facts: Sequence[Fact]) -> dict[str, float]:
 
     Facts are cited by the derivation's own `from` list, not by this
     function, so it has no way to tell which fact a label was meant to come
-    from. If two cited facts both carry the same label (e.g. two facts each
-    using `before`), the later fact in `facts` silently overwrites the
-    earlier one's value here — see the collision analysis in the task
-    report for why that is left as-is rather than guarded against.
+    from. If two *different* facts both carry the same label (e.g. two
+    facts each using `before`), a derivation could silently compute from
+    whichever one happens to iterate last — a value the author never
+    intended, indistinguishable downstream from one they did. This is
+    rejected outright, as `DerivationError` naming the label and both fact
+    ids, rather than resolved by iteration order. The check applies to
+    every label on every fact passed in, not only the ones some particular
+    derivation's `from` list references: limiting it to referenced labels
+    would make whether an error fires depend on which derivation happens to
+    run first over the same fact set, which is the same kind of
+    order-dependence this is meant to remove. A label repeating within a
+    single fact's `numbers` cannot happen — `numbers` is itself a dict — so
+    only cross-fact collisions are possible here.
     """
     values: dict[str, float] = {}
+    owning_fact: dict[str, str] = {}
     for fact in facts:
         for label, quantity in fact.numbers.items():
+            owner = owning_fact.get(label)
+            if owner is not None and owner != fact.id:
+                raise DerivationError(
+                    f"label {label!r} is ambiguous: both fact {owner!r} and "
+                    f"fact {fact.id!r} define it"
+                )
             values[label] = quantity.value
+            owning_fact[label] = fact.id
     return values
 
 
@@ -87,8 +105,9 @@ def compute(derivation: Derivation, facts: Sequence[Fact]) -> float:
     """Recompute `derivation`'s value from the numbers in `facts`.
 
     Raises `DerivationError` for every failure mode: an unsupported op, a
-    label absent from every cited fact, the wrong number of source values
-    for a fixed-arity op, or a zero divisor. `DerivationError` is itself a
+    label absent from every cited fact, a label defined ambiguously by more
+    than one cited fact, the wrong number of source values for a
+    fixed-arity op, or a zero divisor. `DerivationError` is itself a
     `ValueError` subclass, but no *other* exception type — a bare
     `ValueError` from tuple unpacking, a `ZeroDivisionError`, a `KeyError`
     — ever escapes; a caller catching `DerivationError` sees every failure.
@@ -112,7 +131,11 @@ def compute(derivation: Derivation, facts: Sequence[Fact]) -> float:
             f"derivation {derivation.label!r} has unsupported op {derivation.op!r}"
         )
 
-    values = available_values(facts)
+    try:
+        values = available_values(facts)
+    except DerivationError as exc:
+        raise DerivationError(f"derivation {derivation.label!r}: {exc}") from exc
+
     try:
         args = [values[label] for label in derivation.from_]
     except KeyError as exc:
