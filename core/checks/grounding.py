@@ -93,6 +93,31 @@ _SHAPED = re.compile(r"^(?=.*[\d+#.])[A-Z][\w+#.-]*$|^[A-Z]{2,6}$")
 # it, digits are almost certainly a quantity rather than a calendar year.
 _YEAR_MIN, _YEAR_MAX = 1900.0, 2100.0
 
+# Falling in [_YEAR_MIN, _YEAR_MAX] is necessary but not sufficient for a bare
+# number to be read as a year: "Cut the $2020 licensing cost", "Reduced spend
+# by 2020 dollars" and "Handled 2020 tickets" are all ordinary quantities
+# that happen to fall in that range, not years, and must still be sourced
+# like any other number. What decides it is the text immediately around the
+# digits, checked in plain Python rather than folded into one regex.
+#
+# A single combined pattern was tried and rejected three times before this
+# one: matching the surrounding words in the same regex as the digits
+# *consumes* those words, so "from 2018 to 2024" only ever yields a match for
+# "2018" — the engine can't also start a second match at "2024" once "to" has
+# been eaten by the first. And a bare `to` preposition is not safe to add to
+# fix that, because "to" is also the ordinary preposition in "improved
+# throughput to 1999 requests per second", where treating "to <year-shaped
+# number>" as a range would wrongly exempt the 1999 from being sourced. `to`
+# is therefore only ever recognised as part of an explicit range already
+# anchored by a year on the other side (`_RANGE_BEFORE`/`_RANGE_AFTER`), never
+# as a standalone preposition (contrast `_PREP_BEFORE`, which excludes it).
+_PREP_BEFORE = re.compile(r"(?:from|since|until|through|thru|in|during)\s+$", re.IGNORECASE)
+_MONTH_BEFORE = re.compile(
+    r"(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+$", re.IGNORECASE
+)
+_RANGE_AFTER = re.compile(r"^\s*(?:-|–|—|to|through)\s*(?:19|20)\d{2}\b", re.IGNORECASE)
+_RANGE_BEFORE = re.compile(r"(?:19|20)\d{2}\s*(?:-|–|—|to|through)\s*$", re.IGNORECASE)
+
 
 class Verdict(StrEnum):
     """The outcome of grounding a bullet (or a whole document) against its facts."""
@@ -119,6 +144,24 @@ def _iso_month_dates(text: str) -> list[str]:
 
 def _looks_like_year(value: float) -> bool:
     return _YEAR_MIN <= value <= _YEAR_MAX and value.is_integer()
+
+
+def _year_context(text: str, span: tuple[int, int]) -> bool:
+    """True when the text surrounding `span` marks the number there as a year.
+
+    Checked against the text before the number (a date preposition or month
+    name immediately preceding it, or a year-dash/`to`/`through` immediately
+    preceding it) or the text after it (a dash/`to`/`through` immediately
+    followed by another year). See the module-level comment above
+    `_PREP_BEFORE` for why this can't be one regex over the whole span.
+    """
+    before, after = text[: span[0]], text[span[1] :]
+    return bool(
+        _PREP_BEFORE.search(before)
+        or _MONTH_BEFORE.search(before)
+        or _RANGE_BEFORE.search(before)
+        or _RANGE_AFTER.match(after)
+    )
 
 
 def _year_within_hull(value: float, start: str | None, end: str | None) -> bool:
@@ -201,7 +244,11 @@ def check_bullet(
         if any(values_match(number.value, source) for source in derived_pool):
             used_derivation = True
             continue
-        if _looks_like_year(number.value) and _year_within_hull(number.value, start, end):
+        if (
+            _looks_like_year(number.value)
+            and _year_context(text, number.span)
+            and _year_within_hull(number.value, start, end)
+        ):
             continue
         findings.append(
             Finding(

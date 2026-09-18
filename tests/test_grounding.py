@@ -387,6 +387,139 @@ def test_bare_year_outside_the_hull_fails() -> None:
     assert findings[0].kind == "unresolved_number"
 
 
+# --- Ruling 4: a bare year needs surrounding date context, not just hull
+# membership -------------------------------------------------------------
+#
+# Before this ruling, any 1900-2100 integer inside the hull was accepted as a
+# year regardless of what surrounded it, which let a plain dollar amount,
+# unit or count that happened to fall in a plausible year range slip through
+# ungrounded ("Cut the $2020 licensing cost" against a fact dated
+# 2018-2024). Accepting/rejecting is decided from the text immediately
+# around the number, not from the number's value alone.
+
+
+def test_from_to_range_accepts_both_endpoints_as_years() -> None:
+    f = fact("y1", dates=Dates(start="2018", end="2024"))
+    verdict, findings = check_bullet("Worked there from 2018 to 2024", [f])
+    assert verdict is Verdict.PASS
+    assert findings == []
+
+
+def test_hyphen_range_accepts_both_endpoints_as_years() -> None:
+    f = fact("y2", dates=Dates(start="2018", end="2024"))
+    verdict, findings = check_bullet("Employed 2018-2024 as an analyst", [f])
+    assert verdict is Verdict.PASS
+    assert findings == []
+
+
+def test_en_dash_range_accepts_both_endpoints_as_years() -> None:
+    f = fact("y3", dates=Dates(start="2018", end="2024"))
+    verdict, findings = check_bullet("Employed 2018 – 2024 as an analyst", [f])
+    assert verdict is Verdict.PASS
+    assert findings == []
+
+
+def test_month_prefixed_range_accepts_both_endpoints_as_years() -> None:
+    f = fact("y4", dates=Dates(start="2024-06", end="2025-05"))
+    verdict, findings = check_bullet("Jun 2024 - May 2025: built the pipeline", [f])
+    assert verdict is Verdict.PASS
+    assert findings == []
+
+
+def test_in_preposition_accepts_a_year() -> None:
+    f = fact("y5", dates=Dates(start="2022", end="2024"))
+    verdict, findings = check_bullet("In 2023 shipped the loader", [f])
+    assert verdict is Verdict.PASS
+    assert findings == []
+
+
+def test_until_preposition_accepts_a_year() -> None:
+    f = fact("y6", dates=Dates(start="2020", end="2022"))
+    verdict, findings = check_bullet("Ran the programme until 2022", [f])
+    assert verdict is Verdict.PASS
+    assert findings == []
+
+
+def test_since_preposition_accepts_a_year() -> None:
+    f = fact("y7", dates=Dates(start="2019", end="2024"))
+    verdict, findings = check_bullet("Since 2019 owned the pipeline", [f])
+    assert verdict is Verdict.PASS
+    assert findings == []
+
+
+def test_leading_range_with_no_preceding_text_accepts_both_endpoints() -> None:
+    f = fact("y8", dates=Dates(start="2018", end="2024"))
+    verdict, findings = check_bullet("2018 to 2024, three promotions", [f])
+    assert verdict is Verdict.PASS
+    assert findings == []
+
+
+# Each of these is an ordinary quantity that happens to fall in 1900-2100 and
+# inside the hull below; none of it is preceded or followed by year-marking
+# context, so it must be sourced like any other number and fail when it
+# isn't.
+_UNSOURCED_HULL = Dates(start="2018-01", end="2024-12")
+
+
+def test_dollar_amount_that_looks_like_a_year_is_not_accepted() -> None:
+    f = fact("y9", dates=_UNSOURCED_HULL)
+    verdict, findings = check_bullet("Cut the $2020 licensing cost", [f])
+    assert verdict is Verdict.FAIL
+    assert findings[0].kind == "unresolved_number"
+
+
+def test_unit_quantity_that_looks_like_a_year_is_not_accepted() -> None:
+    f = fact("y10", dates=_UNSOURCED_HULL)
+    verdict, findings = check_bullet("Reduced spend by 2020 dollars", [f])
+    assert verdict is Verdict.FAIL
+    assert findings[0].kind == "unresolved_number"
+
+
+def test_bare_count_that_looks_like_a_year_is_not_accepted() -> None:
+    f = fact("y11", dates=_UNSOURCED_HULL)
+    verdict, findings = check_bullet("Handled 2020 tickets", [f])
+    assert verdict is Verdict.FAIL
+    assert findings[0].kind == "unresolved_number"
+
+
+def test_count_last_quarter_that_looks_like_a_year_is_not_accepted() -> None:
+    f = fact("y12", dates=_UNSOURCED_HULL)
+    verdict, findings = check_bullet("Processed 2024 invoices last quarter", [f])
+    assert verdict is Verdict.FAIL
+    assert findings[0].kind == "unresolved_number"
+
+
+def test_to_preposition_before_a_rate_is_not_accepted_as_a_year() -> None:
+    """A bare 'to' must not be treated as a year-range preposition: it is
+    also the ordinary preposition in "improved X to Y units", which would
+    otherwise wrongly exempt Y from being sourced. The hull deliberately
+    contains 1999 so this fails on missing context, not on being outside
+    the hull.
+    """
+    f = fact("y13", dates=Dates(start="1995", end="2005"))
+    verdict, findings = check_bullet("Improved throughput to 1999 requests per second", [f])
+    assert verdict is Verdict.FAIL
+    assert findings[0].kind == "unresolved_number"
+
+
+def test_to_preposition_before_a_latency_value_is_not_accepted_as_a_year() -> None:
+    """The hull deliberately contains 2000 so this fails on missing context,
+    not on being outside the hull."""
+    f = fact("y14", dates=Dates(start="1995", end="2005"))
+    verdict, findings = check_bullet("Cut latency to 2000 ms", [f])
+    assert verdict is Verdict.FAIL
+    assert findings[0].kind == "unresolved_number"
+
+
+def test_plain_count_that_looks_like_a_year_is_not_accepted() -> None:
+    """The hull deliberately contains 1950 so this fails on missing context,
+    not on being outside the hull."""
+    f = fact("y15", dates=Dates(start="1945", end="1955"))
+    verdict, findings = check_bullet("Shipped 1950 units", [f])
+    assert verdict is Verdict.FAIL
+    assert findings[0].kind == "unresolved_number"
+
+
 # --- malformed derivations never raise --------------------------------------
 
 
