@@ -76,9 +76,24 @@ def resolve_inside(relative: str) -> Path:
 
 
 def write_private(path: Path, text: str) -> None:
-    """Write `text` to `path` and restrict it to mode 0600."""
-    path.write_text(text, encoding="utf-8")
-    path.chmod(FILE_MODE)
+    """Write `text` to `path` atomically, at mode 0600, without ever truncating it in place.
+
+    Writes to a hidden temporary file in the same directory as `path` — never a
+    system temp directory, since a rename across filesystems is not atomic —
+    chmods the temp file before the rename so its contents are never briefly
+    world-readable, then swaps it into place with `Path.replace`, a single
+    atomic operation on POSIX. A failure during the write only ever touches the
+    temp file: whatever was previously at `path` is left exactly as it was, and
+    the temp file is removed before the exception propagates.
+    """
+    tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    try:
+        tmp.write_text(text, encoding="utf-8")
+        tmp.chmod(FILE_MODE)
+        tmp.replace(path)
+    except BaseException:
+        tmp.unlink(missing_ok=True)
+        raise
 
 
 def delete_all() -> list[Path]:
