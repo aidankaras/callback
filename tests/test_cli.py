@@ -52,3 +52,17 @@ def test_installed_console_script_reports_version() -> None:
         check=True,
     )
     assert out.stdout.strip().startswith("callback ")
+
+
+def test_cli_init_creates_private_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """`callback init` must create the data home reported by `core.paths.callback_home`."""
+    home = tmp_path / "cb"
+    monkeypatch.setenv("CALLBACK_HOME", str(home))
+    out = subprocess.run(
+        [sys.executable, "-m", "core.cli", "init"],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert home.is_dir()
+    assert str(home) in out.stdout

@@ -11,7 +11,21 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="callback")
     parser.add_argument("--version", action="version", version=f"callback {__version__}")
     parser.set_defaults(handler=None)
+
+    sub = parser.add_subparsers(dest="command")
+
+    init = sub.add_parser("init", help="create the private data directory")
+    init.set_defaults(handler=_cmd_init)
+
     return parser
+
+
+def _cmd_init(_args: argparse.Namespace) -> int:
+    from core.paths import ensure_home
+
+    home = ensure_home()
+    print(f"initialised {home}")
+    return 0
 
 
 def main(argv: list[str] | None = None) -> int:
