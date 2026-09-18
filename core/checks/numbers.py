@@ -56,9 +56,19 @@ ABBR_MAGNITUDES: dict[str, float] = {"k": 1e3, "m": 1e6, "b": 1e9}
 
 CURRENCY: dict[str, str] = {"$": "USD", "£": "GBP", "€": "EUR"}
 
+# The decimal tail `(?:\.\d+)?` is repeated on both digit branches, not
+# shared after the alternation: the grouped-thousands branch needs its own
+# tail so `"1,200.50"` parses as one number (1200.5), not as `"1,200"`
+# followed by a separate `".50"` read as a second, unrelated number.
+#
+# The currency-digit separator is `[ ]?` — a single optional space — never
+# `\s*`. `\s*` would let a currency symbol attach across a newline or a run
+# of tabs to digits that are not actually part of the same written amount;
+# a single space is the only separator that plausibly still means "this
+# symbol prefixes this number" ("$ 12 fee").
 _TOKEN = re.compile(
-    r"(?P<currency>[$£€])?"
-    r"(?P<digits>\d{1,3}(?:,\d{3})+|\d+(?:\.\d+)?)"
+    r"(?P<currency>[$£€])?[ ]?"
+    r"(?P<digits>\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?)"
     r"(?P<gap>\s*)"
     r"(?P<alpha>[A-Za-z]+)?"
     r"(?P<percent>\s*%)?"
@@ -95,7 +105,7 @@ def parse_numbers(text: str) -> list[ParsedNumber]:
     for match in _TOKEN.finditer(text):
         value = float(match.group("digits").replace(",", ""))
         alpha = match.group("alpha")
-        gap = match.group("gap") or ""
+        gap = match.group("gap")  # always a string ("" or more) — the group is mandatory
         end = match.end("digits")
         consumed_alpha = False
 
@@ -113,7 +123,13 @@ def parse_numbers(text: str) -> list[ParsedNumber]:
             # source text and do not extend the match past the digits.
 
         percent = match.group("percent")
-        if percent is not None and (alpha is None or consumed_alpha):
+        # `is_percent` must track the same condition that extends `end`, not
+        # merely whether the percent group matched: a match can capture a
+        # trailing "%" that was never folded into this number (e.g. an
+        # unconsumed unit run directly followed by "%"), and the flag would
+        # then describe a character `raw`/`span` don't include.
+        consumed_percent = percent is not None and (alpha is None or consumed_alpha)
+        if consumed_percent:
             end = match.end("percent")
 
         currency = match.group("currency")
@@ -123,7 +139,7 @@ def parse_numbers(text: str) -> list[ParsedNumber]:
                 raw=text[start:end],
                 value=value,
                 unit=CURRENCY.get(currency) if currency else None,
-                is_percent=percent is not None,
+                is_percent=consumed_percent,
                 span=(start, end),
             )
         )
@@ -137,7 +153,9 @@ def values_match(claimed: float, source: float, *, tolerance: float = 0.005) -> 
     "0.83" — and rejects anything that overstates the underlying figure
     by more than that, so "40%" against a stored 44% still fails.
     Tolerance is symmetric: it also rejects understatement, not only
-    inflation.
+    inflation. Not intended for comparing magnitudes near zero: `source`
+    exactly `0` falls back to an absolute check, so the two branches
+    disagree right at that boundary.
     """
     if source == 0:
         return abs(claimed) <= tolerance

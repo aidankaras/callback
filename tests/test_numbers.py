@@ -88,3 +88,29 @@ def test_spaced_single_letter_abbreviation_is_accepted_cost() -> None:
     # a more common false positive (a physical/rate unit directly following
     # the number, with no space).
     assert [n.value for n in parse_numbers("1.2 M records")] == [1.2]
+
+
+def test_grouped_thousands_with_a_decimal_tail_is_one_number() -> None:
+    # Without a decimal tail on the grouped-thousands branch, this parsed as
+    # two unrelated numbers: 1200.0 and 50.0.
+    assert [n.value for n in parse_numbers("1,200.50 total")] == [1200.5]
+
+
+def test_currency_symbol_separated_by_a_space_still_attaches() -> None:
+    parsed = parse_numbers("$ 12 fee")[0]
+    assert parsed.value == 12.0
+    assert parsed.unit == "USD"
+
+
+def test_currency_with_space_and_grouped_decimal_together() -> None:
+    parsed = parse_numbers("budget of $ 1,500.75 approved")[0]
+    assert parsed.value == 1500.75
+    assert parsed.unit == "USD"
+
+
+def test_percent_flag_is_not_set_when_the_percent_sign_was_not_consumed() -> None:
+    # "ms" is not a magnitude, so the match ends after "300"; the "%" that
+    # follows "ms" belongs to no captured number and must not flip the flag.
+    parsed = parse_numbers("300ms% weird")[0]
+    assert parsed.raw == "300"
+    assert not parsed.is_percent
