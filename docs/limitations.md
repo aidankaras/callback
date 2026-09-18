@@ -1,20 +1,28 @@
 # Limitations
 
-This document tracks what `callback`'s verification gates do and do not guarantee, and records
-functionality that is explicitly out of scope rather than merely unimplemented.
+This document tracks what `callback`'s verification gates do and do not guarantee today, and
+separately records functionality that is planned but not yet built, and functionality that is
+explicitly out of scope rather than merely unimplemented.
 
-## What the verification gates prove
+## What's implemented today
 
 - **Grounding**: every factual claim in a generated document is derivable from data the candidate
   supplied. This is a claim about traceability, not about truthfulness of the underlying facts —
-  `callback` cannot verify that a fact the candidate entered is itself accurate.
-- **Parseability**: a document's rendered layout survives an independent, deliberately pessimistic
-  text extraction with its field structure and reading order intact. This proves the document is
-  *structurally* unambiguous to a generic text extractor — it is not a compatibility claim about any
-  specific applicant-tracking system, and none is made.
-- **No hidden channels**: extracted text matches visible text, and document metadata carries nothing
-  beyond title and author. This rules out documents that present different content to a human reader
-  than to an automated one.
+  `callback` cannot verify that a fact the candidate entered is itself accurate — and it does not
+  catch every kind of invented content; see Known constraints below for the specific gap.
+
+## Planned, not yet built
+
+No document rendering, text extraction, or metadata inspection exists in `core/` yet, so neither of
+the following is checked today:
+
+- **Parseability**: a document's rendered layout will be checked against an independent,
+  deliberately pessimistic text extraction to confirm its field structure and reading order survive
+  intact. This will prove the document is *structurally* unambiguous to a generic text extractor —
+  it is not intended as a compatibility claim about any specific applicant-tracking system.
+- **No hidden channels**: extracted text will be checked against visible text, and document metadata
+  will be constrained to carry nothing beyond title and author, ruling out a document that presents
+  different content to a human reader than to an automated one.
 
 ## Explicit non-goals
 
@@ -26,8 +34,6 @@ functionality that is explicitly out of scope rather than merely unimplemented.
 
 ## Known constraints
 
-- PDF parsing depends on `pdfplumber` and `pypdf`; documents produced by paths those libraries
-  cannot parse reliably will fail the parseability gate rather than pass silently.
 - The grounding check operates on the facts and derivations it is given; it cannot detect a fact
   that is internally consistent but factually false.
 - The grounding check's entity matching is narrow by design: a word in generated text is checked

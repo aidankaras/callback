@@ -1,9 +1,9 @@
 """Filesystem boundary for user data.
 
 All user data lives under a single private directory so that a path check is
-sufficient to prove that a write cannot reach the repository or the plugin tree.
-Symlinks are resolved before comparison: a link inside the home that points
-outside it is an escape.
+sufficient to prove that a write cannot reach the repository. Symlinks are
+resolved before comparison: a link inside the home that points outside it is
+an escape.
 """
 
 from __future__ import annotations
@@ -116,8 +116,8 @@ def delete_all() -> Iterator[Path]:
     The home directory itself is left in place, empty, rather than removed
     outright, so a subsequent `ensure_home()` has nothing to recreate.
 
-    Does not manage the SQLite index this tool will later introduce; that
-    feature owns its own cleanup.
+    Only ever touches what's under the data home; anything stored elsewhere
+    is not this function's concern.
     """
     home = callback_home().resolve()
     if not home.is_dir():

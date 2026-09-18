@@ -9,7 +9,12 @@ from pydantic import BaseModel, Field, model_validator
 
 
 class Identity(BaseModel):
-    """Contact details the round-trip gate must be able to recover from a PDF."""
+    """Contact details for the candidate: name, email, and other reachable-by info.
+
+    Document rendering, and the round-trip check that will validate this
+    against a generated PDF, are not built yet; today this model only
+    validates shape.
+    """
 
     model_config = {"extra": "forbid"}
 
