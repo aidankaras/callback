@@ -3,7 +3,7 @@ from pathlib import Path
 import pytest
 
 from core.paths import ensure_home
-from core.profile.models import Fact, FactKind, Provenance, Quantity, Trust
+from core.profile.models import Derivation, Fact, FactKind, Provenance, Quantity, Trust
 from core.profile.store import (
     DuplicateFactError,
     SensitiveFieldError,
@@ -58,6 +58,31 @@ def test_sensitive_ssn_pattern_is_rejected() -> None:
 def test_web_provenance_cannot_be_user_confirmed() -> None:
     with pytest.raises(ValueError):
         _fact(provenance=Provenance(source="web:https://example.com", trust=Trust.USER_CONFIRMED))
+
+
+def test_import_provenance_cannot_be_user_confirmed() -> None:
+    with pytest.raises(ValueError):
+        _fact(provenance=Provenance(source="import:resume.pdf", trust=Trust.USER_CONFIRMED))
+
+
+def test_sensitive_entity_is_rejected() -> None:
+    with pytest.raises(SensitiveFieldError) as exc:
+        add_fact(_fact(id="pii.3", entities=["Python", "Married"]))
+    assert "entities[1]" in str(exc.value)
+
+
+def test_sensitive_derivation_label_is_rejected() -> None:
+    derivation = Derivation.model_validate(
+        {"label": "Marital status summary", "op": "count", "from": ["exp.lab.1"]}
+    )
+    with pytest.raises(SensitiveFieldError) as exc:
+        add_fact(_fact(id="pii.4", derived=[derivation]))
+    assert "derived[0].label" in str(exc.value)
+
+
+def test_ordinary_entities_are_not_rejected() -> None:
+    add_fact(_fact(id="ok.1", entities=["Boston University", "Python"]))
+    assert load_facts()["ok.1"].entities == ["Boston University", "Python"]
 
 
 def test_absent_fact_records_a_declined_gap() -> None:

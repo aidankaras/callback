@@ -8,6 +8,7 @@ identifier is never silently overwritten.
 from __future__ import annotations
 
 import re
+from collections.abc import Iterator
 
 import yaml
 
@@ -41,13 +42,32 @@ class DuplicateFactError(ValueError):
     """Raised when a fact identifier already exists."""
 
 
-def screen_sensitive(text: str) -> None:
-    """Raise `SensitiveFieldError` if `text` matches a denylisted attribute."""
+def screen_sensitive(text: str, field: str) -> None:
+    """Raise `SensitiveFieldError` if `text` matches a denylisted attribute.
+
+    `field` is the dotted/indexed path the text came from (e.g. `"entities[1]"`),
+    named in the error so a caller knows which part of the fact to fix.
+    """
     for label, pattern in SENSITIVE_PATTERNS:
         if pattern.search(text):
             raise SensitiveFieldError(
-                f"refusing to store {label}: callback does not record this attribute"
+                f"refusing to store {label} in {field}: callback does not record this attribute"
             )
+
+
+def _free_text_fields(fact: Fact) -> Iterator[tuple[str, str]]:
+    """Yield every free-text string on `fact` that must be screened, with its field path.
+
+    `Provenance.source` is deliberately excluded: it names where a fact came from
+    (a filename or URL), not content the candidate wrote, so screening it would
+    reject an import over its own filename rather than over anything sensitive.
+    `Dates` is excluded because it never carries free text.
+    """
+    yield "text", fact.text
+    for index, entity in enumerate(fact.entities):
+        yield f"entities[{index}]", entity
+    for index, derivation in enumerate(fact.derived):
+        yield f"derived[{index}].label", derivation.label
 
 
 def load_facts() -> dict[str, Fact]:
@@ -70,8 +90,9 @@ def save_facts(facts: dict[str, Fact]) -> None:
 
 
 def add_fact(fact: Fact) -> None:
-    """Admit `fact` into the store after screening its text and checking for a duplicate id."""
-    screen_sensitive(fact.text)
+    """Admit `fact` into the store after screening its free text and checking for a duplicate id."""
+    for field, value in _free_text_fields(fact):
+        screen_sensitive(value, field)
     facts = load_facts()
     if fact.id in facts:
         raise DuplicateFactError(f"fact {fact.id!r} already exists")

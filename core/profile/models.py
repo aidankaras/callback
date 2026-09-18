@@ -110,6 +110,11 @@ class Fact(BaseModel):
     text: str
     numbers: dict[str, Quantity] = Field(default_factory=dict)
     dates: Dates | None = None
+    # `default_factory=list[Derivation]`, not bare `list`: pyright strict cannot
+    # bind a bare `list` factory against a `list[SomeBaseModel]` target and
+    # widens the field to `list[Unknown]` (reportUnknownVariableType). Bare
+    # `list` works for `list[str]` and `dict[str, ...]` fields below; only the
+    # user-model-typed list needs the explicit factory spelling.
     derived: list[Derivation] = Field(default_factory=list[Derivation])
     entities: list[str] = Field(default_factory=list)
     provenance: Provenance
