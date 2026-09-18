@@ -27,6 +27,18 @@ alias nor identifier-shaped — a plausible-looking but nonexistent product
 name in title case, say — passes through unchecked. Catching that class of
 fabrication is left to later review, not to this gate.
 
+A hyphenated compound ("S3-backed") is checked one hyphen-split component
+at a time when the whole token isn't itself a table entry, because `-` has
+to stay part of a token for entries like "scikit-learn" to match as a
+whole. Every component that is itself checkable must be cited — accepting
+on any single component's match would let a hyphen hide an uncited
+technology sitting next to a cited one ("S3-H100" passing on "S3" alone
+even though "H100" is not cited, when the space-separated form of the same
+claim would correctly fail). A component that is not itself checkable
+("backed", "Redshift") is ignored, exactly as it would be as a standalone
+word — this is the same entity-detection limitation above, not a separate
+hole that hyphens introduce.
+
 Number matching is by value, against the union of every cited fact's
 numbers and derivations — not by which occurrence in the text a value came
 from. A bullet with two independent claims that happen to share a value
@@ -205,19 +217,46 @@ def check_bullet(
                 used_alias = True
             continue
         # The token as a whole doesn't match, but it may be a hyphenated
-        # compound built around a cited entity ("S3-backed", "Kubernetes-
-        # adjacent"). `_TOKEN` deliberately keeps '-' as part of a token
-        # (it's needed intact for table entries like "scikit-learn"), so a
-        # compound is only recovered here, by splitting and checking each
-        # component against the cited entities individually.
-        component_hit = next(
-            (part for part in token.split("-") if part and canonicalize(part) in cited_entities),
-            None,
-        )
-        if component_hit is not None:
-            if canonicalize(component_hit) != component_hit:
-                used_alias = True
-            continue
+        # compound built around a cited entity ("S3-backed"). `_TOKEN`
+        # deliberately keeps '-' as part of a token (needed intact for
+        # table entries like "scikit-learn", tried above as a whole), so a
+        # compound is only recovered here by splitting on '-'.
+        #
+        # Every *checkable* component must match — not just one of them.
+        # Accepting on any single component match would let a hyphen hide
+        # an uncited technology sitting next to a cited one: "S3-H100"
+        # would pass on "S3" alone even though "H100" (identifier-shaped
+        # in its own right) is not cited, while the same claim written with
+        # a space ("S3 H100") is correctly rejected. A component that is
+        # not itself checkable ("backed", "Redshift" — no digit, no
+        # all-caps shape, no alias-table entry) is ignored, exactly as it
+        # would be as a standalone word: "S3-Redshift" passes on "S3" alone
+        # for the same reason "S3 Redshift" does, which is the documented
+        # entity-detection limitation, not a hole specific to hyphens.
+        if "-" in token:
+            parts = [p for p in token.split("-") if p]
+            checkable_parts = [p for p in parts if p.lower() in ALIAS_TABLE or _SHAPED.match(p)]
+            if checkable_parts:
+                missing = [p for p in checkable_parts if canonicalize(p) not in cited_entities]
+                if not missing:
+                    if any(canonicalize(p) != p for p in checkable_parts):
+                        used_alias = True
+                    continue
+                for part in missing:
+                    findings.append(
+                        Finding(
+                            index,
+                            "unknown_entity",
+                            f"{part!r} (component of {token!r}) appears in no cited fact",
+                        )
+                    )
+                continue
+            # No component of the hyphenated token is itself checkable
+            # (e.g. "scikit-learn" split into "scikit" and "learn", neither
+            # a known technology nor identifier-shaped on its own) — there
+            # is no compound to recover, so this falls through to the
+            # whole-token miss below.
+
         findings.append(
             Finding(
                 index,

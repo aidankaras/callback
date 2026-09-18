@@ -251,12 +251,67 @@ def test_shipped_s3_and_greet_are_both_checked() -> None:
 def test_hyphenated_compound_with_a_cited_component_passes() -> None:
     """'S3-backed' tokenises as one word — the alias table needs hyphens kept
     intact for 'scikit-learn' — so a whole-token match against the cited
-    entities fails even though 'S3' itself is cited. Splitting on '-' and
-    accepting a component match keeps the compound truthful without
-    dropping the hyphen from the tokeniser.
+    entities fails even though 'S3' itself is cited. 'backed' is not itself
+    checkable (no digit, not all-caps, not in the alias table), so 'S3' is
+    the only component that has to match, and it does.
     """
     f = fact("s8b", entities=["S3"])
     verdict, findings = check_bullet("Built an S3-backed store", [f])
+    assert verdict is Verdict.PASS
+    assert findings == []
+
+
+def test_hyphen_does_not_hide_an_uncited_checkable_component() -> None:
+    """A hyphen must not let one checkable component vouch for another.
+
+    Both 'S3' and 'H100' are identifier-shaped on their own, so writing them
+    joined by a hyphen must not be more permissive than writing them apart:
+    'Deployed on S3 H100 nodes' would fail on the uncited 'H100', and so
+    must the hyphenated form. Accepting on any single component match
+    (an earlier version of this rule) let a hyphen hide an uncited
+    technology sitting next to a cited one — this is the case that defect
+    would have let through silently.
+    """
+    f = fact("s8c", entities=["S3"])
+    verdict, findings = check_bullet("Deployed on S3-H100 nodes", [f])
+    assert verdict is Verdict.FAIL
+    entity_findings = [f for f in findings if f.kind == "unknown_entity"]
+    assert len(entity_findings) == 1
+    assert "H100" in entity_findings[0].detail
+
+
+def test_hyphen_passes_when_every_checkable_component_is_cited() -> None:
+    f = fact("s8d", entities=["S3", "H100"])
+    verdict, findings = check_bullet("Deployed on S3-H100 nodes", [f])
+    assert verdict is Verdict.PASS
+    assert findings == []
+
+
+def test_hyphenated_alias_table_entry_matches_as_a_whole_token() -> None:
+    f = fact("s8e", entities=["scikit-learn"])
+    verdict, findings = check_bullet("Used scikit-learn pipelines", [f])
+    assert verdict is Verdict.PASS
+    assert findings == []
+
+
+def test_hyphenated_alias_table_entry_fails_when_not_cited() -> None:
+    f = fact("s8f", entities=["Python"])
+    verdict, findings = check_bullet("Used scikit-learn pipelines", [f])
+    assert verdict is Verdict.FAIL
+    assert any(f.kind == "unknown_entity" for f in findings)
+
+
+def test_hyphen_with_an_uncheckable_second_component_is_a_documented_limitation() -> None:
+    """This passes because 'Redshift' is not checkable, not because hyphens
+    are trusted. 'Redshift' has no digit, is not all-caps, and is not in the
+    alias table, so it is ignored exactly as it would be as a standalone
+    word — 'Built an S3 Redshift sync' (space, not hyphen) passes the same
+    way with the same single cited entity. Do not "fix" this into the
+    S3-H100 behaviour above: that case differs because both halves are
+    independently checkable, and this one differs because only one is.
+    """
+    f = fact("s8g", entities=["S3"])
+    verdict, findings = check_bullet("Built an S3-Redshift sync", [f])
     assert verdict is Verdict.PASS
     assert findings == []
 
