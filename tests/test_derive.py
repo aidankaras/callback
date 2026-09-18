@@ -131,6 +131,41 @@ def test_ratio_zero_divisor_raises_derivation_error() -> None:
         compute(fact.derived[0], [fact])
 
 
+def test_pct_change_increase_is_negative() -> None:
+    # Pins the sign convention: a decrease (before > after) is positive
+    # (see test_pct_change_is_recomputed, 500 -> 300 gives +40.0); an
+    # increase (before < after) is therefore negative.
+    fact = _fact(
+        "increase",
+        numbers={"before": Quantity(value=100), "after": Quantity(value=150)},
+        derived=[
+            Derivation.model_validate(
+                {"label": "growth", "op": "pct_change", "from": ["before", "after"]}
+            )
+        ],
+    )
+    assert compute(fact.derived[0], [fact]) == pytest.approx(-50.0)
+
+
+def test_sum_with_no_sources_raises_derivation_error() -> None:
+    derivation = Derivation.model_validate({"label": "total", "op": "sum", "from": []})
+    with pytest.raises(DerivationError):
+        compute(derivation, [_fact("empty-sum")])
+
+
+def test_count_with_no_sources_raises_derivation_error() -> None:
+    derivation = Derivation.model_validate({"label": "team", "op": "count", "from": []})
+    with pytest.raises(DerivationError):
+        compute(derivation, [_fact("empty-count")])
+
+
+def test_count_sums_entities_across_multiple_cited_facts() -> None:
+    one = _fact("team-one", entities=["Ana", "Ben"])
+    two = _fact("team-two", entities=["Cleo"])
+    derivation = Derivation.model_validate({"label": "team", "op": "count", "from": ["entities"]})
+    assert compute(derivation, [one, two]) == 3.0
+
+
 def test_pct_change_zero_baseline_raises_derivation_error() -> None:
     fact = _fact(
         "zero-base",
@@ -201,3 +236,22 @@ def test_date_hull_mixed_precision_orders_lexicographically() -> None:
     year_only = _fact("year", dates=Dates(start="2024", end="2024"))
     month = _fact("month", dates=Dates(start="2024-06", end="2024-06"))
     assert date_hull([year_only, month]) == ("2024", "2024-06")
+
+
+def test_date_hull_with_no_facts_returns_none_pair() -> None:
+    assert date_hull([]) == (None, None)
+
+
+def test_date_hull_with_undated_facts_returns_none_pair() -> None:
+    fact = _fact("no-dates")
+    assert date_hull([fact]) == (None, None)
+
+
+def test_date_hull_does_not_validate_a_facts_own_start_after_end() -> None:
+    # Per-fact date validity (an end before its own start) is the model
+    # layer's job, not date_hull's — this test pins the actual behavior
+    # (min of starts, max of ends, taken independently) rather than
+    # asserting it is "correct": considered and deliberately not
+    # validated here, not an oversight.
+    fact = _fact("backwards", dates=Dates(start="2024-08", end="2024-06"))
+    assert date_hull([fact]) == ("2024-08", "2024-06")

@@ -41,6 +41,20 @@ def _require_pair(op: str, args: Sequence[float]) -> tuple[float, float]:
 
 
 def _pct_change(args: Sequence[float]) -> float:
+    """(before - after) / before * 100, as a signed percentage.
+
+    Sign convention: the result is *positive* for a reduction (after <
+    before) and *negative* for an increase (after > before) — the formula
+    itself carries no notion of "good" or "bad" direction, only whether
+    the second value is smaller or larger than the first. A generated
+    bullet's verb carries that direction in natural language ("cut costs
+    40%" vs. "grew revenue 40%"); this function only ever returns a
+    magnitude with a sign tied to before/after order, not to the verb. A
+    caller comparing a claimed percentage against this derived value must
+    therefore compare magnitudes (e.g. the absolute value of each), never
+    signed values — otherwise a truthful "grew revenue 50%" bullet is
+    compared against a derived -50.0 and is wrongly rejected.
+    """
     before, after = _require_pair("pct_change", args)
     if before == 0:
         raise DerivationError("pct_change with a zero baseline is undefined")
@@ -107,10 +121,16 @@ def compute(derivation: Derivation, facts: Sequence[Fact]) -> float:
     Raises `DerivationError` for every failure mode: an unsupported op, a
     label absent from every cited fact, a label defined ambiguously by more
     than one cited fact, the wrong number of source values for a
-    fixed-arity op, or a zero divisor. `DerivationError` is itself a
-    `ValueError` subclass, but no *other* exception type — a bare
-    `ValueError` from tuple unpacking, a `ZeroDivisionError`, a `KeyError`
-    — ever escapes; a caller catching `DerivationError` sees every failure.
+    fixed-arity op (including none at all), or a zero divisor.
+    `DerivationError` is itself a `ValueError` subclass, but no *other*
+    exception type — a bare `ValueError` from tuple unpacking, a
+    `ZeroDivisionError`, a `KeyError` — ever escapes; a caller catching
+    `DerivationError` sees every failure.
+
+    `count` sums `len(entities)` over *every* cited fact, not just one —
+    citing two facts adds their entity counts together rather than picking
+    one fact's list. That is a deliberate reading of "how many people are
+    named across what I'm citing," not an accident of the loop.
     """
     if derivation.op == "count":
         if len(derivation.from_) != 1:
@@ -143,6 +163,14 @@ def compute(derivation: Derivation, facts: Sequence[Fact]) -> float:
             f"derivation {derivation.label!r} references unknown label {exc.args[0]!r}"
         ) from exc
 
+    if not args:
+        # `sum` has no fixed arity, so nothing above catches an empty
+        # `from` list — and `sum([])` is 0.0, the additive identity, which
+        # would otherwise flow into a comparison looking like a real
+        # figure. An author who genuinely wants zero should write it as a
+        # number, not derive it from nothing.
+        raise DerivationError(f"derivation {derivation.label!r} has no source values")
+
     try:
         return operation(args)
     except DerivationError as exc:
@@ -155,8 +183,20 @@ def date_hull(facts: Sequence[Fact]) -> tuple[str | None, str | None]:
     Dates are compared as plain ISO strings (`"2024-06"`, `"2024"`), which
     is only sound because ISO 8601's field order makes lexicographic and
     chronological order agree for two dates at the *same* precision. Mixed
-    precisions still compare, but not always the way a reader would expect
-    — see the task report for a documented case.
+    precisions still compare, but not always the way a reader would
+    expect: a year-only date (`"2024"`) is a string-prefix of any
+    same-year month-precision date (`"2024-06"`), so it always sorts
+    *before* it. That makes a coarse year-only `start` win the minimum
+    comparison — a conservative, defensible outcome — but it means a
+    coarse year-only `end` can *never* win the maximum comparison against
+    a same-year month-precision `end`, even when the true, unknown month
+    behind that year-only date is actually later.
+
+    A fact whose own `end` precedes its own `start` is not detected or
+    corrected here; that per-fact invariant is the model layer's
+    responsibility (`Dates`), not this function's — it only takes the min
+    of every start and the max of every end it is handed, whatever those
+    values are.
     """
     starts = [fact.dates.start for fact in facts if fact.dates and fact.dates.start]
     ends = [fact.dates.end for fact in facts if fact.dates and fact.dates.end]
