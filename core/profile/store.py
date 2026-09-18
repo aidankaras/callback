@@ -17,19 +17,56 @@ from core.profile.models import Fact
 
 FACTS_FILE = "facts.yaml"
 
+# Every pattern here targets self-attribution or an explicit field label (e.g.
+# "date of birth:", "I am married"), never a bare topic word. callback is not a
+# classifier that infers intent from a topic; it is a refusal of a candidate
+# recording their own protected attributes. A bare word like "race", "married",
+# "disabled" or "religious" collides constantly with ordinary technical and
+# academic vocabulary ("race condition", "married two datasets", "disabled
+# legacy flow", "Religious Studies") — refusing those teaches the user the tool
+# is broken, which is worse than not screening at all. Equally, a label must
+# not promise more than its pattern delivers: "salary history" previously
+# matched only "current/previous/prior salary" and let the literal phrase
+# "salary history" straight through.
 SENSITIVE_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("date of birth", re.compile(r"\b(date of birth|d\.?o\.?b\.?)\b", re.I)),
-    ("age", re.compile(r"\b(?:i am|aged)\s+\d{2}\s+years old\b", re.I)),
-    ("ssn", re.compile(r"\b(ssn|social security)\b|\b\d{3}-\d{2}-\d{4}\b", re.I)),
-    ("salary history", re.compile(r"\b(current|previous|prior)\s+salary\b", re.I)),
-    ("marital status", re.compile(r"\b(marital status|married|divorced|single parent)\b", re.I)),
-    ("religion", re.compile(r"\b(religion|religious affiliation)\b", re.I)),
-    ("disability", re.compile(r"\b(disability status|disabled)\b", re.I)),
-    ("race or ethnicity", re.compile(r"\b(race|ethnicity|ethnic origin)\b", re.I)),
-    ("gender", re.compile(r"\b(gender identity|sex assigned)\b", re.I)),
+    (
+        "age",
+        re.compile(r"\b(?:i am|i'm)\s+\d{1,2}\b|\bage\s*:\s*\d{1,2}\b|\bborn\s+(?:in|on)\s", re.I),
+    ),
+    ("ssn", re.compile(r"\b(ssn|social security (?:number|no))\b|\b\d{3}-\d{2}-\d{4}\b", re.I)),
+    (
+        "salary history",
+        re.compile(
+            r"\b(salary history|desired salary|(?:current|previous|prior|expected)\s+salary)\b",
+            re.I,
+        ),
+    ),
+    (
+        "marital status",
+        re.compile(r"\bmarital status\b|\bi am (?:married|divorced|single|widowed)\b", re.I),
+    ),
+    ("religion", re.compile(r"\b(my religion|religious affiliation)\b|\breligion\s*:", re.I)),
+    (
+        "disability",
+        re.compile(r"\b(disability status|disabled veteran|i have a disability)\b", re.I),
+    ),
+    (
+        "race or ethnicity",
+        re.compile(
+            r"\b(racial background|ethnic background|race or ethnicity)\b|\b(?:race|ethnicity)\s*:",
+            re.I,
+        ),
+    ),
+    ("gender", re.compile(r"\b(gender identity|sex assigned)\b|\bgender\s*:", re.I)),
     (
         "street address",
-        re.compile(r"\b\d{1,5}\s+\w+\s+(street|st|avenue|ave|road|rd|drive|dr)\b", re.I),
+        re.compile(
+            r"\b\d{1,5}\s+\w+\s+"
+            r"(street|st|avenue|ave|road|rd|drive|dr|boulevard|blvd|lane|ln|way|"
+            r"court|ct|circle|cir|place|pl)\b",
+            re.I,
+        ),
     ),
 )
 

@@ -3,12 +3,14 @@ from pathlib import Path
 import pytest
 
 from core.paths import ensure_home
-from core.profile.models import Derivation, Fact, FactKind, Provenance, Quantity, Trust
+from core.profile.models import Dates, Derivation, Fact, FactKind, Provenance, Quantity, Trust
 from core.profile.store import (
+    SENSITIVE_PATTERNS,
     DuplicateFactError,
     SensitiveFieldError,
     add_fact,
     load_facts,
+    screen_sensitive,
 )
 
 
@@ -36,6 +38,26 @@ def test_round_trip_through_yaml() -> None:
     loaded = load_facts()
     assert loaded["exp.lab.1"].numbers["records"].value == 1_200_000
     assert loaded["exp.lab.1"].provenance.trust is Trust.USER_CONFIRMED
+
+
+def test_round_trip_preserves_dates_units_and_derivations() -> None:
+    """The single-field assertions above don't exercise `Dates`, a non-`None`
+    `Quantity.unit`, or the `from`/`from_` alias on `Derivation` — each of those
+    only round-trips correctly if `save_facts`/`load_facts` serialize by alias and
+    `model_dump` includes every field. Compare the whole reloaded fact to the
+    original rather than picking fields, so a regression in any one of them fails
+    this test instead of passing silently."""
+    fact = _fact(
+        dates=Dates(start="2024-01", end="2024-06", precision="month"),
+        numbers={"records": Quantity(value=1_200_000, unit="rows")},
+        derived=[
+            Derivation.model_validate(
+                {"label": "records per month", "op": "divide", "from": ["exp.lab.1"]}
+            )
+        ],
+    )
+    add_fact(fact)
+    assert load_facts()["exp.lab.1"] == fact
 
 
 def test_duplicate_id_is_rejected() -> None:
@@ -67,7 +89,7 @@ def test_import_provenance_cannot_be_user_confirmed() -> None:
 
 def test_sensitive_entity_is_rejected() -> None:
     with pytest.raises(SensitiveFieldError) as exc:
-        add_fact(_fact(id="pii.3", entities=["Python", "Married"]))
+        add_fact(_fact(id="pii.3", entities=["Python", "SSN 123-45-6789"]))
     assert "entities[1]" in str(exc.value)
 
 
@@ -90,3 +112,56 @@ def test_absent_fact_records_a_declined_gap() -> None:
         _fact(id="exp.lab.1.metric", kind=FactKind.ABSENT, text="no metric available", numbers={})
     )
     assert load_facts()["exp.lab.1.metric"].kind is FactKind.ABSENT
+
+
+# One (self-attributing, ordinary-vocabulary) pair per label in SENSITIVE_PATTERNS. The
+# positive case must be refused; the negative case is realistic technical or academic
+# resume text that must be accepted despite superficially resembling the topic. This is
+# what actually protects against an over-eager pattern: a bare topic word would fail the
+# negative half even though it happily catches the positive half.
+SENSITIVE_CASES: dict[str, tuple[str, str]] = {
+    "date of birth": (
+        "Date of birth: 12 March 2006",
+        "Completed a certificate program before graduation",
+    ),
+    "age": ("Age: 34", "Led a cross-functional team of 12 engineers"),
+    "ssn": ("SSN 123-45-6789", "Streamlined onboarding paperwork for new hires"),
+    "salary history": (
+        "Please see my salary history attached below",
+        "Negotiated vendor contracts worth $85k annually",
+    ),
+    "marital status": (
+        "I am married and have two children",
+        "Married two datasets on a composite key",
+    ),
+    "religion": ("My religion is Buddhist", "BA in Religious Studies"),
+    "disability": (
+        "Disability status: none",
+        "Disabled legacy authentication flow before rollout",
+    ),
+    "race or ethnicity": ("Race: Asian", "Fixed a race condition in the concurrency module"),
+    "gender": ("Gender: female", "Managed gender-balanced hiring initiatives across the org"),
+    "street address": ("123 Main Street, Apt 4", "Delivered the project two weeks ahead"),
+}
+
+
+def test_sensitive_cases_cover_every_pattern_label() -> None:
+    """Every label in SENSITIVE_PATTERNS must have a case pair, so the table and its
+    tests cannot silently drift apart as patterns are added or renamed."""
+    assert set(SENSITIVE_CASES) == {label for label, _pattern in SENSITIVE_PATTERNS}
+
+
+@pytest.mark.parametrize("label", [label for label, _pattern in SENSITIVE_PATTERNS])
+def test_sensitive_pattern_refuses_self_attribution_and_accepts_vocabulary(label: str) -> None:
+    positive, negative = SENSITIVE_CASES[label]
+    with pytest.raises(SensitiveFieldError):
+        screen_sensitive(positive, "text")
+    screen_sensitive(negative, "text")  # must not raise
+
+
+def test_generic_technical_bullets_are_not_rejected() -> None:
+    for text in (
+        "Improved accessibility for users with disabilities",
+        "Reduced p99 latency by 40%",
+    ):
+        screen_sensitive(text, "text")

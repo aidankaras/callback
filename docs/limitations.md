@@ -30,3 +30,7 @@ functionality that is explicitly out of scope rather than merely unimplemented.
   cannot parse reliably will fail the parseability gate rather than pass silently.
 - The grounding check operates on the facts and derivations it is given; it cannot detect a fact
   that is internally consistent but factually false.
+- The sensitive-attribute screen on fact storage is a heuristic refusal of self-attributed
+  protected attributes (e.g. "I am married", "Date of birth: ..."), not a general PII classifier;
+  it may occasionally refuse legitimate text that happens to match a pattern, and the remedy is to
+  rephrase the fact rather than to bypass the check.
