@@ -9,6 +9,7 @@ outside it is an escape.
 from __future__ import annotations
 
 import os
+from collections.abc import Iterator
 from pathlib import Path
 
 DEFAULT_HOME = Path.home() / ".callback"
@@ -96,31 +97,40 @@ def write_private(path: Path, text: str) -> None:
         raise
 
 
-def delete_all() -> list[Path]:
-    """Remove every file and directory under the data home; return what was removed.
+def delete_all() -> Iterator[Path]:
+    """Remove every file and directory under the data home, yielding each path
+    as it is removed rather than only after the whole walk finishes.
 
-    Only descends into the resolved home and never follows a symlink out of it: any
-    symlink encountered (file or directory) is unlinked directly rather than resolved
-    and traversed. The home directory itself is left in place, empty, rather than
-    removed outright, so a subsequent `ensure_home()` has nothing to recreate.
+    This is a command whose entire job is deleting personal data, so a
+    failure partway through must not leave the caller unable to tell what
+    already vanished — yielding lazily lets a caller (see `core.cli`) report
+    each removal as it happens, instead of only learning about any of them
+    once every removal has already succeeded.
 
-    Does not manage the SQLite index this tool will later introduce; that feature
-    owns its own cleanup.
+    Only descends into the resolved home and never follows a symlink out of
+    it: a symlink is unlinked directly rather than resolved and traversed,
+    whether it points at a file or a directory. Every other non-directory
+    entry — a FIFO, a socket, a device node, anything `iterdir` can return
+    that isn't a directory — is unlinked the same way, rather than silently
+    left behind because it matched none of a fixed list of expected kinds.
+    The home directory itself is left in place, empty, rather than removed
+    outright, so a subsequent `ensure_home()` has nothing to recreate.
+
+    Does not manage the SQLite index this tool will later introduce; that
+    feature owns its own cleanup.
     """
     home = callback_home().resolve()
-    removed: list[Path] = []
     if not home.is_dir():
-        return removed
+        return
 
-    def _walk(directory: Path) -> None:
+    def _walk(directory: Path) -> Iterator[Path]:
         for entry in sorted(directory.iterdir()):
-            if entry.is_symlink() or entry.is_file():
-                entry.unlink()
-                removed.append(entry)
-            elif entry.is_dir():
-                _walk(entry)
+            if entry.is_dir() and not entry.is_symlink():
+                yield from _walk(entry)
                 entry.rmdir()
-                removed.append(entry)
+                yield entry
+            else:
+                entry.unlink()
+                yield entry
 
-    _walk(home)
-    return removed
+    yield from _walk(home)

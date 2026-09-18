@@ -1,3 +1,4 @@
+import os
 import stat
 from pathlib import Path
 
@@ -7,6 +8,7 @@ from core.paths import (
     FILE_MODE,
     OutsideHomeError,
     callback_home,
+    delete_all,
     ensure_home,
     resolve_inside,
     write_private,
@@ -100,3 +102,57 @@ def test_write_private_preserves_existing_content_on_failed_write(
 
     assert target.read_text(encoding="utf-8") == "original"
     assert list(tmp_path.iterdir()) == [target], "no leftover temp file should remain"
+
+
+def test_delete_all_unlinks_a_fifo_instead_of_skipping_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A FIFO (or a socket) is neither a plain file, a directory nor a
+    symlink, so the old three-way dispatch in `_walk` left it on disk with
+    no error and no mention in what was removed -- a silent skip on a
+    command whose whole job is deleting personal data. Every non-directory
+    entry must be unlinked, whatever kind it is."""
+    monkeypatch.setenv("CALLBACK_HOME", str(tmp_path / "cb"))
+    home = ensure_home()
+    fifo = home / "leftover.fifo"
+    os.mkfifo(fifo)
+
+    removed = list(delete_all())
+
+    assert fifo in removed
+    assert not fifo.exists()
+    assert list(home.iterdir()) == []
+
+
+def test_delete_all_yields_each_removal_as_it_happens_not_after_the_walk(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`delete_all` must report what it already removed even when a later
+    removal fails partway through -- the old implementation built the full
+    removed-list before returning it, so a mid-walk exception left the
+    caller with nothing to show for what had already vanished. Simulating
+    the failure on the second unlink call proves removals already made are
+    visible to the caller before the failure propagates.
+    """
+    monkeypatch.setenv("CALLBACK_HOME", str(tmp_path / "cb"))
+    home = ensure_home()
+    (home / "a.txt").write_text("a")
+    (home / "b.txt").write_text("b")
+
+    calls = {"count": 0}
+    original_unlink = Path.unlink
+
+    def _flaky_unlink(self: Path, missing_ok: bool = False) -> None:
+        calls["count"] += 1
+        if calls["count"] == 2:
+            raise OSError("simulated failure")
+        original_unlink(self, missing_ok=missing_ok)
+
+    monkeypatch.setattr(Path, "unlink", _flaky_unlink)
+
+    already_removed: list[Path] = []
+    with pytest.raises(OSError):
+        for removed in delete_all():
+            already_removed.append(removed)
+
+    assert len(already_removed) == 1, "the first successful removal must already be visible"
