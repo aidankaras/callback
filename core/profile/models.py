@@ -79,9 +79,16 @@ class Derivation(BaseModel):
 
 
 class Provenance(BaseModel):
-    """Where a fact's content came from, and the trust level that follows from it."""
+    """Where a fact's content came from, and the trust level that follows from it.
 
-    model_config = {"extra": "forbid"}
+    Frozen: `Fact.selectable()` trusts `provenance.trust` to reflect how the
+    content was actually established, and a plain attribute assignment
+    (`fact.provenance.trust = Trust.USER_CONFIRMED`) would otherwise bypass
+    `trust_matches_source` entirely, letting an unconfirmed import or a
+    web-sourced fact back generated text with no validation in the way.
+    """
+
+    model_config = {"extra": "forbid", "frozen": True}
 
     source: str
     trust: Trust

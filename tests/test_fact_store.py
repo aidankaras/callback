@@ -87,6 +87,19 @@ def test_import_provenance_cannot_be_user_confirmed() -> None:
         _fact(provenance=Provenance(source="import:resume.pdf", trust=Trust.USER_CONFIRMED))
 
 
+def test_provenance_trust_cannot_be_mutated_after_construction() -> None:
+    """`selectable()` only means anything if trust can't be bumped after the fact.
+
+    Before `Provenance` was frozen, `fact.provenance.trust = Trust.USER_CONFIRMED`
+    silently flipped an unconfirmed import into one that backs generated text,
+    with no validator in the way -- a single attribute assignment defeated the
+    trust gate entirely.
+    """
+    provenance = Provenance(source="import:resume.pdf", trust=Trust.IMPORT_UNCONFIRMED)
+    with pytest.raises(ValueError):
+        provenance.trust = Trust.USER_CONFIRMED
+
+
 def test_sensitive_entity_is_rejected() -> None:
     with pytest.raises(SensitiveFieldError) as exc:
         add_fact(_fact(id="pii.3", entities=["Python", "SSN 123-45-6789"]))
