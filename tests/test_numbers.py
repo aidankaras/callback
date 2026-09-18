@@ -114,3 +114,35 @@ def test_percent_flag_is_not_set_when_the_percent_sign_was_not_consumed() -> Non
     parsed = parse_numbers("300ms% weird")[0]
     assert parsed.raw == "300"
     assert not parsed.is_percent
+
+
+def test_digit_run_embedded_in_a_lowercase_identifier_is_not_a_number() -> None:
+    # "p99" is a percentile name, not a claim about the number 99. A digit
+    # run with a letter immediately before it is part of an identifier, not
+    # a standalone quantity, at every position inside the run — not just the
+    # first — so nothing is parsed, rather than a truncated "9".
+    assert parse_numbers("p99 latency improved") == []
+
+
+def test_digit_run_embedded_in_an_uppercase_identifier_is_not_a_number() -> None:
+    # "H100" is a product name; "100" is not a separately claimed quantity.
+    assert parse_numbers("ran it on an H100") == []
+
+
+def test_digit_suffix_on_a_short_identifier_is_not_a_number() -> None:
+    # "S3" and "GPT4" are technology names whose trailing digit is part of
+    # the name, not a number claimed about anything.
+    assert parse_numbers("used S3 and GPT4") == []
+
+
+def test_dotted_version_identifier_is_not_a_number() -> None:
+    # Every digit in "v1.2.3" is preceded by a letter or a ".", so the guard
+    # rejects the whole run rather than parsing a fragment of it.
+    assert parse_numbers("shipped v1.2.3") == []
+
+
+def test_number_after_a_letter_prefixed_identifier_is_still_parsed() -> None:
+    # The guard only blocks a digit run that is directly glued to a
+    # preceding letter/digit/dot; a genuine number elsewhere in the same
+    # sentence, separated by whitespace, is unaffected.
+    assert [n.value for n in parse_numbers("on the H100, cut latency 40%")] == [40.0]

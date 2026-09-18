@@ -26,6 +26,20 @@ fabricated one. An invented tool name that happens to be neither a known
 alias nor identifier-shaped — a plausible-looking but nonexistent product
 name in title case, say — passes through unchecked. Catching that class of
 fabrication is left to later review, not to this gate.
+
+Number matching is by value, against the union of every cited fact's
+numbers and derivations — not by which occurrence in the text a value came
+from. A bullet with two independent claims that happen to share a value
+("cut errors 42% while onboarding 42 new accounts") grounds both from a
+single stored `42`, even if only one of the two was ever meant to cite it.
+Per-occurrence linkage between a specific span of text and a specific fact
+is out of scope here.
+
+Entities are canonicalised on this module's side of the comparison too
+(`canonicalize(e) for e in f.entities`), even though `Fact.entities` is
+documented as already canonical at write time — a defensive redundancy,
+not a second source of truth, so a `Fact` built without going through the
+normal write path still compares correctly.
 """
 
 from __future__ import annotations
@@ -146,10 +160,14 @@ def check_bullet(
             try:
                 derived_values.add(compute(derivation, sources))
             except DerivationError as exc:
+                # A broken derivation names a defect in the profile's own
+                # data, not an unresolved number in the bullet's text, so it
+                # gets a finding kind of its own rather than being folded
+                # into `unresolved_number`.
                 findings.append(
                     Finding(
                         index,
-                        "unresolved_number",
+                        "invalid_derivation",
                         f"derivation {derivation.label!r} could not be recomputed: {exc}",
                     )
                 )
@@ -179,20 +197,34 @@ def check_bullet(
             )
         )
 
-    cited_entities = {e for f in sources for e in f.entities}
+    cited_entities = {canonicalize(e) for f in sources for e in f.entities}
     for token in _checkable_entity_tokens(text):
         canonical = canonicalize(token)
-        if canonical not in cited_entities:
-            findings.append(
-                Finding(
-                    index,
-                    "unknown_entity",
-                    f"{token!r} (canonical form {canonical!r}) appears in no cited fact",
-                )
-            )
+        if canonical in cited_entities:
+            if canonical != token:
+                used_alias = True
             continue
-        if canonical != token:
-            used_alias = True
+        # The token as a whole doesn't match, but it may be a hyphenated
+        # compound built around a cited entity ("S3-backed", "Kubernetes-
+        # adjacent"). `_TOKEN` deliberately keeps '-' as part of a token
+        # (it's needed intact for table entries like "scikit-learn"), so a
+        # compound is only recovered here, by splitting and checking each
+        # component against the cited entities individually.
+        component_hit = next(
+            (part for part in token.split("-") if part and canonicalize(part) in cited_entities),
+            None,
+        )
+        if component_hit is not None:
+            if canonicalize(component_hit) != component_hit:
+                used_alias = True
+            continue
+        findings.append(
+            Finding(
+                index,
+                "unknown_entity",
+                f"{token!r} (canonical form {canonical!r}) appears in no cited fact",
+            )
+        )
 
     for iso in _iso_month_dates(text):
         if (start is not None and iso < start) or (end is not None and iso > end):

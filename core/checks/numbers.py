@@ -27,6 +27,17 @@ backtracking entirely: the interpretation step can only choose to
 extend the match or leave it alone, never reshape what the digits
 matched.
 
+The same "reject, don't slide" hazard applies to what precedes a digit
+run: an identifier like "p99", "S3" or "H100" embeds a digit run that is
+not a quantity at all, and a naive scan happily extracts "99", "3" or
+"100" from it. A negative lookbehind that excludes only letters looks
+like the fix but has the identical failure mode as the suffix lookahead
+above — the engine retries at the next character instead of rejecting
+the match, so "p99" would parse as "9" rather than nothing. Excluding
+digits and "." from the lookbehind as well closes that gap, because it
+then blocks every position inside the run, not just the first one; see
+`_TOKEN`.
+
 `values_match` compares two already-parsed values with a relative
 tolerance rather than exact equality, because a generated claim is
 usually a rounded restatement of a stored figure (`0.8312` reported as
@@ -66,7 +77,21 @@ CURRENCY: dict[str, str] = {"$": "USD", "£": "GBP", "€": "EUR"}
 # of tabs to digits that are not actually part of the same written amount;
 # a single space is the only separator that plausibly still means "this
 # symbol prefixes this number" ("$ 12 fee").
+#
+# The leading `(?<![A-Za-z0-9.])` rejects a digit run that is part of an
+# identifier rather than a standalone quantity — "p99", "S3", "H100",
+# "GPT4", "v1.2.3" — instead of matching a truncated substring of one.
+# A lookbehind of only `(?<![A-Za-z])` looks like the fix but is unsound
+# for the same reason a lookahead was rejected above: when it blocks the
+# match at one start position, `finditer` simply retries at the next
+# character rather than giving up, so "p99" would parse as "99" and
+# "H100" as "00" — a wrong value is silently produced instead of no
+# value at all. Including digits (and `.`) in the excluded class closes
+# that gap: every position inside a digit run also has a digit or `.`
+# immediately before it, so every retry inside the run is blocked too,
+# and the whole run is rejected rather than sliding to a shorter match.
 _TOKEN = re.compile(
+    r"(?<![A-Za-z0-9.])"
     r"(?P<currency>[$£€])?[ ]?"
     r"(?P<digits>\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?)"
     r"(?P<gap>\s*)"

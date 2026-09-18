@@ -37,6 +37,12 @@ functionality that is explicitly out of scope rather than merely unimplemented.
   neither a known alias nor identifier-shaped (a plausible-looking but nonexistent name in ordinary
   title case) passes through unchecked; catching that class of fabrication is a job for later
   review, not for this gate.
+- The grounding check's number matching is by value, not by occurrence: it asks "does some cited
+  fact or derivation produce this value anywhere," not "does this specific claim in the text trace
+  to this specific fact." A bullet with two independent numeric claims that happen to share a value
+  (a genuinely sourced `42` and an unrelated, fabricated `42%` in the same sentence) will ground
+  both from the one stored figure. Linking a specific span of text to a specific fact is out of
+  scope.
 - The sensitive-attribute screen on fact storage is a heuristic refusal of self-attributed
   protected attributes (e.g. "I am married", "Date of birth: ..."), not a general PII classifier;
   it may occasionally refuse legitimate text that happens to match a pattern, and the remedy is to

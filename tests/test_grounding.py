@@ -184,11 +184,13 @@ def test_false_positive_rate_on_the_measured_seven() -> None:
 
 def test_entities_known_technologies_are_checked_case_insensitively() -> None:
     cited = fact("s1", entities=["Python", "PostgreSQL"])
-    _, findings = check_bullet("Built ingestion jobs in Python against PostgreSQL", [cited])
-    assert not any(f.kind == "unknown_entity" for f in findings)
+    verdict, findings = check_bullet("Built ingestion jobs in Python against PostgreSQL", [cited])
+    assert verdict is Verdict.PASS
+    assert findings == []
 
     uncited = fact("s2", entities=[])
-    _, findings = check_bullet("Built ingestion jobs in Python against PostgreSQL", [uncited])
+    verdict, findings = check_bullet("Built ingestion jobs in Python against PostgreSQL", [uncited])
+    assert verdict is Verdict.FAIL
     entity_kinds = {f.detail for f in findings if f.kind == "unknown_entity"}
     assert len(entity_kinds) == 2
 
@@ -198,27 +200,36 @@ def test_p99_is_not_flagged_as_an_entity_but_cpp_is() -> None:
 
     Omitting it would flag 'p99' as an entity and fail a truthful latency
     bullet; only the capitalised, identifier-shaped 'C++' is checkable here.
+    Both assertions check the overall verdict, not just a finding slice: an
+    earlier version of this test only checked for the absence/presence of
+    `unknown_entity` findings and passed even while the bullet failed
+    end-to-end on an unrelated `unresolved_number` finding for '99' — a
+    defect in `parse_numbers`, since fixed, not in this gate.
     """
     uncited = fact("s3", entities=[])
-    _, findings = check_bullet("Improved p99 latency on the C++ service", [uncited])
+    verdict, findings = check_bullet("Improved p99 latency on the C++ service", [uncited])
+    assert verdict is Verdict.FAIL
     entity_findings = [f for f in findings if f.kind == "unknown_entity"]
     assert len(entity_findings) == 1
     assert "C++" in entity_findings[0].detail
 
     cited = fact("s4", entities=["C++"])
-    _, findings = check_bullet("Improved p99 latency on the C++ service", [cited])
-    assert not any(f.kind == "unknown_entity" for f in findings)
+    verdict, findings = check_bullet("Improved p99 latency on the C++ service", [cited])
+    assert verdict is Verdict.PASS
+    assert findings == []
 
 
 def test_bare_percentile_tokens_check_nothing() -> None:
     f = fact("s5", entities=[])
-    _, findings = check_bullet("Cut p50 and p95 tail latency", [f])
-    assert not any(f.kind == "unknown_entity" for f in findings)
+    verdict, findings = check_bullet("Cut p50 and p95 tail latency", [f])
+    assert verdict is Verdict.PASS
+    assert findings == []
 
 
 def test_lowercase_alias_of_a_technology_is_checked() -> None:
     f = fact("s6", entities=[])
-    _, findings = check_bullet("Tuned postgres query plans", [f])
+    verdict, findings = check_bullet("Tuned postgres query plans", [f])
+    assert verdict is Verdict.FAIL
     entity_findings = [f for f in findings if f.kind == "unknown_entity"]
     assert len(entity_findings) == 1
     assert "PostgreSQL" in entity_findings[0].detail
@@ -226,31 +237,49 @@ def test_lowercase_alias_of_a_technology_is_checked() -> None:
 
 def test_shipped_s3_and_greet_are_both_checked() -> None:
     uncited = fact("s7", entities=[])
-    _, findings = check_bullet("Shipped S3 exports and GREET updates", [uncited])
+    verdict, findings = check_bullet("Shipped S3 exports and GREET updates", [uncited])
+    assert verdict is Verdict.FAIL
     entity_findings = [f for f in findings if f.kind == "unknown_entity"]
     assert len(entity_findings) == 2
 
     cited = fact("s8", entities=["S3", "GREET"])
-    _, findings = check_bullet("Shipped S3 exports and GREET updates", [cited])
-    assert not any(f.kind == "unknown_entity" for f in findings)
+    verdict, findings = check_bullet("Shipped S3 exports and GREET updates", [cited])
+    assert verdict is Verdict.PASS
+    assert findings == []
+
+
+def test_hyphenated_compound_with_a_cited_component_passes() -> None:
+    """'S3-backed' tokenises as one word — the alias table needs hyphens kept
+    intact for 'scikit-learn' — so a whole-token match against the cited
+    entities fails even though 'S3' itself is cited. Splitting on '-' and
+    accepting a component match keeps the compound truthful without
+    dropping the hyphen from the tokeniser.
+    """
+    f = fact("s8b", entities=["S3"])
+    verdict, findings = check_bullet("Built an S3-backed store", [f])
+    assert verdict is Verdict.PASS
+    assert findings == []
 
 
 def test_ordinary_capitalised_company_names_check_nothing() -> None:
     f = fact("s9", entities=[])
-    _, findings = check_bullet("Coordinated with Northwind Analytics stakeholders", [f])
-    assert not any(f.kind == "unknown_entity" for f in findings)
+    verdict, findings = check_bullet("Coordinated with Northwind Analytics stakeholders", [f])
+    assert verdict is Verdict.PASS
+    assert findings == []
 
 
 def test_led_three_separate_teams_checks_nothing() -> None:
     f = fact("s10", entities=[])
-    _, findings = check_bullet("Led the migration across three separate teams", [f])
-    assert not any(f.kind == "unknown_entity" for f in findings)
+    verdict, findings = check_bullet("Led the migration across three separate teams", [f])
+    assert verdict is Verdict.PASS
+    assert findings == []
 
 
 def test_wrote_python_312_tooling_checks_only_python() -> None:
     f = fact("s11", entities=["Python"], numbers={"v": Quantity(value=3.12)})
-    _, findings = check_bullet("Wrote Python 3.12 tooling", [f])
-    assert not any(f.kind == "unknown_entity" for f in findings)
+    verdict, findings = check_bullet("Wrote Python 3.12 tooling", [f])
+    assert verdict is Verdict.PASS
+    assert findings == []
 
 
 # --- Ruling 2: percentages compared as magnitudes ---------------------------
@@ -318,7 +347,9 @@ def test_malformed_derivation_yields_a_finding_instead_of_raising() -> None:
     )
     verdict, findings = check_bullet("Cut something significant", [f])
     assert verdict is Verdict.FAIL
-    assert findings[0].kind == "unresolved_number"
+    # A malformed derivation names a broken artifact in the profile itself,
+    # not an unresolved number in the text, so it gets its own finding kind.
+    assert findings[0].kind == "invalid_derivation"
     assert "bogus" in findings[0].detail
 
 
