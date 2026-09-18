@@ -60,10 +60,20 @@ import re
 from collections.abc import Sequence
 from dataclasses import dataclass
 from enum import StrEnum
+from typing import TYPE_CHECKING
 
 from core.aliases import ALIAS_TABLE, canonicalize
 from core.checks.derive import DerivationError, compute, date_hull
 from core.checks.numbers import parse_numbers, values_match
+
+if TYPE_CHECKING:
+    # Only for the `check_document_gate` return annotation below. Not a
+    # module-level runtime import: `core.checks.result` imports `Verdict`
+    # and `Finding` from this module, so importing it back at load time
+    # here would be a cycle. `check_document_gate` does the real import
+    # locally, at call time, once both modules have already finished
+    # loading.
+    from core.checks.result import GateResult
 from core.profile.models import Fact
 
 _MONTHS = {
@@ -378,3 +388,24 @@ def check_document(
     if Verdict.ALIAS_MATCH in verdicts:
         return Verdict.ALIAS_MATCH, []
     return Verdict.PASS, []
+
+
+def check_document_gate(bullets: Sequence[tuple[str, Sequence[Fact]]]) -> GateResult:
+    """Ground a whole document and return the result in the shared gate shape.
+
+    `check_document`'s tuple return predates `GateResult` and is load-bearing
+    for tests already written against it, so it stays exactly as it is and
+    this wraps it, rather than the reverse — adapting its call sites would
+    have meant touching every existing test for no behavioural change.
+
+    The import is local rather than module-level to avoid a load-time cycle:
+    `core.checks.result` imports `Verdict` and `Finding` from this module, so
+    this module cannot also import `GateResult` from `core.checks.result` at
+    the top level. By the time this function is actually called, whichever
+    of the two modules loads first will have already finished loading the
+    other, so the import here always succeeds.
+    """
+    from core.checks.result import GateResult
+
+    verdict, findings = check_document(bullets)
+    return GateResult(gate="grounding", verdict=verdict, findings=findings)
