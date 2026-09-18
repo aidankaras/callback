@@ -1,4 +1,4 @@
-from core.checks.grounding import Verdict, check_bullet, check_document
+from core.checks.grounding import FindingKind, Verdict, check_bullet, check_document
 from core.profile.models import Dates, Derivation, Fact, FactKind, Provenance, Quantity, Trust
 
 PROV = Provenance(source="onboarding_answer", trust=Trust.USER_CONFIRMED)
@@ -106,6 +106,11 @@ def test_bullet_with_no_sources_fails() -> None:
     verdict, findings = check_bullet("Did something impressive", [])
     assert verdict is Verdict.FAIL
     assert findings[0].kind == "missing_source"
+    # `Finding.kind` is a `FindingKind` member, not a bare string; StrEnum
+    # equality with its string form is what keeps the assertion above (and
+    # every other `== "some_string"` comparison in this file) working
+    # unchanged now that the field is enum-typed.
+    assert findings[0].kind is FindingKind.MISSING_SOURCE
 
 
 def test_unconfirmed_import_cannot_back_a_bullet() -> None:

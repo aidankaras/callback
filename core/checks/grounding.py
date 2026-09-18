@@ -133,12 +133,28 @@ class Verdict(StrEnum):
     FAIL = "fail"
 
 
+class FindingKind(StrEnum):
+    """Every reason `check_bullet` can attach to a `Finding`.
+
+    A `StrEnum` member compares equal to its string form, so existing call
+    sites and tests that compare `finding.kind == "unresolved_number"`
+    continue to work unchanged against a member of this enum.
+    """
+
+    MISSING_SOURCE = "missing_source"
+    UNSELECTABLE_FACT = "unselectable_fact"
+    INVALID_DERIVATION = "invalid_derivation"
+    UNRESOLVED_NUMBER = "unresolved_number"
+    UNKNOWN_ENTITY = "unknown_entity"
+    UNRESOLVED_DATE = "unresolved_date"
+
+
 @dataclass(frozen=True)
 class Finding:
     """A single reason a bullet failed to ground, or a note on how it passed."""
 
     bullet_index: int
-    kind: str
+    kind: FindingKind
     detail: str
 
 
@@ -200,12 +216,16 @@ def check_bullet(
     else plain `PASS`.
     """
     if not sources:
-        return Verdict.FAIL, [Finding(index, "missing_source", "bullet cites no fact")]
+        return Verdict.FAIL, [Finding(index, FindingKind.MISSING_SOURCE, "bullet cites no fact")]
 
     unselectable = [f.id for f in sources if not f.selectable()]
     if unselectable:
         return Verdict.FAIL, [
-            Finding(index, "unselectable_fact", f"facts not confirmed by the user: {unselectable}")
+            Finding(
+                index,
+                FindingKind.UNSELECTABLE_FACT,
+                f"facts not confirmed by the user: {unselectable}",
+            )
         ]
 
     findings: list[Finding] = []
@@ -227,7 +247,7 @@ def check_bullet(
                 findings.append(
                     Finding(
                         index,
-                        "invalid_derivation",
+                        FindingKind.INVALID_DERIVATION,
                         f"derivation {derivation.label!r} could not be recomputed: {exc}",
                     )
                 )
@@ -257,7 +277,9 @@ def check_bullet(
             continue
         findings.append(
             Finding(
-                index, "unresolved_number", f"{number.raw!r} is not derivable from the cited facts"
+                index,
+                FindingKind.UNRESOLVED_NUMBER,
+                f"{number.raw!r} is not derivable from the cited facts",
             )
         )
 
@@ -298,7 +320,7 @@ def check_bullet(
                     findings.append(
                         Finding(
                             index,
-                            "unknown_entity",
+                            FindingKind.UNKNOWN_ENTITY,
                             f"{part!r} (component of {token!r}) appears in no cited fact",
                         )
                     )
@@ -312,7 +334,7 @@ def check_bullet(
         findings.append(
             Finding(
                 index,
-                "unknown_entity",
+                FindingKind.UNKNOWN_ENTITY,
                 f"{token!r} (canonical form {canonical!r}) appears in no cited fact",
             )
         )
@@ -320,7 +342,7 @@ def check_bullet(
     for iso in _iso_month_dates(text):
         if (start is not None and iso < start) or (end is not None and iso > end):
             findings.append(
-                Finding(index, "unresolved_date", f"{iso} falls outside {start}..{end}")
+                Finding(index, FindingKind.UNRESOLVED_DATE, f"{iso} falls outside {start}..{end}")
             )
 
     if findings:
