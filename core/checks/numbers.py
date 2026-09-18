@@ -7,6 +7,26 @@ must not be misread as the start of a new decimal. Everything downstream
 compares parsed values, never the original strings, so this module is
 the only place either of those distinctions gets made.
 
+The regex itself does not decide whether a letter run after a number is
+a magnitude — it only tokenises "digits, optional gap, optional letters,
+optional percent sign". A separate interpretation step in `parse_numbers`
+decides whether the letters mean anything, because that decision needs
+context a regex alone cannot apply safely: "1.2M" and "1.2 million" are
+magnitudes, but "300mph", "900ms", "1.2Mbps" and "2mm" all happen to
+start with a magnitude letter while meaning something else entirely. A
+negative lookahead after the suffix ("only attach `m` if not followed by
+another letter") looks like the fix, but is unsound in a backtracking
+engine: when the lookahead fails, the engine does not fail the suffix —
+it backtracks the *digits* group instead, so "300mph" would silently
+parse as "30" (with the trailing "0" reinterpreted as ordinary text)
+rather than cleanly failing to attach a suffix. A silently wrong value
+is worse than the collision it would have prevented, since it flows
+into a comparison that then passes or fails for the wrong reason.
+Tokenising broadly and interpreting the pieces in plain Python avoids
+backtracking entirely: the interpretation step can only choose to
+extend the match or leave it alone, never reshape what the digits
+matched.
+
 `values_match` compares two already-parsed values with a relative
 tolerance rather than exact equality, because a generated claim is
 usually a rounded restatement of a stored figure (`0.8312` reported as
@@ -18,30 +38,30 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
-MAGNITUDES: dict[str, float] = {
-    "k": 1e3,
-    "thousand": 1e3,
-    "m": 1e6,
-    "million": 1e6,
-    "mm": 1e6,
-    "b": 1e9,
-    "billion": 1e9,
-}
+WORD_MAGNITUDES: dict[str, float] = {"thousand": 1e3, "million": 1e6, "billion": 1e9}
+
+# A single-letter abbreviation only attaches when there is no whitespace
+# before it ("1.2M", "$12k", "5K"): that spacing is the ordinary written
+# convention for an abbreviation, whereas the same bare letter separated by
+# a space is far more often a unit ("300 m") than a magnitude someone chose
+# to space out. "1.2 M" is therefore deliberately NOT read as a magnitude —
+# see test_spaced_single_letter_abbreviation_is_accepted_cost.
+#
+# "mm" is deliberately absent even though it is a common finance
+# abbreviation for "million": that reading is far rarer in this domain than
+# "mm" as a millimetre/tolerance unit ("2mm tolerance"), so leaving it out
+# means that phrase parses as the literal 2 instead of silently becoming
+# two million.
+ABBR_MAGNITUDES: dict[str, float] = {"k": 1e3, "m": 1e6, "b": 1e9}
+
 CURRENCY: dict[str, str] = {"$": "USD", "£": "GBP", "€": "EUR"}
 
-# Alternation is tried left to right, so a word must appear before any
-# shorter alternative that is also a prefix of it: "million" and "mm" before
-# bare "m", "billion" before bare "b". With the reverse order "1.2 million"
-# would match only the leading "m" of "million", leaving "illion" dangling
-# outside the match (the resolved value is unaffected here because "m" and
-# "million" share a magnitude, but `raw` and `span` would be wrong).
-_NUMBER = re.compile(
+_TOKEN = re.compile(
     r"(?P<currency>[$£€])?"
     r"(?P<digits>\d{1,3}(?:,\d{3})+|\d+(?:\.\d+)?)"
-    r"\s*"
-    r"(?P<suffix>thousand|million|billion|mm|k|m|b)?"
-    r"(?P<percent>\s*%)?",
-    re.IGNORECASE,
+    r"(?P<gap>\s*)"
+    r"(?P<alpha>[A-Za-z]+)?"
+    r"(?P<percent>\s*%)?"
 )
 
 
@@ -59,28 +79,52 @@ class ParsedNumber:
 def parse_numbers(text: str) -> list[ParsedNumber]:
     """Find every quantity in `text` and resolve it to a float.
 
-    Handles thousands separators (`1,200,000`), magnitude suffixes
-    (`1.2M`, `1.2 million`), currency symbols (`$12k`) and percent signs.
-    A number with no suffix is used as literal digits — this is what
-    keeps a year like `2024` from being read as a magnitude it never
-    carries, rather than any year-specific detection.
+    Handles thousands separators (`1,200,000`), magnitude words and
+    abbreviations (`1.2M`, `1.2 million`), currency symbols (`$12k`) and
+    percent signs. A letter run immediately after a number is treated as
+    a magnitude only when it is exactly a known word (any spacing) or
+    exactly a known single-letter abbreviation with no space before it.
+    Any other letter run — a unit word ("items"), a unit that happens to
+    start with a magnitude letter ("mph", "ms", "Mbps", "mm"), or a
+    spaced single-letter abbreviation ("1.2 M") — is left untouched in
+    the source text and the number is used as literal digits. This is
+    also what keeps a year like `2024` from being read as a magnitude it
+    never carries.
     """
     out: list[ParsedNumber] = []
-    for match in _NUMBER.finditer(text):
-        digits = match.group("digits").replace(",", "")
-        value = float(digits)
-        suffix = (match.group("suffix") or "").lower()
-        if suffix:
-            value *= MAGNITUDES[suffix]
+    for match in _TOKEN.finditer(text):
+        value = float(match.group("digits").replace(",", ""))
+        alpha = match.group("alpha")
+        gap = match.group("gap") or ""
+        end = match.end("digits")
+        consumed_alpha = False
+
+        if alpha is not None:
+            alpha_lower = alpha.lower()
+            if alpha_lower in WORD_MAGNITUDES:
+                value *= WORD_MAGNITUDES[alpha_lower]
+                end = match.end("alpha")
+                consumed_alpha = True
+            elif gap == "" and len(alpha) == 1 and alpha_lower in ABBR_MAGNITUDES:
+                value *= ABBR_MAGNITUDES[alpha_lower]
+                end = match.end("alpha")
+                consumed_alpha = True
+            # Otherwise the letters are not a magnitude: leave them in the
+            # source text and do not extend the match past the digits.
+
+        percent = match.group("percent")
+        if percent is not None and (alpha is None or consumed_alpha):
+            end = match.end("percent")
+
         currency = match.group("currency")
-        unit = CURRENCY.get(currency) if currency else None
+        start = match.start("currency") if currency is not None else match.start("digits")
         out.append(
             ParsedNumber(
-                raw=match.group(0).strip(),
+                raw=text[start:end],
                 value=value,
-                unit=unit,
-                is_percent=bool(match.group("percent")),
-                span=match.span(),
+                unit=CURRENCY.get(currency) if currency else None,
+                is_percent=percent is not None,
+                span=(start, end),
             )
         )
     return out
