@@ -17,3 +17,4 @@ uselessness.
 | Note | Subsystem |
 |---|---|
 | [01 — Adversarial extraction](01-adversarial-extraction.md) | `checks/naive_extract`, `checks/roundtrip` |
+| [02 — Gate result shapes](02-gate-result-shapes.md) | `checks/result`, `checks/grounding`, `checks/roundtrip`, `checks/hidden` |
