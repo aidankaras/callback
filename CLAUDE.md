@@ -159,10 +159,17 @@ whole table of figures came to be 2–3% wrong.
 mutation evidence itself vacuous.** CPython invalidates a cached `.pyc` on the pair
 (source mtime **truncated to whole seconds**, source size). A mutate-test-revert cycle
 that rewrites a file to the same length inside one second therefore runs against stale
-bytecode: the test passes, and it looks exactly like a mutation the test failed to catch
-being reported as one it did. Measured directly — writing `VALUE = 9` over `VALUE = 1`
-within the same second imports as `1`, while `VALUE = 123` over `VALUE = 1` imports as
-`123`, because only the second changes the size.
+bytecode, and the mutation never takes effect. Measured directly — writing `VALUE = 9` over
+`VALUE = 1` within the same second imports as `1`, while `VALUE = 123` over `VALUE = 1`
+imports as `123`, because only the second changes the size.
+
+The direction of the error is worth stating, because it decides what an uncleared run is
+evidence of. A mutation that never takes effect leaves the suite green, which is
+indistinguishable from the suite genuinely failing to notice the change. So the failure
+always lands on the same side: it **manufactures survivors**. Using a mutation to prove a
+test bites, that is the conservative direction — the test looks weaker than it is and you
+strengthen something already sound. Computing a mutation score across a suite, it is not:
+the score understates the suite, and every phantom survivor invites a redundant test.
 
 This was caught here on a `1pt` → `8pt` edit in a fixture, which is size-preserving, and it
 threatens every mutation claim in this repository rather than one test. Two mutations used
