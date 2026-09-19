@@ -76,12 +76,22 @@ even if every test passes.
 
 ## Reporting standards for anyone dispatching or reviewing work here
 
+The non-negotiables above constrain what the code must do. These constrain what may be
+*claimed* about it, and each one exists because a verification can appear to have
+happened without happening.
+
 - **A claimed test count is verified independently, not trusted.** This build has already
   shipped one report that stated "28/28 full suite" passing when the real, independently
   verified count was 39/39 (Task 4) — nothing was lost, but the report was wrong, and the
   report is the only evidence a reviewer has unless they rerun the suite themselves.
   Before treating any "N passed" claim as done, run `uv run pytest -q` and read the tail
   line yourself.
+- **A mutation is run with the bytecode cache cleared, or its result means nothing.**
+  `find . -name __pycache__ -type d -exec rm -rf {} +` before each one, or
+  `PYTHONDONTWRITEBYTECODE=1`. CPython invalidates a `.pyc` on the source's size and its
+  mtime truncated to whole seconds, so a same-length edit tested within one second never
+  takes effect and the suite stays green for the wrong reason. Failure mode 7 below has the
+  measurement.
 - **Pinned Action SHAs and dependency versions are verified against the source, not
   assumed correct because they appear in a plan.** `gh api repos/<org>/<repo>/git/ref/tags/<tag>
   --jq .object.sha` before any CI change lands (this caught a wrong SHA in the plan itself
