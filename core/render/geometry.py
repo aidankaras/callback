@@ -15,12 +15,27 @@ round to the same tenth and splits lines that straddle a rounding boundary,
 in either direction, with no relationship to which lines are actually
 adjacent on the page. Measured directly on this project's own resume
 fixture, naive rounding counted a heading and its right-aligned
-date/location run — one visual line — as two. Clustering instead by a
-tolerance proportional to the font size (0.3x, per `tolerance_ratio`)
-merges words whose `top` values are close relative to the type size actually
-in use, which is what "close" needs to mean here: a 0.03pt gap is
-noise at 10pt and would still be noise at 24pt, but a fixed absolute
-tolerance tuned for one size is wrong for the other.
+date/location run — one visual line — as two. Clustering instead merges
+words whose `top` values are close in absolute points.
+
+The tolerance is **one value for the whole call**, computed as
+`tolerance_ratio * font_size` from the caller's declared body size — it is
+not re-derived per line from each line's own rendered size. That is
+deliberate rather than an omission. Scaling per line would give this
+template's 16pt centred name a 4.8pt tolerance against a body line pitch of
+5.5pt (`leading: 0.55em` at 10pt in `templates/resume.typ`), making a false
+*merge* of two genuinely adjacent lines more likely in order to fix a false
+split that no measurement exhibits: the largest same-line offset observed on
+a real render is 0.03pt, three orders of magnitude inside the tolerance at
+every size the template uses.
+
+So the number that matters to a future reader is the margin, not the ratio:
+the default 3.0pt tolerance sits against a 5.5pt line pitch, roughly 1.8x.
+A template with tighter leading than this one's — or a caller passing a
+`font_size` well above the dominant body size — is what breaks this, by
+silently collapsing two real lines into one and undercounting `line_count`.
+Neither is currently reachable; both are worth a measurement before
+changing `leading` or the default.
 
 **Why PDF geometry, not Typst introspection.** Two alternatives were tried
 before this one and both measurably fail on this project's own bullets:
@@ -81,7 +96,16 @@ class Line:
 
 @dataclass
 class BulletBlock:
-    """One bullet's marker line plus every continuation line that wraps it."""
+    """One bullet's marker line plus every continuation line that wraps it.
+
+    `page` is the page the bullet *starts* on — the marker line's page — and
+    is not updated when a continuation line wraps onto the next page. The
+    measurements are unaffected: `line_count`, `last_line_words` and `text`
+    all span the boundary correctly, because continuations attach by
+    x-position without consulting the page. Only this single field is
+    ambiguous for a cross-page bullet, so a caller doing per-page
+    attribution should read each line's own `page` rather than the block's.
+    """
 
     page: int
     lines: list[Line]
@@ -138,7 +162,12 @@ def extract_lines(
     return lines
 
 
-def bullet_blocks(lines: list[Line], *, marker: str = "\N{BULLET}") -> list[BulletBlock]:
+def bullet_blocks(
+    lines: list[Line],
+    *,
+    marker: str = "\N{BULLET}",
+    continuation_slack: float = 1.0,
+) -> list[BulletBlock]:
     """Group `lines` into bullet blocks by finding the marker glyph.
 
     A line starts a new block when its first word (by x-position) is
@@ -147,10 +176,24 @@ def bullet_blocks(lines: list[Line], *, marker: str = "\N{BULLET}") -> list[Bull
     should count. A later line joins the open block as a continuation
     when its own leftmost x-position matches the block's body
     x-position — the column the marker's template grid cell wraps
-    text into — within one point. Any other line (the next entry's
-    heading, a subheading) closes the open block by resetting the body
-    x-position tracked below, so it can't be mistaken for a further
-    continuation of a bullet that has already ended.
+    text into — within `continuation_slack` points. Any other line (the
+    next entry's heading, a subheading) closes the open block by resetting
+    the body x-position tracked below, so it can't be mistaken for a
+    further continuation of a bullet that has already ended.
+
+    `continuation_slack` is horizontal and absolute, unlike
+    `extract_lines`'s vertical tolerance, which is proportional — the two
+    are separate mechanisms and neither default is derived from the other.
+    Its 1.0pt default is safe here only because of a specific template
+    fact: `templates/resume.typ` puts the marker in its own 10pt grid
+    column (`grid(columns: (10pt, 1fr), [•], ...)`), so bullet bodies begin
+    10pt right of the flush-left x-position that section headings and
+    subheadings are typeset at. That is a 10x margin against the nearest
+    thing this test could confuse a continuation with. A template that
+    indented headings to near the bullet body column, or narrowed that grid
+    column, would need this re-measured rather than re-guessed — the
+    failure mode is a heading silently absorbed into the preceding bullet,
+    inflating its `line_count`.
 
     This depends on the marker being real, extractable text at a
     distinct x-position rather than a drawn shape — see the module
@@ -166,7 +209,7 @@ def bullet_blocks(lines: list[Line], *, marker: str = "\N{BULLET}") -> list[Bull
             body = Line(page=line.page, top=line.top, words=words[1:])
             body_x0 = body.x0 if body.words else body_x0
             blocks.append(BulletBlock(page=line.page, lines=[body]))
-        elif blocks and body_x0 is not None and abs(line.x0 - body_x0) < 1.0:
+        elif blocks and body_x0 is not None and abs(line.x0 - body_x0) < continuation_slack:
             blocks[-1].lines.append(line)
         else:
             body_x0 = None

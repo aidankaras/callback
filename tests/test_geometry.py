@@ -95,6 +95,11 @@ def test_last_line_words_support_widow_detection(pdf: Path) -> None:
     wrong line. Mutation: indexing `self.lines[0]` (the 17-word first
     line) instead of `self.lines[-1]` fails this exact-value assertion,
     where it would not have failed a `>= 1` check.
+
+    This 5 is a measured golden, not an invariant. Re-baseline it only after
+    inspecting the rendered PDF and confirming the new wrap point is
+    correct — never by loosening it back toward a bound, which would restore
+    exactly the unfalsifiable check this replaced.
     """
     blocks = bullet_blocks(extract_lines(pdf))
     assert blocks[1].last_line_words == 5
@@ -111,6 +116,11 @@ def test_page_fill_is_a_fraction(pdf: Path) -> None:
     below is tight enough to separate the two. Mutation: dropping the
     `2 * 36.0` margin subtraction in `page_fill` reliably lands outside
     this range.
+
+    This interval is a measured golden, not an invariant. Re-baseline it
+    only after inspecting the rendered PDF and confirming the new fill is
+    correct — never by widening it back toward `(0, 1)`, which would restore
+    exactly the unfalsifiable check this replaced.
     """
     fills = page_fill(pdf)
     assert len(fills) == 1
