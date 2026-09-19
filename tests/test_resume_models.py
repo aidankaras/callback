@@ -49,6 +49,21 @@ def test_a_section_cannot_hold_both_entries_and_skills() -> None:
         Section(title="Skills", entries=[Entry(heading="X")], skills=["Python"])
 
 
+def test_a_blank_skill_is_rejected() -> None:
+    with pytest.raises(ValidationError, match="a skill cannot be blank"):
+        Section(title="Skills", skills=["Python", ""])
+
+
+def test_a_whitespace_only_skill_is_rejected() -> None:
+    with pytest.raises(ValidationError, match="a skill cannot be blank"):
+        Section(title="Skills", skills=["   "])
+
+
+def test_a_skill_containing_a_comma_is_rejected() -> None:
+    with pytest.raises(ValidationError, match="split it into separate skills"):
+        Section(title="Skills", skills=["Tableau, Looker"])
+
+
 def test_resume_doc_round_trips_sources_through_sections() -> None:
     doc = ResumeDoc(
         identity=IDENTITY,

@@ -497,6 +497,16 @@ def _row_items(segment: str) -> list[str]:
     accepting `"Go"` against `"SQL, PostgreSQL, Go, Golang"` (a standalone
     item, `casefold()`-equal to the target, that `"Golang"` sitting next to
     it does not disturb).
+
+    Splitting on *every* comma in the segment is only correct because no
+    declared skill can contain one: `Section`'s own field validator
+    (`core.resume.models.Section._skills_are_single_names`) refuses a skill
+    with a comma in its own name before it can reach a document at all. A
+    skill that did carry a comma would render indistinguishably from two
+    adjacent skills (`"Tableau, Looker"` as one declared value renders
+    identically to the two values `"Tableau"` and `"Looker"`), which no
+    splitting rule applied after the fact could ever recover -- so that
+    case is closed at the model boundary rather than guarded against here.
     """
     return [normalize(item).casefold() for item in segment.split(",")]
 

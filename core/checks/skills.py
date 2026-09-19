@@ -101,6 +101,17 @@ def _mentions(form: str, text: str) -> bool:
     skill name is caller-supplied free text, not a hand-written pattern,
     and one containing a regex metacharacter (`C++`, `Node.js`) must be
     matched literally rather than interpreted.
+
+    `form` is never blank here. `synonyms(canonicalize(skill))` only ever
+    returns non-blank forms for a non-blank `skill`, and `Section`'s own
+    field validator (`core.resume.models.Section._skills_are_single_names`)
+    refuses a blank skill before it can reach a document at all -- an empty
+    pattern would make the lookaround on both sides degenerate to a
+    zero-width assertion between any two adjacent non-alphanumeric
+    characters, matching the first `", "` or double space in almost any
+    prose. This function does not guard against that state; the guard
+    belongs where the value is created, not repeated at every place that
+    later reads it.
     """
     pattern = re.compile(
         rf"(?<!{_NOT_ALNUM}){re.escape(form)}(?!{_NOT_ALNUM})",

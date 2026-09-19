@@ -18,7 +18,7 @@ unsourced bullet, which defeats the point of grounding as a whole.
 
 from __future__ import annotations
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from core.profile.models import Identity
 
@@ -75,6 +75,46 @@ class Section(BaseModel):
     title: str
     entries: list[Entry] = Field(default_factory=list[Entry])
     skills: list[str] = Field(default_factory=list[str])
+
+    @field_validator("skills")
+    @classmethod
+    def _skills_are_single_names(cls, skills: list[str]) -> list[str]:
+        """Refuse a blank skill and a skill containing its own comma.
+
+        Both are rejected here, at the point the value enters the document,
+        rather than left for something downstream to work around, because
+        neither has a recoverable meaning once accepted. A blank skill
+        contributes nothing and only ever signals a data-entry slip; keeping
+        it produces a real defect one step later, not a cosmetic one -- see
+        `core.checks.skills`'s `_mentions`, whose word-boundary lookaround
+        degenerates to a zero-width match for an empty pattern, so a blank
+        skill is reported "evidenced" by the first stray `", "` or double
+        space in any grounded bullet, while the real skill sharing its ratio
+        is pushed toward "unevidenced" in its place.
+
+        A comma-containing skill is worse than blank: it is ambiguous by
+        construction, not merely wrong. `templates/resume.typ` renders a
+        section's skills as one comma-joined run
+        (`section.skills.join(", ")`), and the round-trip gate's own skill
+        matcher (`core.checks.roundtrip._row_items`) recovers a skill by
+        splitting that run on every comma and comparing items exactly --
+        which makes "Tableau, Looker" as a *single* declared skill
+        structurally indistinguishable, once rendered, from the two
+        adjacent skills "Tableau" and "Looker". No amount of care in that
+        matcher can recover which one the author meant; only rejecting the
+        value before it is ever rendered can.
+        """
+        for skill in skills:
+            if not skill.strip():
+                raise ValueError("a skill cannot be blank")
+            if "," in skill:
+                raise ValueError(
+                    f"skill {skill!r} contains a comma; split it into separate skills "
+                    "-- a skills section renders as one comma-delimited line, so a comma "
+                    "inside a single skill's own name cannot be told apart from the "
+                    "boundary between two skills"
+                )
+        return skills
 
     @model_validator(mode="after")
     def _entries_or_skills(self) -> Section:
