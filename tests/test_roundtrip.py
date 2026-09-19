@@ -315,6 +315,14 @@ def test_dropped_location_shared_with_another_entry_is_not_recovered(tmp_path: P
     *there*. Before per-entry scoping, a document-wide search for "Boston,
     MA" found entry 1's genuine segment and reported entry 0's fabricated
     claim as recovered, passing the whole document clean.
+
+    This test exercises `location` specifically and would not notice
+    `entry_index` going missing from a different field's declaration --
+    `dates`, say. `test_identical_headings_swapped_fields_are_not_recovered`
+    is the test that holds that line: it swaps title, location *and* dates
+    between two entries at once, so losing scoping on any one of those
+    three field kinds leaves at least one of its six expected misses absent
+    and fails it.
     """
     rendered = ResumeDoc(
         identity=Identity(name="Dana Vex", email="dana@example.com", phone="+1 555 0100"),
@@ -417,6 +425,145 @@ def test_identical_headings_swapped_fields_are_not_recovered(tmp_path: Path) -> 
         "location[1]",
         "dates[1]",
     ]
+
+
+@pytest.mark.slow
+def test_entry_span_end_is_exclusive_of_the_next_anchor(tmp_path: Path) -> None:
+    """An entry's region runs up to, and does not include, the segment
+    where the next entry's own heading was found -- nothing in the suite
+    otherwise distinguishes that half-open `[start, end)` from an inclusive
+    `[start, end]` one segment wider, and a boundary with zero coverage is
+    not actually pinned down.
+
+    Entry 0 ("Northwind") has no location declared for rendering. Entry 1's
+    heading is "Contoso Analytics". The document checked here fabricates
+    entry 0's location as "Contoso Analytics" too -- equal to entry 1's
+    *heading*, specifically, because that heading's own segment is exactly
+    the one segment an off-by-one on the exclusive end would pull into
+    entry 0's region. A correct, exclusive end excludes it; entry 0's
+    region stops one segment short of entry 1's heading.
+    """
+    rendered = ResumeDoc(
+        identity=Identity(name="Dana Vex", email="dana@example.com", phone="+1 555 0100"),
+        sections=[
+            Section(
+                title="Experience",
+                entries=[
+                    Entry(
+                        heading="Northwind",
+                        start="Jun 2024",
+                        end="Aug 2025",
+                        bullets=[Bullet(text="Owned the pipeline", sources=["a"])],
+                    ),
+                    Entry(
+                        heading="Contoso Analytics",
+                        location="Boston, MA",
+                        start="Jan 2020",
+                        end="May 2023",
+                        bullets=[Bullet(text="Led the migration", sources=["b"])],
+                    ),
+                ],
+            )
+        ],
+    )
+    out = tmp_path / "span_boundary.pdf"
+    render(rendered, out)
+
+    claimed = rendered.model_copy(deep=True)
+    claimed.sections[0].entries[0].location = "Contoso Analytics"
+    result = check_roundtrip(claimed, out)
+
+    location = next(f for f in result.critical if f.field == "location[0]")
+    assert not location.recovered, (
+        f"'Contoso Analytics' was reported recovered from segment {location.segment!r}, "
+        "which is entry 1's heading, one segment past where entry 0's region should end"
+    )
+    assert result.verdict == "fail"
+
+
+@pytest.mark.slow
+def test_fabricated_name_matching_an_unrelated_employer_is_not_recovered(tmp_path: Path) -> None:
+    """Identity must be scoped to the header block for the same reason an
+    entry's fields are scoped to that entry's region: a document-wide
+    search for a fabricated name that happens to equal an unrelated entry's
+    employer name finds that entry's genuine segment and reports the
+    fabrication as recovered, passing a document whose declared identity is
+    entirely made up.
+
+    The rendered document's real name is "Dana Vex"; its one entry's
+    employer is "Foo Bar Ventures". The document checked against it claims
+    the candidate's name is "Foo Bar Ventures" -- a value that never
+    appears anywhere as a name, but is the genuine text of an unrelated
+    entry's heading.
+    """
+    rendered = ResumeDoc(
+        identity=Identity(name="Dana Vex", email="dana@example.com", phone="+1 555 0100"),
+        sections=[
+            Section(
+                title="Experience",
+                entries=[
+                    Entry(
+                        heading="Foo Bar Ventures",
+                        location="Boston, MA",
+                        start="Jun 2024",
+                        end="Aug 2025",
+                        bullets=[Bullet(text="Owned the pipeline", sources=["a"])],
+                    )
+                ],
+            )
+        ],
+    )
+    out = tmp_path / "fabricated_name.pdf"
+    render(rendered, out)
+
+    claimed = rendered.model_copy(deep=True)
+    claimed.identity.name = "Foo Bar Ventures"
+    result = check_roundtrip(claimed, out)
+
+    name = next(f for f in result.critical if f.field == "name")
+    assert not name.recovered, (
+        f"'Foo Bar Ventures' was reported recovered from segment {name.segment!r}, "
+        "which is the entry's heading, not the header"
+    )
+    assert result.verdict == "fail"
+
+
+@pytest.mark.slow
+def test_name_whose_surname_appears_inside_an_employer_name_still_passes(
+    tmp_path: Path,
+) -> None:
+    """Scoping identity to the header block must not break the ordinary
+    case it could plausibly interfere with: a candidate's surname
+    legitimately reappearing inside an employer's name (a common surname,
+    or simple coincidence) is not itself suspicious, and the header block
+    is defined widely enough -- everything before the first entry anchor --
+    that the genuine name in its own header segment is found there directly
+    rather than needing to compete with the later, unrelated occurrence.
+    """
+    doc = ResumeDoc(
+        identity=Identity(name="Jordan Reed", email="jordan@example.com", phone="+1 555 0100"),
+        sections=[
+            Section(
+                title="Experience",
+                entries=[
+                    Entry(
+                        heading="Reed Analytics",
+                        location="Boston, MA",
+                        start="Jun 2024",
+                        end="Aug 2025",
+                        bullets=[Bullet(text="Owned the pipeline", sources=["a"])],
+                    )
+                ],
+            )
+        ],
+    )
+    out = tmp_path / "legit_surname.pdf"
+    render(doc, out)
+    result = check_roundtrip(doc, out)
+
+    name = next(f for f in result.critical if f.field == "name")
+    assert name.recovered, "a name legitimately echoed in an employer name was not recovered"
+    assert result.verdict == "pass", result.findings
 
 
 @pytest.mark.slow

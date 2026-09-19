@@ -128,21 +128,30 @@ def build_two_column_resume(
     `build`'s caller checking the word count in the page's right half.
 
     `entries` is capped below 22 deliberately, not just chosen for a round
-    number. Once `check_roundtrip` scopes an entry's non-heading fields to
-    the region between its own anchor and the next one it can find (see
-    `core.checks.roundtrip`'s module docstring), a heavily scrambled layout
-    can interleave rows from a *different* entry into the middle of what
-    should be one entry's own three-row block -- measured at `entries=24`:
-    one entry's subheading lands physically between another entry's heading
-    row and that first entry's own dates row, so it falls outside the span
-    its own anchor opens, and `char_ratio` drops to 0.9794, just under the
-    gate's own 0.98 threshold. That is a real, secondary consequence of
-    fixing the recovery-scoping defect, not a bug in this fixture -- but it
-    means a 24-entry version of this fixture fails on three axes at once
-    (order, one recovery miss, and a borderline ratio) instead of cleanly
-    isolating order, which is what a caller checking that specific claim
-    needs. `entries=20` was the largest count checked that still isolates
-    cleanly: 0 critical misses, `char_ratio == 1.0` exactly, single page.
+    number. Past that count, this fixture is the real render that exercises
+    the imprecision `core.checks.roundtrip._entry_spans` documents on
+    itself: when several consecutive entries in the middle of the scramble
+    all fail their own forward-cursor anchor search, the entry just before
+    that run does not get a span bounded by its true neighbour -- it gets
+    one bounded by whichever later entry's anchor search happens to succeed
+    next, wherever that lands. `_entry_spans`'s own docstring describes the
+    failure this produces as a widened span *absorbing* a neighbour's
+    content; measured here, at `entries=24`, the same mechanism produces
+    the opposite-looking symptom -- one entry's own subheading falls just
+    *outside* the boundary that landed short of it -- because in this
+    specific scramble the next entry whose anchor search succeeds happens
+    to be found earlier than that subheading's real position, not later.
+    Both are the same root cause wearing different faces: a span boundary
+    chosen by skipping past failed anchors does not reliably track where an
+    entry's own content actually is once enough consecutive anchors fail in
+    a row. This is not a bug in this fixture to route around -- it is this
+    fixture demonstrating a real, documented property of the gate -- but it
+    does mean a 24-entry version fails on three axes at once (order, one
+    recovery miss, and a borderline ratio, `0.9794` against a `0.98`
+    threshold) instead of isolating order alone, which is what a caller
+    checking that specific claim needs. `entries=20` was the largest count
+    checked that still isolates cleanly: 0 critical misses, `char_ratio ==
+    1.0` exactly, single page.
 
     The document's fields are injected as a JSON literal decoded inside the
     Typst source, exactly as `core.render.typst.build_source` does, rather

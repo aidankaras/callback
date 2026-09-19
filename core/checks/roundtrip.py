@@ -48,9 +48,28 @@ position, or the end of the document for the last entry. An entry whose own
 heading could not be found forward of the cursor has no region to scope
 into; its other fields fall back to a document-wide search rather than
 being reported as a pile of unrelated recovery failures on top of the one
-real ordering problem. Identity fields (name, email, phone) and a section's
-title belong to no entry and stay document-scoped, since nothing in the
-model claims otherwise.
+real ordering problem.
+
+Identity fields (name, email, phone) get the same treatment for the same
+reason, scoped to the header block instead of an entry's region: the
+region running from the start of the document up to the first entry anchor
+that was actually found. A document-wide search for a fabricated name that
+happens to equal an unrelated entry's employer name would find that
+entry's genuine segment and report the fabrication as recovered -- the
+identical failure shape as an entry's dropped location being covered for by
+a different entry's identical city, just one level up. The header's end is
+defined by the first *found* anchor, not a fixed row count, so a template
+that adds a summary line above the first entry still gets a correctly
+sized header region rather than one hard-coded to today's layout. When no
+entry anchor was found at all (a document with no entries, or one where
+every entry's own heading search failed), identity falls back to a
+document-wide search too, since there is then no entry region for an
+identity value to be mistaken for.
+
+A section's title is not treated as an identity field and stays
+document-scoped: it belongs to no entry either, but nothing yet has shown a
+section title colliding with an entry's content the way a name or a
+location can.
 
 `char_ratio` compares like with like: the summed length of every string the
 document declares that a naive parser actually recovered, over the summed
@@ -74,7 +93,15 @@ with `char_ratio` measuring 0.5982 and the heading itself unrecovered.
 Loosening matching to reassemble that heading across segments would defeat
 the entire premise this gate checks -- a naive parser reading the same PDF
 cannot do it either -- so a future reader who sees this as a failing case
-and reaches for a "fix" should reread this paragraph first.
+and reaches for a "fix" should reread this paragraph first. The same
+outcome is reachable from a second direction that touches no code in this
+module at all: raising `y_tolerance` or `gap_factor` in
+`core.checks.naive_extract.naive_segments` would re-merge the wrapped rows
+into fewer, wider bands, at which point this module's own matching would
+find the whole heading intact and pass it. That change would not be a fix
+either -- it would make the pessimistic extractor a better reader than the
+naive baseline it exists to approximate, which is the same regression its
+own module docstring already warns against for the two-column fixture.
 """
 
 from __future__ import annotations
@@ -145,15 +172,18 @@ class _Declared:
     and a naive parser was asked to recover.
 
     `entry_index` is `None` for a field that belongs to no entry (identity,
-    a section's title) and is searched document-wide; otherwise it names
-    which entry's region (see `check_roundtrip`) the field must be found
-    within. `is_anchor` marks the one field per entry -- its heading -- that
-    defines that region rather than being searched inside it: an entry's
-    own heading is always searched document-wide too, because scoping it to
-    "its own region" would be circular, and because whether a naive parser
-    can find a heading *anywhere* is a question independent of whether it
-    can find it in the declared reading position (see the module docstring
-    on why recovery and order are checked separately).
+    a section's title); otherwise it names which entry's region (see
+    `check_roundtrip`) the field must be found within. `is_anchor` marks the
+    one field per entry -- its heading -- that defines that region rather
+    than being searched inside it: an entry's own heading is always
+    searched document-wide, because scoping it to "its own region" would be
+    circular, and because whether a naive parser can find a heading
+    *anywhere* is a question independent of whether it can find it in the
+    declared reading position (see the module docstring on why recovery and
+    order are checked separately). `is_identity` marks `name`, `email` and
+    `phone` for the header-block scoping described in the module
+    docstring; a section's title has `entry_index=None` too but
+    `is_identity=False`, and stays on an unscoped, document-wide search.
     """
 
     field: str
@@ -161,15 +191,16 @@ class _Declared:
     critical: bool
     entry_index: int | None = None
     is_anchor: bool = False
+    is_identity: bool = False
 
 
 def _declared_fields(doc: ResumeDoc) -> list[_Declared]:
     out: list[_Declared] = [
-        _Declared("name", doc.identity.name, critical=True),
-        _Declared("email", doc.identity.email, critical=True),
+        _Declared("name", doc.identity.name, critical=True, is_identity=True),
+        _Declared("email", doc.identity.email, critical=True, is_identity=True),
     ]
     if doc.identity.phone:
-        out.append(_Declared("phone", doc.identity.phone, critical=True))
+        out.append(_Declared("phone", doc.identity.phone, critical=True, is_identity=True))
     index = 0
     for section_index, section in enumerate(doc.sections):
         out.append(_Declared(f"section_title[{section_index}]", section.title, critical=False))
@@ -249,27 +280,36 @@ def _matches(value: str, segment: str, declared_values: Sequence[str]) -> bool:
     and each is closed elsewhere rather than here. First, it exempts equal
     values (`w != v`) so that legitimately repeated content (several
     entries sharing one date span) doesn't block itself, but that same
-    exemption means two *equal* values belonging to two different entries
-    -- a location genuinely missing from entry 0, satisfied by an identical
-    city that legitimately belongs to entry 1 -- pass straight through this
-    function unblocked; `check_roundtrip` closes that gap by scoping each
-    entry's fields to that entry's own region of the page (see the module
-    docstring), not by anything this function does. Second, this function
-    only ever inspects one segment at a time, so a value that spans several
-    segments (a heading long enough to wrap across two or three rows) never
-    appears whole in any single segment and so never reaches the point
-    where this rule would even apply -- that case fails for an unrelated
-    reason (see the module docstring's closing paragraph), not because this
-    rule caught or missed anything.
+    exemption means two *equal* values that the document declares in two
+    logically distinct places pass straight through this function
+    unblocked. That has shown up twice, in the same shape: a location
+    genuinely missing from entry 0, satisfied by an identical city that
+    legitimately belongs to entry 1, and a fabricated name equal to an
+    unrelated entry's employer name, satisfied by that entry's own segment.
+    Neither is a defect in this function to fix -- `check_roundtrip` closes
+    both by deciding, before it ever calls this function, which segments a
+    given value is even allowed to be searched against (an entry's own
+    region, or the header block before the first entry, via `_find`'s
+    `start`/`end`); this function has no notion of "region" at all and
+    reasons about the segment it is handed on its own terms. Second, this
+    function only ever inspects one segment at a time, so a value that
+    spans several segments (a heading long enough to wrap across two or
+    three rows) never appears whole in any single segment and so never
+    reaches the point where this rule would even apply -- that case fails
+    for an unrelated reason (see the module docstring's closing
+    paragraphs), not because this rule caught or missed anything.
 
-    Within what it does check, this rule can refuse a legitimate match, but
-    it cannot grant an illegitimate one: a segment reading `"NY Ops Lead in
-    NY"` contains both the longer declared value `"NY Ops Lead"` and a
-    genuinely separate, standalone `"NY"` later in the same segment, and
-    this function refuses the shorter value's match there anyway, because
-    it reasons about whole-segment containment and cannot tell those two
-    occurrences of "NY" apart. A missed recovery is the safe direction for
-    a gate whose job is to reject documents it cannot vouch for, so that
+    Within what it does check -- whether `value` is a legitimate reading of
+    one specific `segment`, given competing declared values that might also
+    be present in that same segment -- this rule can refuse a legitimate
+    match, but it cannot grant an illegitimate one: a segment reading `"NY
+    Ops Lead in NY"` contains both the longer declared value `"NY Ops
+    Lead"` and a genuinely separate, standalone `"NY"` later in the same
+    segment, and this function refuses the shorter value's match there
+    anyway, because it reasons about whole-segment containment and cannot
+    tell those two occurrences of "NY" apart. A missed recovery is the safe
+    direction for a gate whose job is to reject documents it cannot vouch
+    for, so that
     spurious failure is accepted here rather than chased with position
     tracking this module does not otherwise need.
     """
@@ -317,11 +357,36 @@ def _entry_spans(anchors: list[int | None], flat_len: int) -> list[tuple[int, in
 
     An entry's region starts at its own anchor and runs to the *next*
     anchor that was actually found, skipping over any entry in between
-    whose own heading search failed -- an entry with no anchor of its own
-    contributes no boundary, but does not widen its neighbours' regions
-    either; it simply has no region (`None`), and `check_roundtrip` falls
-    that entry's other fields back to a document-wide search instead of
-    scoping them to a region no anchor supports.
+    whose own heading search failed. That skip is a real, accepted
+    imprecision, not an oversight: an entry with no anchor of its own
+    contributes no boundary of its own, but it does not shrink to nothing
+    either -- the *previous found* entry's region silently widens to reach
+    past it, absorbing whatever segments the skipped entry's own rows
+    occupy. Checked against a real 22-entry two-column render where this
+    happens (see `tests.fixtures.make_two_column`): the widened region
+    absorbs a *different* entry's genuine subheading and bullet, so a
+    fabricated value equal to that neighbour's real content would be
+    reported recovered even though it does not belong to the entry whose
+    region grew to include it.
+
+    This cannot flip the document's aggregate verdict: whichever entry's
+    anchor search failed still independently trips something, on the
+    heading itself -- either `out_of_order` (present, just not reachable
+    forward of the cursor) or a `critical` recovery miss on its
+    `employer[i]` entry (not present anywhere at all). One of those two
+    always fires when an anchor is `None`, so the document does not pass
+    clean. What is not reliable in that situation is *per-field*
+    attribution: a `FieldResult.recovered=True` next to the wrong entry, or
+    a `char_ratio` nudged upward by content that was never really that
+    entry's, are both possible, and a non-critical field (a bullet) that
+    gets silently absorbed this way produces no signal at all, critical or
+    otherwise. Closing this would mean tracking which segments an earlier
+    entry's search has already consumed so a later one can't be credited
+    with them -- position-tracking machinery this module does not
+    otherwise need, for a case that already cannot pass a document clean.
+    The verdict is sound; do not read a passing `FieldResult` for a
+    specific field as proof that field's own value was what was actually
+    found there.
     """
     spans: list[tuple[int, int] | None] = []
     for i, position in enumerate(anchors):
@@ -379,11 +444,23 @@ def check_roundtrip(doc: ResumeDoc, pdf_path: Path) -> RoundTripResult:
             cursor = position + 1
     spans = _entry_spans(anchors, len(flat))
 
+    # The header block: everything before the first entry anchor that was
+    # actually found. `None` (no entry anchor found at all -- no entries,
+    # or every entry's own heading search failed) means there is no entry
+    # region for an identity value to be confused with, so identity falls
+    # back to an unscoped search -- `_find`'s own `end=None` already means
+    # "search to the end of `flat`", so passing `first_anchor` straight
+    # through as `end` gives the fallback for free.
+    first_anchor = next((a for a in anchors if a is not None), None)
+
     positions: dict[str, int | None] = {}
     for d in declared:
+        if d.is_identity:
+            positions[d.field] = _find(d.value, flat, declared_values, end=first_anchor)
+            continue
         if d.entry_index is None or d.is_anchor:
-            # Document-scoped: identity, a section's title, or an entry's
-            # own heading (which cannot be scoped to a region it is what
+            # Document-scoped: a section's title, or an entry's own
+            # heading (which cannot be scoped to a region it is what
             # defines).
             positions[d.field] = _find(d.value, flat, declared_values)
             continue
