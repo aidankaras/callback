@@ -91,14 +91,25 @@ jobs:
                that have been amended more than twice for what looks like the same
                class of defect -- a fix that recurs in one file is a design
                problem, not a sequence of unrelated bugs.
-            7. Prose by audience: identify any section that must orient a reader
+            7. Dependency reality: every third-party module imported by shipped
+               code under `core/` must resolve from the declared non-optional
+               dependencies in `pyproject.toml`, not from the development
+               environment. Check the import list against
+               `project.dependencies` specifically -- `[dependency-groups]`
+               and any optional extra do not count, because a consumer
+               installing the package does not get them. This is invisible to
+               CI by construction: CI installs the dev group, so a module that
+               only an extra provides imports fine there and fails on a user's
+               machine. State the import list you checked and where each name
+               is declared.
+            8. Prose by audience: identify any section that must orient a reader
                unfamiliar with the code versus one written for a reader who will
                check the arithmetic or the exception types by hand, and flag any
                passage whose register fits neither -- too vague to verify, or too
                dense to orient.
 
             Write your findings to reports/standards-audit.md, organized by these
-            seven properties. For each one, either cite the specific file, line
+            eight properties. For each one, either cite the specific file, line
             range, or test name that demonstrates a finding, or say plainly that
             you found nothing demonstrable in that category -- do not manufacture
             a finding to look thorough; a report that invents problems trains its
@@ -125,7 +136,7 @@ jobs:
             echo "::error::$report is $bytes bytes, too small to be a real audit"
             exit 1
           fi
-          for n in 1 2 3 4 5 6 7; do
+          for n in 1 2 3 4 5 6 7 8; do
             grep -q "^#\+ *$n\.\|^$n\." "$report" || \
               echo "::warning::no section found for claimed property $n"
           done
