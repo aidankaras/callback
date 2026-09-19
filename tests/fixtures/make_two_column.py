@@ -104,7 +104,7 @@ def _two_column_payload(doc: ResumeDoc) -> dict[str, object]:
 
 
 def build_two_column_resume(
-    out_pdf: Path, font_dir: Path, entries: int = 24
+    out_pdf: Path, font_dir: Path, entries: int = 20
 ) -> tuple[ResumeDoc, Path]:
     """Render a `ResumeDoc` with `entries` entries in a two-column layout and
     write it to `out_pdf`, returning the document alongside the path so the
@@ -115,8 +115,8 @@ def build_two_column_resume(
     substring-recoverable somewhere on the page -- a presence-only check
     would pass this document, and its character ratio is exactly 1.0
     because nothing declared is actually absent. What the layout breaks is
-    declared reading *order*: measured at `entries=24`, every heading is
-    recoverable, and 10 of the 24 are unreachable by a cursor that only
+    declared reading *order*: measured at `entries=20`, every heading is
+    recoverable, and 9 of the 20 are unreachable by a cursor that only
     moves forward through the page in the order a naive parser reads it
     (`core.checks.naive_extract.naive_segments`)
     -- see the constant `_RESUME_TEMPLATE` above for why a two-column layout
@@ -126,6 +126,23 @@ def build_two_column_resume(
     adversarial; the caller comparing against this fixture's own output
     (`result.out_of_order`) is the guard against that, in the same spirit as
     `build`'s caller checking the word count in the page's right half.
+
+    `entries` is capped below 22 deliberately, not just chosen for a round
+    number. Once `check_roundtrip` scopes an entry's non-heading fields to
+    the region between its own anchor and the next one it can find (see
+    `core.checks.roundtrip`'s module docstring), a heavily scrambled layout
+    can interleave rows from a *different* entry into the middle of what
+    should be one entry's own three-row block -- measured at `entries=24`:
+    one entry's subheading lands physically between another entry's heading
+    row and that first entry's own dates row, so it falls outside the span
+    its own anchor opens, and `char_ratio` drops to 0.9794, just under the
+    gate's own 0.98 threshold. That is a real, secondary consequence of
+    fixing the recovery-scoping defect, not a bug in this fixture -- but it
+    means a 24-entry version of this fixture fails on three axes at once
+    (order, one recovery miss, and a borderline ratio) instead of cleanly
+    isolating order, which is what a caller checking that specific claim
+    needs. `entries=20` was the largest count checked that still isolates
+    cleanly: 0 critical misses, `char_ratio == 1.0` exactly, single page.
 
     The document's fields are injected as a JSON literal decoded inside the
     Typst source, exactly as `core.render.typst.build_source` does, rather

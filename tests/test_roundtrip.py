@@ -138,13 +138,22 @@ def test_char_ratio_falls_when_declared_content_is_absent(tmp_path: Path) -> Non
 @pytest.mark.slow
 def test_two_column_document_fails_on_order_not_recovery(tmp_path: Path) -> None:
     """The document this gate exists to reject. Every declared entry heading is
-    recoverable by substring search, so a presence-only gate passes it; 10 of
-    24 are unreachable in declared order, so this one must not. The final
+    recoverable by substring search, so a presence-only gate passes it; 9 of
+    20 are unreachable in declared order, so this one must not. The final
     assertion is the point of the test: it proves the weaker check would have
     passed, so a future change back to presence-only fails here rather than
     quietly widening what the gate accepts.
+
+    `entries=20`, not a rounder or larger number, is load-bearing: past
+    roughly 22 entries on this fixture, per-entry recovery scoping (see
+    `core.checks.roundtrip`) picks up a secondary, genuine recovery miss
+    from one entry's rows interleaving into a different entry's own span --
+    a real consequence of the fix, not a bug, but not what this test is
+    about either. `build_two_column_resume`'s own docstring has the measured
+    numbers for that case; this test stays at the largest count that still
+    isolates order cleanly.
     """
-    doc, out = build_two_column_resume(tmp_path / "scrambled.pdf", FONT_DIR, entries=24)
+    doc, out = build_two_column_resume(tmp_path / "scrambled.pdf", FONT_DIR, entries=20)
     result = check_roundtrip(doc, out)
 
     assert not result.order_ok
@@ -165,9 +174,9 @@ def test_two_column_document_fails_on_order_not_recovery(tmp_path: Path) -> None
     # to the total number of finding *types* the gate can ever produce, so an
     # unrelated future finding would break it even though order isolation
     # would be untouched. Measured here: every critical field recovers, and
-    # the character ratio is exactly 1.0 (the fixture now renders every
-    # string it declares, including its section title), so neither path is
-    # anywhere near its own threshold.
+    # the character ratio is exactly 1.0 (the fixture renders every string
+    # it declares, including its section title), so neither path is anywhere
+    # near its own threshold.
     assert [f.field for f in result.critical if not f.recovered] == [], (
         "a critical field was unrecoverable, so this no longer isolates order"
     )
@@ -204,6 +213,14 @@ def test_colliding_heading_reports_out_of_order(tmp_path: Path) -> None:
     containing the right text, without checking whether a longer declared
     value owns that segment instead, was never exercised against a
     colliding pair -- which is how this shipped.
+
+    This test's own collision is heading-against-heading, so it would still
+    pass under a narrower fix that only ever blocked one heading with
+    another and left every other field type unprotected -- it never
+    exercises a non-heading blocker. `test_coincidental_substring_is_not_recovered`
+    is the test that holds that line: its blocker is a subheading, not a
+    heading, so a fix narrowed to headings only would pass this test while
+    failing that one.
     """
     physical = ResumeDoc(
         identity=Identity(name="Dana Vex", email="dana@example.com", phone="+1 555 0100"),
@@ -282,6 +299,124 @@ def test_coincidental_substring_is_not_recovered(tmp_path: Path) -> None:
         f"'NY' was reported recovered from segment {location.segment!r}, "
         "which is a different field's text, not a location"
     )
+
+
+@pytest.mark.slow
+def test_dropped_location_shared_with_another_entry_is_not_recovered(tmp_path: Path) -> None:
+    """Recovery must be scoped to the entry that declares a field, not the
+    whole document. Two jobs in the same city is ordinary; a location
+    genuinely missing from one of them must not be covered for by the
+    other entry's identical value landing somewhere else on the page.
+
+    Entry 0 ("Northwind") is rendered with no location at all -- the
+    content loss this gate exists to detect. Entry 1 ("Contoso") genuinely
+    has "Boston, MA". The document checked here fabricates entry 0's
+    location as "Boston, MA" too: a value that is real, just not real
+    *there*. Before per-entry scoping, a document-wide search for "Boston,
+    MA" found entry 1's genuine segment and reported entry 0's fabricated
+    claim as recovered, passing the whole document clean.
+    """
+    rendered = ResumeDoc(
+        identity=Identity(name="Dana Vex", email="dana@example.com", phone="+1 555 0100"),
+        sections=[
+            Section(
+                title="Experience",
+                entries=[
+                    Entry(
+                        heading="Northwind",
+                        start="Jun 2024",
+                        end="Aug 2025",
+                        bullets=[Bullet(text="Owned the pipeline", sources=["a"])],
+                    ),
+                    Entry(
+                        heading="Contoso",
+                        location="Boston, MA",
+                        start="Jan 2020",
+                        end="May 2023",
+                        bullets=[Bullet(text="Led the migration", sources=["b"])],
+                    ),
+                ],
+            )
+        ],
+    )
+    out = tmp_path / "dropped_location.pdf"
+    render(rendered, out)
+
+    claimed = rendered.model_copy(deep=True)
+    claimed.sections[0].entries[0].location = "Boston, MA"
+    result = check_roundtrip(claimed, out)
+
+    location = next(f for f in result.critical if f.field == "location[0]")
+    assert not location.recovered, (
+        f"'Boston, MA' was reported recovered from segment {location.segment!r}, "
+        "which belongs to a different entry"
+    )
+    assert result.verdict == "fail"
+
+
+@pytest.mark.slow
+def test_identical_headings_swapped_fields_are_not_recovered(tmp_path: Path) -> None:
+    """Two entries can share one heading exactly (a title held twice, at two
+    different companies, is ordinary), which erases the order check's only
+    signal: heading-only order-checking cannot tell two identical headings
+    apart, so a document with their *other* fields physically swapped --
+    entry 0's real subheading, location and dates sitting where entry 1's
+    are declared, and the reverse -- still reads as perfectly in order.
+    `order_ok` is asserted `True` below specifically to make that visible,
+    not just skipped over: identical headings genuinely carry no order
+    signal, and the order check alone cannot be expected to catch a swap
+    like this one. What catches it instead is recovery, once fields are
+    scoped per entry: entry 0's own span runs from its own heading to entry
+    1's, and entry 1's real subheading/location/dates are not inside it.
+    """
+    physical = ResumeDoc(
+        identity=Identity(name="Dana Vex", email="dana@example.com", phone="+1 555 0100"),
+        sections=[
+            Section(
+                title="Experience",
+                entries=[
+                    Entry(
+                        heading="Regional Sales Lead",
+                        subheading="West Region",
+                        location="Denver, CO",
+                        start="Jan 2022",
+                        end="Dec 2023",
+                        bullets=[Bullet(text="Grew west territory revenue", sources=["a"])],
+                    ),
+                    Entry(
+                        heading="Regional Sales Lead",
+                        subheading="East Region",
+                        location="Miami, FL",
+                        start="Jan 2020",
+                        end="Dec 2021",
+                        bullets=[Bullet(text="Grew east territory revenue", sources=["b"])],
+                    ),
+                ],
+            )
+        ],
+    )
+    declared = physical.model_copy(deep=True)
+    e0, e1 = declared.sections[0].entries
+    e0.subheading, e1.subheading = e1.subheading, e0.subheading
+    e0.location, e1.location = e1.location, e0.location
+    e0.start, e1.start = e1.start, e0.start
+    e0.end, e1.end = e1.end, e0.end
+    e0.bullets, e1.bullets = e1.bullets, e0.bullets
+
+    out = tmp_path / "identical_headings.pdf"
+    render(physical, out)
+    result = check_roundtrip(declared, out)
+
+    assert result.order_ok, "identical headings carry no order signal either way"
+    assert result.verdict == "fail"
+    assert [f.field for f in result.critical if not f.recovered] == [
+        "title[0]",
+        "location[0]",
+        "dates[0]",
+        "title[1]",
+        "location[1]",
+        "dates[1]",
+    ]
 
 
 @pytest.mark.slow

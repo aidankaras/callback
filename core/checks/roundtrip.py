@@ -19,8 +19,8 @@ document can fail either one without failing the other:
   substring-recoverable while still destroying this -- the content stream
   and a position-based reader disagree about which text comes first, and a
   presence-only check cannot tell the two cases apart. Measured on a
-  24-entry two-column fixture (`tests.fixtures.make_two_column`): every
-  declared entry heading is recoverable by substring search, while 10 of
+  20-entry two-column fixture (`tests.fixtures.make_two_column`): every
+  declared entry heading is recoverable by substring search, while 9 of
   them are unreachable in declared order.
 
 Order is checked across entries, by heading only, not within an entry: the
@@ -34,6 +34,24 @@ date span and one location is ordinary); independent first-match lookup
 would resolve every repeated value back to the first entry that used it and
 manufacture inversions in a document that reads perfectly in order.
 
+Every other entry-owned field (subheading, location, dates, bullets) is
+recovered only from *its own entry's region* of the page, not from anywhere
+in the document. Searching the whole document for each field independently
+means a value missing from entry 0 can be satisfied by an identical value
+that legitimately belongs to entry 1 -- two jobs in the same city is
+ordinary, and a location genuinely dropped from one of them must not be
+covered for by the other one's. An entry's region runs from its own
+heading's position (found by the same forward-moving cursor the order
+check uses, advanced strictly past that position so two entries sharing one
+heading still claim two different regions) to the next entry's heading
+position, or the end of the document for the last entry. An entry whose own
+heading could not be found forward of the cursor has no region to scope
+into; its other fields fall back to a document-wide search rather than
+being reported as a pile of unrelated recovery failures on top of the one
+real ordering problem. Identity fields (name, email, phone) and a section's
+title belong to no entry and stay document-scoped, since nothing in the
+model claims otherwise.
+
 `char_ratio` compares like with like: the summed length of every string the
 document declares that a naive parser actually recovered, over the summed
 length of everything it declares (every critical field, plus section titles
@@ -42,6 +60,21 @@ what "recoverable" means for the document as a whole). Comparisons are
 casefolded throughout, because the template renders section titles through
 `upper()` -- that is a rendering decision the gate should not punish as
 content loss.
+
+A value long enough to wrap across several rows is reported unrecovered,
+and that is correct, not a bug to chase away: matching only ever looks
+inside one segment at a time (see `_matches`), and a naive, position-based
+reader has no more ability to reassemble a heading split across rows than
+this gate does. Checked against its own render, a heading that wraps across
+three rows with the location column interleaved between its fragments
+(`'Company 12 Extended International A Truly Extremely Long City Name
+Metropolitan Area, Massachusetts March 2021 - April 2022'` /
+`'Holdings Group Corporation'` / `'Worldwide Services Division'`) fails
+with `char_ratio` measuring 0.5982 and the heading itself unrecovered.
+Loosening matching to reassemble that heading across segments would defeat
+the entire premise this gate checks -- a naive parser reading the same PDF
+cannot do it either -- so a future reader who sees this as a failing case
+and reaches for a "fix" should reread this paragraph first.
 """
 
 from __future__ import annotations
@@ -53,7 +86,7 @@ from pathlib import Path
 import pdfplumber
 
 from core.checks.naive_extract import naive_segments, normalize
-from core.resume.models import ResumeDoc
+from core.resume.models import Entry, ResumeDoc
 
 # Below this fraction of declared characters recovered, the document is
 # failing to survive being read by a naive parser even where individual
@@ -110,11 +143,24 @@ class _Declared:
     concern, not a hard failure on its own -- but still count toward what
     `char_ratio` measures, since they are still text the document declared
     and a naive parser was asked to recover.
+
+    `entry_index` is `None` for a field that belongs to no entry (identity,
+    a section's title) and is searched document-wide; otherwise it names
+    which entry's region (see `check_roundtrip`) the field must be found
+    within. `is_anchor` marks the one field per entry -- its heading -- that
+    defines that region rather than being searched inside it: an entry's
+    own heading is always searched document-wide too, because scoping it to
+    "its own region" would be circular, and because whether a naive parser
+    can find a heading *anywhere* is a question independent of whether it
+    can find it in the declared reading position (see the module docstring
+    on why recovery and order are checked separately).
     """
 
     field: str
     value: str
     critical: bool
+    entry_index: int | None = None
+    is_anchor: bool = False
 
 
 def _declared_fields(doc: ResumeDoc) -> list[_Declared]:
@@ -128,30 +174,49 @@ def _declared_fields(doc: ResumeDoc) -> list[_Declared]:
     for section_index, section in enumerate(doc.sections):
         out.append(_Declared(f"section_title[{section_index}]", section.title, critical=False))
         for entry in section.entries:
-            out.append(_Declared(f"employer[{index}]", entry.heading, critical=True))
+            out.append(
+                _Declared(
+                    f"employer[{index}]",
+                    entry.heading,
+                    critical=True,
+                    entry_index=index,
+                    is_anchor=True,
+                )
+            )
             if entry.subheading:
-                out.append(_Declared(f"title[{index}]", entry.subheading, critical=True))
+                out.append(
+                    _Declared(f"title[{index}]", entry.subheading, critical=True, entry_index=index)
+                )
             if entry.location:
-                out.append(_Declared(f"location[{index}]", entry.location, critical=True))
+                out.append(
+                    _Declared(
+                        f"location[{index}]", entry.location, critical=True, entry_index=index
+                    )
+                )
             if entry.start:
                 span = f"{entry.start} - {entry.end}" if entry.end else entry.start
-                out.append(_Declared(f"dates[{index}]", span, critical=True))
+                out.append(_Declared(f"dates[{index}]", span, critical=True, entry_index=index))
             for bullet_index, bullet in enumerate(entry.bullets):
                 out.append(
-                    _Declared(f"bullet[{index}][{bullet_index}]", bullet.text, critical=False)
+                    _Declared(
+                        f"bullet[{index}][{bullet_index}]",
+                        bullet.text,
+                        critical=False,
+                        entry_index=index,
+                    )
                 )
             index += 1
     return out
 
 
-def _entry_headings(doc: ResumeDoc) -> list[str]:
-    """Every entry's heading, in declared order, across all sections.
+def _entries(doc: ResumeDoc) -> list[Entry]:
+    """Every entry, in declared order, across all sections.
 
-    This is the anchor sequence the order check walks a cursor through --
-    see the module docstring for why headings specifically, and not every
-    critical field, are what "declared order" means here.
+    This flattened order is what `entry_index` in `_declared_fields`
+    counts against, and what the order check and the per-entry regions in
+    `check_roundtrip` both walk.
     """
-    return [entry.heading for section in doc.sections for entry in section.entries]
+    return [entry for section in doc.sections for entry in section.entries]
 
 
 def _flatten(rows: list[list[str]]) -> list[str]:
@@ -179,16 +244,34 @@ def _matches(value: str, segment: str, declared_values: Sequence[str]) -> bool:
     blocking each other: neither is a substring of the other, so neither
     blocks the other's match there.
 
-    This rule can refuse a legitimate match, never grant an illegitimate
-    one: a segment reading `"NY Ops Lead in NY"` contains both the longer
-    declared value `"NY Ops Lead"` and a genuinely separate, standalone
-    `"NY"` later in the same segment, and this function refuses the
-    shorter value's match there anyway, because it reasons about whole-
-    segment containment and cannot tell those two occurrences of "NY"
-    apart. A missed recovery is the safe direction for a gate whose job is
-    to reject documents it cannot vouch for, so that spurious failure is
-    accepted here rather than chased with position tracking this module
-    does not otherwise need.
+    This rule closes the proper-containment case specifically, and it is
+    not a general guarantee against every false match -- two gaps are real,
+    and each is closed elsewhere rather than here. First, it exempts equal
+    values (`w != v`) so that legitimately repeated content (several
+    entries sharing one date span) doesn't block itself, but that same
+    exemption means two *equal* values belonging to two different entries
+    -- a location genuinely missing from entry 0, satisfied by an identical
+    city that legitimately belongs to entry 1 -- pass straight through this
+    function unblocked; `check_roundtrip` closes that gap by scoping each
+    entry's fields to that entry's own region of the page (see the module
+    docstring), not by anything this function does. Second, this function
+    only ever inspects one segment at a time, so a value that spans several
+    segments (a heading long enough to wrap across two or three rows) never
+    appears whole in any single segment and so never reaches the point
+    where this rule would even apply -- that case fails for an unrelated
+    reason (see the module docstring's closing paragraph), not because this
+    rule caught or missed anything.
+
+    Within what it does check, this rule can refuse a legitimate match, but
+    it cannot grant an illegitimate one: a segment reading `"NY Ops Lead in
+    NY"` contains both the longer declared value `"NY Ops Lead"` and a
+    genuinely separate, standalone `"NY"` later in the same segment, and
+    this function refuses the shorter value's match there anyway, because
+    it reasons about whole-segment containment and cannot tell those two
+    occurrences of "NY" apart. A missed recovery is the safe direction for
+    a gate whose job is to reject documents it cannot vouch for, so that
+    spurious failure is accepted here rather than chased with position
+    tracking this module does not otherwise need.
     """
     v = normalize(value).casefold()
     s = segment.casefold()
@@ -200,22 +283,54 @@ def _matches(value: str, segment: str, declared_values: Sequence[str]) -> bool:
 
 
 def _find(
-    value: str, flat: list[str], declared_values: Sequence[str], *, start: int = 0
+    value: str,
+    flat: list[str],
+    declared_values: Sequence[str],
+    *,
+    start: int = 0,
+    end: int | None = None,
 ) -> int | None:
-    """The position of the first segment at or after `start` that `value`
-    can be read out of -- see `_matches` for what that excludes and why.
+    """The position of the first segment in `[start, end)` that `value` can
+    be read out of -- see `_matches` for what that excludes and why.
 
     `start` is inclusive rather than exclusive of a previous match's
     position: two anchors can legitimately share one segment (a merged
     field), and requiring strictly-increasing positions would report that
-    as an order failure it isn't.
+    as an order failure it isn't. `end` defaults to the whole of `flat`;
+    callers scoping a search to one entry's region (`check_roundtrip`) pass
+    the next entry's anchor position instead.
     """
     if not normalize(value):
         return None
-    for i in range(start, len(flat)):
+    limit = len(flat) if end is None else end
+    for i in range(start, limit):
         if _matches(value, flat[i], declared_values):
             return i
     return None
+
+
+def _entry_spans(anchors: list[int | None], flat_len: int) -> list[tuple[int, int] | None]:
+    """The `[start, end)` region each entry's non-heading fields must be
+    found within, derived from `anchors` (that entry's heading position, or
+    `None` if it couldn't be found forward of the reading cursor -- see
+    `check_roundtrip`).
+
+    An entry's region starts at its own anchor and runs to the *next*
+    anchor that was actually found, skipping over any entry in between
+    whose own heading search failed -- an entry with no anchor of its own
+    contributes no boundary, but does not widen its neighbours' regions
+    either; it simply has no region (`None`), and `check_roundtrip` falls
+    that entry's other fields back to a document-wide search instead of
+    scoping them to a region no anchor supports.
+    """
+    spans: list[tuple[int, int] | None] = []
+    for i, position in enumerate(anchors):
+        if position is None:
+            spans.append(None)
+            continue
+        following = next((q for q in anchors[i + 1 :] if q is not None), flat_len)
+        spans.append((position, following))
+    return spans
 
 
 def _field_result(d: _Declared, position: int | None, flat: list[str]) -> FieldResult:
@@ -245,7 +360,43 @@ def check_roundtrip(doc: ResumeDoc, pdf_path: Path) -> RoundTripResult:
 
     declared = _declared_fields(doc)
     declared_values = [d.value for d in declared]
-    positions = {d.field: _find(d.value, flat, declared_values) for d in declared}
+    entries = _entries(doc)
+
+    # One anchor per entry: the position of its own heading, found by a
+    # cursor that only ever moves forward -- this is what makes "declared
+    # order" a property of the *document*, not of each heading looked up in
+    # isolation (see the module docstring). The advance is strict
+    # (`position + 1`, not `position`) specifically so that two entries
+    # sharing one heading still land on two different anchors; an inclusive
+    # advance would let the second lookup re-match the first entry's own
+    # segment, collapsing two entries into one region below.
+    anchors: list[int | None] = []
+    cursor = 0
+    for entry in entries:
+        position = _find(entry.heading, flat, declared_values, start=cursor)
+        anchors.append(position)
+        if position is not None:
+            cursor = position + 1
+    spans = _entry_spans(anchors, len(flat))
+
+    positions: dict[str, int | None] = {}
+    for d in declared:
+        if d.entry_index is None or d.is_anchor:
+            # Document-scoped: identity, a section's title, or an entry's
+            # own heading (which cannot be scoped to a region it is what
+            # defines).
+            positions[d.field] = _find(d.value, flat, declared_values)
+            continue
+        span = spans[d.entry_index]
+        if span is None:
+            # This entry's own heading couldn't be found forward of the
+            # cursor, so it has no region to scope into. Falling back to a
+            # document-wide search here means one ordering problem is
+            # reported once, not amplified into a recovery failure on
+            # every other field this entry declares.
+            positions[d.field] = _find(d.value, flat, declared_values)
+        else:
+            positions[d.field] = _find(d.value, flat, declared_values, start=span[0], end=span[1])
 
     critical = [_field_result(d, positions[d.field], flat) for d in declared if d.critical]
     missing = [f.field for f in critical if not f.recovered]
@@ -262,21 +413,18 @@ def check_roundtrip(doc: ResumeDoc, pdf_path: Path) -> RoundTripResult:
             f"only {char_ratio:.0%} of declared characters recoverable by a naive parser"
         )
 
-    out_of_order: list[str] = []
-    cursor = 0
-    for heading in _entry_headings(doc):
-        forward = _find(heading, flat, declared_values, start=cursor)
-        if forward is not None:
-            cursor = forward
-            continue
-        # Not reachable from the current reading position. Distinguish a
-        # heading a naive parser will never reach in order (present, just
-        # earlier on the page) from one that isn't on the page at all --
-        # the latter is already reported above as a `critical` recovery
-        # failure on this heading's `employer[i]` entry, not an ordering
-        # problem.
-        if _find(heading, flat, declared_values) is not None:
-            out_of_order.append(heading)
+    # An anchor search failing to find a heading forward of the cursor means
+    # one of two things, and only a *second*, unconstrained search tells
+    # them apart: a heading that is on the page nowhere at all is already
+    # reported above as a `critical` recovery failure on that heading's
+    # `employer[i]` entry, not an ordering problem, so it must not also
+    # appear here; a heading that is on the page but only *earlier* than the
+    # cursor left it is a genuine ordering problem, and does belong here.
+    out_of_order = [
+        entries[i].heading
+        for i, position in enumerate(anchors)
+        if position is None and _find(entries[i].heading, flat, declared_values) is not None
+    ]
     order_ok = not out_of_order
     if out_of_order:
         findings.append(
