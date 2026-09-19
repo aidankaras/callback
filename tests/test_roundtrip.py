@@ -661,6 +661,82 @@ def test_two_sections_with_honest_titles_are_both_recovered(tmp_path: Path) -> N
 
 
 @pytest.mark.slow
+def test_unrecoverable_section_heading_is_a_critical_failure(tmp_path: Path) -> None:
+    """A section heading is critical because `char_ratio` alone is not a
+    reliable signal for one: it is length-weighted, and a heading is short
+    relative to the bullet text a real multi-entry resume accumulates, so
+    the same fully-missing heading that fails a small document stops
+    crossing the ratio threshold once there is enough other content to
+    dilute it. Twenty entries with substantive bullets is exactly that
+    document -- the ratio alone measures comfortably above the 0.98
+    threshold even with the heading completely gone, which is the whole
+    reason this became a critical field rather than staying a `char_ratio`
+    concern. The heading must be named in the critical-fields finding, not
+    left to whatever `char_ratio` happens to say.
+    """
+    doc = ResumeDoc(
+        identity=Identity(name="Dana Vex", email="dana@example.com", phone="+1 555 0100"),
+        sections=[
+            Section(
+                title="Experience",
+                entries=[
+                    Entry(
+                        heading=f"Company {i}",
+                        subheading=f"Engineer {i}",
+                        location="Boston, MA",
+                        start="Jun 2024",
+                        end="Aug 2025",
+                        bullets=[
+                            Bullet(
+                                text=(
+                                    f"Shipped milestone {i} on time with a fairly long "
+                                    "description of the achievement and its measurable "
+                                    "impact on the team"
+                                ),
+                                sources=["a"],
+                            )
+                        ],
+                    )
+                    for i in range(1, 21)
+                ],
+            )
+        ],
+    )
+    out = tmp_path / "twenty_entry.pdf"
+    render(doc, out)
+
+    claimed = doc.model_copy(deep=True)
+    claimed.sections[0].title = "Zzznonexistentheading"
+    result = check_roundtrip(claimed, out)
+
+    assert result.char_ratio >= 0.98, (
+        f"char_ratio ({result.char_ratio:.4f}) already caught this; the test no longer "
+        "demonstrates why criticality was needed"
+    )
+    assert result.verdict == "fail"
+    assert any(
+        finding.startswith("critical fields not recoverable") and "section_title[0]" in finding
+        for finding in result.findings
+    ), result.findings
+
+
+@pytest.mark.slow
+def test_recoverable_section_heading_is_reported_recovered(tmp_path: Path) -> None:
+    """The regression guard for making a field critical: a false negative
+    here now fails documents that are actually fine, so an honest heading
+    must still be reported recovered, in `result.critical`, and the
+    document must still pass.
+    """
+    out = tmp_path / "clean_title.pdf"
+    render(DOC, out)
+    result = check_roundtrip(DOC, out)
+
+    title = next(f for f in result.critical if f.field == "section_title[0]")
+    assert title.recovered, title
+    assert result.verdict == "pass", result.findings
+
+
+@pytest.mark.slow
 def test_missing_phone_is_a_failure(tmp_path: Path) -> None:
     doc = DOC.model_copy(deep=True)
     out = tmp_path / "nophone.pdf"

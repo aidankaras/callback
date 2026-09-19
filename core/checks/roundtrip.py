@@ -82,12 +82,11 @@ rather than chased down.
 
 `char_ratio` compares like with like: the summed length of every string the
 document declares that a naive parser actually recovered, over the summed
-length of everything it declares (every critical field, plus section titles
-and bullet text, which are not gated individually but still count toward
-what "recoverable" means for the document as a whole). Comparisons are
-casefolded throughout, because the template renders section titles through
-`upper()` -- that is a rendering decision the gate should not punish as
-content loss.
+length of everything it declares (every critical field, plus bullet text,
+which is not gated individually but still counts toward what "recoverable"
+means for the document as a whole). Comparisons are casefolded throughout,
+because the template renders section titles through `upper()` -- that is a
+rendering decision the gate should not punish as content loss.
 
 A value long enough to wrap across several rows is reported unrecovered,
 and that is correct, not a bug to chase away: matching only ever looks
@@ -209,12 +208,15 @@ class _Scope(Enum):
 class _Declared:
     """One string the rendered document is expected to contain.
 
-    `critical` marks the fields whose absence fails the document outright
-    (identity plus every entry header field); section titles and bullet
-    text are not individually gated -- a missing bullet is a `char_ratio`
-    concern, not a hard failure on its own -- but still count toward what
-    `char_ratio` measures, since they are still text the document declared
-    and a naive parser was asked to recover.
+    `critical` marks the fields whose absence fails the document outright:
+    identity, every entry header field, and a section's own title -- a
+    parser that segments a resume by recognising section headings can
+    strand every entry beneath one it fails to recognise, which is why a
+    title sits with the header fields here rather than with bullet text.
+    Bullets are not individually gated -- a missing bullet is a
+    `char_ratio` concern, not a hard failure on its own -- but still count
+    toward what `char_ratio` measures, since they are still text the
+    document declared and a naive parser was asked to recover.
 
     `scope` and `region_index` together say where this value is allowed to
     be found -- see `_region` for how they resolve to an actual range.
@@ -244,7 +246,7 @@ def _declared_fields(doc: ResumeDoc) -> list[_Declared]:
             _Declared(
                 f"section_title[{section_index}]",
                 section.title,
-                critical=False,
+                critical=True,
                 scope=_Scope.SECTION,
                 region_index=section_index,
             )
