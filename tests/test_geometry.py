@@ -15,7 +15,7 @@ from pathlib import Path
 import pytest
 
 from core.profile.models import Identity
-from core.render.geometry import bullet_blocks, extract_lines, page_fill
+from core.render.geometry import Line, Word, bullet_blocks, extract_lines, page_fill
 from core.render.typst import render
 from core.resume.models import Bullet, Entry, ResumeDoc, Section
 
@@ -175,3 +175,54 @@ def test_geometry_snapshot_is_stable(pdf: Path) -> None:
     assert observed == [1, 2], (
         f"line counts changed to {observed}; re-baseline only after inspecting the PDF"
     )
+
+
+def _synthetic_bullet_lines(*continuation_x0: float) -> list[Line]:
+    """A marker line at x=36 with body text at x=46, plus continuations.
+
+    Built by hand rather than rendered so the horizontal offsets under test
+    are exact. The body column at 46 is 10pt right of the marker at 36,
+    matching the grid column width the real template uses.
+    """
+    marker = Line(
+        page=0,
+        top=100.0,
+        words=[
+            Word(text="\N{BULLET}", x0=36.0, x1=40.0, top=100.0),
+            Word(text="Shipped", x0=46.0, x1=80.0, top=100.0),
+        ],
+    )
+    rest = [
+        Line(
+            page=0,
+            top=110.0 + i * 10,
+            words=[Word(text="more", x0=x, x1=x + 30, top=110.0 + i * 10)],
+        )
+        for i, x in enumerate(continuation_x0)
+    ]
+    return [marker, *rest]
+
+
+def test_continuation_slack_bounds_attachment_in_both_directions() -> None:
+    """A wrapped line's left edge can sit a fraction of a point off the first
+    body line's, so the column match is a tolerance rather than an equality.
+    `continuation_slack` is the width of that tolerance, and both of its
+    directions matter: too narrow drops real continuations and undercounts a
+    bullet's length, too wide swallows the next heading and overcounts it.
+
+    A line 0.5pt off the body column attaches at the 1.0pt default; one 2.0pt
+    off does not, and closes the block. Raising the slack to 3.0pt attaches
+    both. The 2.0pt case stands in for a heading at a nearby indent, which is
+    what the default's margin exists to exclude.
+
+    Mutation: hardcoding `1.0` in place of `continuation_slack` in the
+    comparison leaves the default cases passing and fails the 3.0pt case,
+    which reports 2 lines instead of 3.
+    """
+    lines = _synthetic_bullet_lines(46.5, 48.0)
+
+    default = bullet_blocks(lines)
+    assert default[0].line_count == 2, "a 0.5pt offset continuation should attach"
+
+    loosened = bullet_blocks(lines, continuation_slack=3.0)
+    assert loosened[0].line_count == 3, "a 2.0pt offset should attach once slack exceeds it"

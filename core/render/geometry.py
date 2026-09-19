@@ -26,8 +26,9 @@ template's 16pt centred name a 4.8pt tolerance against a body line pitch of
 5.5pt (`leading: 0.55em` at 10pt in `templates/resume.typ`), making a false
 *merge* of two genuinely adjacent lines more likely in order to fix a false
 split that no measurement exhibits: the largest same-line offset observed on
-a real render is 0.03pt, three orders of magnitude inside the tolerance at
-every size the template uses.
+a real render is 0.03pt, which is 90x to 160x inside the tolerance across
+every size the template uses (2.7pt at 9pt text through 4.8pt at the 16pt
+name).
 
 So the number that matters to a future reader is the margin, not the ratio:
 the default 3.0pt tolerance sits against a 5.5pt line pitch, roughly 1.8x.
