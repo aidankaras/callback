@@ -1,10 +1,22 @@
 import re
 from pathlib import Path
+from typing import Any
 
 import pdfplumber
 import pytest
 
-from core.checks.naive_extract import naive_segments, naive_text, normalize
+# `_space_advance` is private, and reaching across that boundary is normally
+# not worth it. It is worth it here: the choice of a median over a mean is a
+# documented design decision that no document this project renders can
+# exercise -- the margins between real gaps are far too wide for the statistic
+# to change any segmentation -- so the only instrument that can hold the
+# decision to its claim is a direct unit test.
+from core.checks.naive_extract import (
+    _space_advance,  # pyright: ignore[reportPrivateUsage]
+    naive_segments,
+    naive_text,
+    normalize,
+)
 from core.render.typst import FONT_DIR
 from tests.fixtures.make_two_column import build
 
@@ -101,11 +113,13 @@ def test_gap_threshold_holds_in_both_directions(tmp_path: Path) -> None:
 
     row = next(r for r in naive_segments(out) if any("Northwind" in s for s in r))
 
-    # One assertion, both failure directions: too low a threshold splits the
-    # heading's own word gap and this reads "Northwind"; too high a threshold
-    # merges the field gap and it reads the whole row. Either way the heading
-    # did not come back as exactly itself, so the message names both causes
-    # rather than guessing which one fired.
+    # The two assertions catch different drifts, and the first does not catch
+    # every one on its own. A threshold below the 2.5pt heading gap splits the
+    # heading and one above the 308.9pt field gap merges the whole row: both
+    # show up here, so the message names both causes rather than guessing which
+    # fired. But a threshold landing between the 4.5pt location/date join and
+    # the field gap leaves the heading intact and splits the row into three, so
+    # only the count assertion below sees it.
     assert row[0] == "Northwind Analytics", (
         f"the heading did not come back as exactly one segment: {row}. Either "
         "an ordinary word gap was split (threshold too low, e.g. body text "
@@ -144,4 +158,35 @@ def test_two_column_layout_scrambles_under_the_naive_extractor(tmp_path: Path) -
     assert order[:4] == [1, 40, 2, 41], (
         f"expected column-interleaved order, got {order[:8]}; column 1 holds "
         "39 entries on this page, so a naive band sort reads 1, 40, 2, 41, ..."
+    )
+
+
+def test_space_advance_resists_a_single_outlier_token() -> None:
+    """One pathologically wide token must not move the threshold for every
+    other row on the page, which is the whole reason this is a median rather
+    than a mean. Nine ordinary words at 5.0pt/char alongside one token at
+    60.0pt/char must still report 5.0: the mean of the same list is 10.5,
+    which would more than double the segment threshold and start merging
+    fields that ought to split.
+
+    This cannot be observed through `naive_segments` on any document this
+    project renders -- the gap it would have to misclassify sits between
+    4.5pt and 308.9pt, so even a doubled threshold changes nothing -- which
+    is exactly why the statistic needs a unit test rather than a
+    behavioural one. Without it, switching to a mean passes the entire
+    suite.
+
+    Mutation: replacing the sort-and-index with `sum(widths) / len(widths)`
+    returns 10.5 and fails the first assertion.
+    """
+    ordinary = [{"text": "aaaa", "x0": 0.0, "x1": 20.0} for _ in range(9)]
+    outlier = {"text": "W", "x0": 0.0, "x1": 60.0}
+    words: list[dict[str, Any]] = [*ordinary, outlier]
+
+    assert _space_advance(words) == 5.0
+
+    advances = [(float(w["x1"]) - float(w["x0"])) / len(str(w["text"])) for w in words]
+    assert sum(advances) / len(advances) == 10.5, (
+        "the mean this median exists to avoid should differ sharply; if it no "
+        "longer does, this fixture has stopped exercising the decision"
     )

@@ -173,7 +173,7 @@ def _space_advance(words: list[dict[str, Any]]) -> float:
     **What actually moves this value, and what does not.** Per-character
     advance is close to a pure font-metrics property, essentially
     independent of how long a token is: at 10pt on this project's vendored
-    font, short words ("the cat sat on a mat") measure 4.45pt/char, a
+    font, short words ("the cat sat on a mat") measure 4.57pt/char, a
     66-character URL measures 4.34pt/char, and a 48-character hex hash
     measures 4.56pt/char — all within a few percent of each other. A page
     that happens to contain one long unbroken token (a link, a hash, an ID)
@@ -185,10 +185,14 @@ def _space_advance(words: list[dict[str, Any]]) -> float:
     the whole page while `naive_segments` compares it against individual
     rows that may be set at a different size. At the same text and font,
     per-char advance — and the `gap_factor=2.0` threshold it sets — scales
-    roughly linearly with size: 7pt measures 3.12pt/char (6.23pt
-    threshold), 9pt measures 4.01pt/char (8.02pt), 10pt measures 4.45pt/char
-    (8.91pt), 11pt measures 4.90pt/char (9.80pt), and 16pt measures
-    7.13pt/char (14.25pt). On this project's real renders, the resume
+    roughly linearly with size: 7pt measures 3.20pt/char (6.40pt
+    threshold), 9pt measures 4.11pt/char (8.23pt), 10pt measures 4.57pt/char
+    (9.14pt), 11pt measures 5.03pt/char (10.05pt), and 16pt measures
+    7.31pt/char (14.62pt). Every figure here is this function's own return
+    value on a real render, not a textbook median of the same words:
+    `statistics.median` would average the two central values of an
+    even-length list and report 2-3% lower throughout, so a number measured
+    that way does not describe this function. On this project's real renders, the resume
     page's median is 4.79pt (9.57pt threshold) against ordinary
     within-field gaps of 2.25-4.50pt and an employer/location field gap of
     308.9pt; the two-column fixture's threshold is 8.83pt against ordinary
