@@ -39,7 +39,7 @@ def test_clean_document_recovers_every_critical_field(tmp_path: Path) -> None:
 
 
 @pytest.mark.slow
-def test_en_dash_date_range_still_matches(tmp_path: Path) -> None:
+def test_date_span_is_recovered_as_written(tmp_path: Path) -> None:
     """Checked against this project's own render: a single '-' in a date span
     ("Jun 2024 - Aug 2025") comes back from `extract_words` as a literal
     hyphen-minus, not an en dash -- Typst's typographic substitution only
@@ -158,6 +158,21 @@ def test_two_column_document_fails_on_order_not_recovery(tmp_path: Path) -> None
         any(normalize(anchor).casefold() in seg.casefold() for seg in segments)
         for anchor in result.out_of_order
     ), "an out-of-order anchor was also missing outright; this fixture should fail on order alone"
+
+    # The docstring above claims this document fails on order *alone*, so pin
+    # the other two paths shut rather than trusting them to stay open. Measured
+    # here: 99 critical fields all recovered, and a character ratio of 0.9947 --
+    # only 0.0147 above the 0.98 threshold, close enough that a fixture or
+    # template change could push it under and silently turn this into a
+    # recovery test that still passes for the wrong reason.
+    assert [f.field for f in result.critical if not f.recovered] == [], (
+        "a critical field was unrecoverable, so this no longer isolates order"
+    )
+    assert result.char_ratio >= 0.98, (
+        f"character ratio {result.char_ratio:.4f} is itself failing the document, "
+        "so this no longer isolates order"
+    )
+    assert len(result.findings) == 1, f"expected one order finding, got {result.findings}"
 
 
 @pytest.mark.slow
