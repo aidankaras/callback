@@ -126,6 +126,11 @@ def build_source(doc: ResumeDoc, *, font_family: str = DEFAULT_FONT) -> str:
     data = json.dumps(_payload(doc), ensure_ascii=False)
     return (
         '#import "/templates/resume.typ": resume\n'
+        # `json(bytes(...))`, not `json.decode(...)`: the pinned typst
+        # 0.15.0 removed `json.decode` — `json` is a plain function there,
+        # and calling it on a `bytes` value is how a string is parsed
+        # in-place rather than read from a file. Don't "simplify" this back
+        # to `.decode`; it doesn't exist in this version and never ran.
         f"#let data = json(bytes({json.dumps(data)}))\n"
         f'#resume(identity: data.identity, sections: data.sections, font: "{font_family}")\n'
     )
@@ -136,7 +141,13 @@ def render(doc: ResumeDoc, out_pdf: Path, *, font_family: str = DEFAULT_FONT) ->
 
     Raises `RenderError` if the compiler reported any warning, or if the
     embedded font family doesn't match `font_family` — see the module
-    docstring for why both checks exist independently of each other.
+    docstring for why both checks exist independently of each other. The
+    embedded-family check is a name match, not an identity check: a
+    different font that happens to share the family name would pass it too.
+    `ignore_system_fonts=True` is what actually rules that out, by making
+    the vendored copy the only file that name can resolve to in the first
+    place; this check exists to catch a substitution *despite* that, not to
+    verify provenance on its own.
     """
     source = build_source(doc, font_family=font_family)
     # A `Compiler` instance, not the free `typst.compile_with_warnings`
@@ -160,7 +171,13 @@ def render(doc: ResumeDoc, out_pdf: Path, *, font_family: str = DEFAULT_FONT) ->
     pdf_bytes = compiled
     out_pdf.write_bytes(pdf_bytes)
     families = _embedded_families(out_pdf)
-    if not any(font_family.split()[0] in family for family in families):
+    # `all`, not `any`: every embedded family must trace back to the
+    # requested one. `any` would only catch a *total* substitution — it
+    # passes as soon as one weight (say, Regular) is the vendored font, even
+    # if another weight (Bold, Italic) silently fell back to something else
+    # entirely. A partial substitution is exactly as undetectable to a
+    # reader as a total one, so it gets exactly the same hard failure here.
+    if not families or not all(font_family.split()[0] in family for family in families):
         raise RenderError(f"requested font {font_family!r} is not embedded; PDF reports {families}")
     return RenderResult(pdf_bytes=pdf_bytes, typst_source=source, font_families=families)
 

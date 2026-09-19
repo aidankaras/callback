@@ -74,6 +74,19 @@ def test_render_is_byte_reproducible(tmp_path: Path) -> None:
 
 
 @pytest.mark.slow
+def test_creation_date_is_pinned_to_the_epoch(tmp_path: Path) -> None:
+    """Two renders made a second apart still hash the same only because the
+    embedded `CreationDate` is fixed, not because they happen to run inside
+    the same wall-clock second. `test_render_is_byte_reproducible` alone
+    can't tell those two explanations apart — two renders that both run
+    inside one second would pass it even with `timestamp` left unset — so
+    this asserts the actual mechanism directly: the literal epoch timestamp
+    Typst embeds when `timestamp=0` is honoured."""
+    result = render(DOC, tmp_path / "f.pdf")
+    assert b"CreationDate(D:19700101000000Z)" in result.pdf_bytes
+
+
+@pytest.mark.slow
 def test_only_vendored_fonts_are_used(tmp_path: Path) -> None:
     result = render(DOC, tmp_path / "c.pdf")
     assert result.font_families, "no font families reported"
@@ -86,9 +99,38 @@ def test_unknown_font_is_a_hard_error(tmp_path: Path) -> None:
         render(DOC, tmp_path / "d.pdf", font_family="Nonexistent Sans")
 
 
+# `DOC`'s longest bullet is 41 characters and never wraps at 10pt in the
+# page's ~7.2in text column, so it cannot exercise hyphenation either way —
+# a hyphen guard tested against it would pass whether or not hyphenation
+# were actually disabled. This bullet is long enough to wrap, and its wrap
+# point falls inside "infrastructure" specifically (verified by rendering
+# with `hyphenate: true` and confirming the break lands there as
+# "infra-"/"structure", the exact motivating case in the module docstring)
+# — the shape needed to prove this test can fail.
+_HYPHENATION_BOUNDARY_BULLET = (
+    "Rebuilt the nightly regional customer order and vendor reconciliation "
+    "data pipeline and cross-team billing reporting infrastructure"
+)
+
+HYPHEN_DOC = ResumeDoc(
+    identity=IDENTITY,
+    sections=[
+        Section(
+            title="Experience",
+            entries=[
+                Entry(
+                    heading="Northwind Analytics",
+                    bullets=[Bullet(text=_HYPHENATION_BOUNDARY_BULLET, sources=["a"])],
+                ),
+            ],
+        ),
+    ],
+)
+
+
 @pytest.mark.slow
 def test_no_line_ends_in_a_hyphen(tmp_path: Path) -> None:
-    render(DOC, tmp_path / "e.pdf")
+    render(HYPHEN_DOC, tmp_path / "e.pdf")
     with pdfplumber.open(tmp_path / "e.pdf") as pdf:
         for line in (pdf.pages[0].extract_text() or "").splitlines():
             assert not line.rstrip().endswith("-"), f"hyphenated break in {line!r}"
