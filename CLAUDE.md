@@ -92,6 +92,13 @@ someone asked that question of it.
   report is the only evidence a reviewer has unless they rerun the suite themselves.
   Before treating any "N passed" claim as done, run `uv run pytest -q` and read the tail
   line yourself.
+
+  When more than one contributor has files in the tree, the full-suite total is **not**
+  attributable to any one change: uncommitted work from elsewhere is collected too. A suite
+  that goes from 210 to 221 across a commit adding two tests is not a discrepancy to chase —
+  it is nine tests belonging to someone else. Report the count for the file you changed, and
+  read the whole-suite number as a check that nothing broke rather than as a measure of what
+  you added.
 - **A mutation's restore is verified, not assumed.** Copy the file aside, restore from the
   copy, and `cmp` to confirm the restore happened. `git checkout -- <path>` silently does
   nothing on an untracked file — it prints a pathspec error and returns non-zero, which a
