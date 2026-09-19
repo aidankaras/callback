@@ -55,15 +55,31 @@ _DROP = dict.fromkeys(map(ord, "•­​‌‍﻿"), None)
 def normalize(text: str) -> str:
     """Fold `text` down to a form that ignores rendering-level noise.
 
-    `NFKC` handles most of this on its own — it already folds every
-    Unicode space variant (non-breaking space, thin space, and friends)
-    to a form `\\s+` collapses in the following line, so no explicit space
-    table is needed here. What `NFKC` does *not* touch is the handful of
-    zero-width and format characters below (`_DROP`): a soft hyphen, a
-    zero-width space, and the bidi/BOM control characters. Those survive
-    `NFKC` unchanged and are invisible to `\\s`, so a naive parser reading a
-    hyphenated line break literally would see `infra\\u00adstructure` as one
-    unbroken token unless something removes the soft hyphen explicitly.
+    Space-class coverage comes from `\\s` in the final `re.sub`, not from
+    `NFKC`: Python's `\\s` matches every Unicode space-separator codepoint
+    directly, including ones `NFKC` leaves alone — OGHAM SPACE MARK
+    (U+1680) is untouched by `NFKC` but still matches `\\s`. So `\\s+`
+    collapsing already covers the whole space class on its own; no explicit
+    space table is needed, and `NFKC` folding some of those same codepoints
+    is redundant with it rather than load-bearing. `NFKC`'s real job here is
+    compatibility-form folding that neither `\\s` nor the tables below can
+    do — a ligature such as `ﬁ` decomposes to `fi`, and a fullwidth Latin
+    punctuation form used by some CJK input methods collapses to its
+    ordinary ASCII form — not the dash or quote folding: `NFKC` leaves
+    curly quotes and en/em dashes untouched, which is exactly why `_DASHES`
+    and `_QUOTES` exist as explicit tables rather than relying on it.
+
+    What survives both `NFKC` and `\\s` is the handful of zero-width and
+    format characters below (`_DROP`): a soft hyphen, a zero-width space,
+    and the bidi/BOM control characters. This pipeline's own rendering never
+    produces the soft hyphen case — both `templates/resume.typ` and the
+    two-column test fixture set `hyphenate: false`, so nothing this project
+    renders ever emits one — but candidate-supplied source text pasted in
+    from elsewhere can carry one already embedded, e.g. from a document
+    that auto-hyphenated before the text was copied. These characters are
+    invisible to `\\s`, so a naive parser reading such a line literally
+    would see `infra\\u00adstructure` as one unbroken token unless something
+    removes the soft hyphen explicitly.
     """
     folded = unicodedata.normalize("NFKC", text)
     folded = folded.translate(_DASHES | _QUOTES | _DROP)
@@ -110,6 +126,15 @@ def naive_segments(
             # on its own line just after. Sorting here first would be
             # thrown away by that later sort and never observed in the
             # output — do not add it back "for clarity."
+            #
+            # `use_text_flow=False` is currently unobservable for the same
+            # reason: both settings return the same multiset of words, and
+            # the banding plus per-row `x0` sort below discard whatever
+            # order `extract_words` handed back. It costs nothing to keep
+            # and is deliberate insurance, not a live safeguard — it is
+            # exactly what would matter if this function ever grew a code
+            # path that relied on input order without re-sorting. Remove it
+            # only alongside proof that no such path exists.
             words = page.extract_words(use_text_flow=False)
             space = _space_advance(words)
             bands: dict[int, list[dict[str, Any]]] = {}
@@ -141,10 +166,45 @@ def _space_advance(words: list[dict[str, Any]]) -> float:
     so the same `gap_factor` works across a resume set in a slightly larger
     or smaller body size. It is one value for the whole page rather than
     recomputed per row — see `naive_segments` — and the median, not the
-    mean, is deliberate: a single very wide or very narrow token (a long
-    unbroken number, a lone punctuation mark) would otherwise pull the mean
-    toward it and change the effective threshold for every other row on the
-    page.
+    mean, is deliberate: a single very wide or very narrow token would
+    otherwise pull the mean toward it and change the effective threshold for
+    every other row on the page.
+
+    **What actually moves this value, and what does not.** Per-character
+    advance is close to a pure font-metrics property, essentially
+    independent of how long a token is: at 10pt on this project's vendored
+    font, short words ("the cat sat on a mat") measure 4.45pt/char, a
+    66-character URL measures 4.34pt/char, and a 48-character hex hash
+    measures 4.56pt/char — all within a few percent of each other. A page
+    that happens to contain one long unbroken token (a link, a hash, an ID)
+    does not depress this median. Only text made of genuinely narrow glyphs
+    would (an artificial `"illlliiiillll..."` string measures 2.67pt/char),
+    and no real resume content is written in glyphs that narrow.
+
+    Font *size* is what actually moves it, because this is measured across
+    the whole page while `naive_segments` compares it against individual
+    rows that may be set at a different size. At the same text and font,
+    per-char advance — and the `gap_factor=2.0` threshold it sets — scales
+    roughly linearly with size: 7pt measures 3.12pt/char (6.23pt
+    threshold), 9pt measures 4.01pt/char (8.02pt), 10pt measures 4.45pt/char
+    (8.91pt), 11pt measures 4.90pt/char (9.80pt), and 16pt measures
+    7.13pt/char (14.25pt). On this project's real renders, the resume
+    page's median is 4.79pt (9.57pt threshold) against ordinary
+    within-field gaps of 2.25-4.50pt and an employer/location field gap of
+    308.9pt; the two-column fixture's threshold is 8.83pt against ordinary
+    gaps of 2.50pt and column gutters of 102.5-111.8pt.
+
+    The composition that could actually break this function's assumption is
+    therefore a page whose *dominant* text is small — pulling the page
+    median, and so the threshold, down — while one row is set much larger —
+    pulling that row's own ordinary word gaps up — not a page of long
+    tokens. This project's own template sizes span 9pt to 16pt (the 16pt
+    name row's "Dana"/"Vex" gap measures 4.0pt), which puts the worst
+    realistic composition at roughly an 8.0pt threshold against a 4.0pt gap
+    it must not split: about 2x margin, not the order-of-magnitude margin
+    the real field-boundary gaps enjoy above. A template that pushed either
+    extreme further — a smaller body size, or a still-larger heading —
+    would need this re-measured rather than re-guessed.
     """
     widths = [
         (float(w["x1"]) - float(w["x0"])) / max(len(str(w["text"])), 1)
