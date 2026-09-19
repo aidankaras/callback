@@ -105,6 +105,31 @@ jobs:
             reader to stop trusting the next one. Do not include a finding you
             cannot point at in the actual current source.
 
+      - name: Fail if the audit produced no report
+        run: |
+          # A run that writes nothing must not go green. The pull-request action
+          # below opens no PR when it finds no change, so without this check a
+          # silently empty audit is indistinguishable from an audit that found
+          # nothing worth saying -- and both look like success.
+          #
+          # `git status --porcelain` rather than `git diff`: this file is untracked
+          # until the first audit commits it, and `git diff` does not report
+          # untracked files, so it would answer "no change" no matter what was
+          # written.
+          report=reports/standards-audit.md
+          test -f "$report" || { echo "::error::$report was not written"; exit 1; }
+          bytes=$(wc -c < "$report")
+          echo "report is $bytes bytes"
+          echo "tree state:"; git status --porcelain
+          if [ "$bytes" -lt 500 ]; then
+            echo "::error::$report is $bytes bytes, too small to be a real audit"
+            exit 1
+          fi
+          for n in 1 2 3 4 5 6 7; do
+            grep -q "^#\+ *$n\.\|^$n\." "$report" || \
+              echo "::warning::no section found for claimed property $n"
+          done
+
       - name: Open a pull request with the findings
         uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1  # v8.1.1
         with:
