@@ -10,9 +10,10 @@ that follows it meaningless, whichever way it came out.
 
 The handful of invisible or hard-to-distinguish code points used below
 (a zero-width space, a soft hyphen, a variation selector, a right-to-left
-override) are built from their integer code points with `chr(...)` rather
-than typed or pasted as literal characters, so nothing in this file's
-source is invisible or ambiguous in a diff.
+override, a byte-order mark, a combining grapheme joiner, and a few
+ordinary combining accents) are built from their integer code points with
+`chr(...)` rather than typed or pasted as literal characters, so nothing in
+this file's source is invisible or ambiguous in a diff.
 """
 
 from __future__ import annotations
@@ -25,6 +26,11 @@ ZERO_WIDTH_SPACE = chr(0x200B)
 SOFT_HYPHEN_CHAR = chr(0x00AD)
 VARIATION_SELECTOR_16 = chr(0xFE0F)
 RIGHT_TO_LEFT_OVERRIDE = chr(0x202E)
+COMBINING_GRAPHEME_JOINER_CHAR = chr(0x034F)
+BYTE_ORDER_MARK_CHAR = chr(0xFEFF)
+COMBINING_ACUTE_ACCENT = chr(0x0301)
+COMBINING_DIAERESIS = chr(0x0308)
+COMBINING_CARON = chr(0x030C)
 
 # Fill drawn at the page's own white, over ordinary visible text -- the
 # plainest form of colour-matching keyword stuffing.
@@ -33,6 +39,52 @@ WHITE = """
 #set text(font: "Libertinus Serif", size: 10pt)
 Visible line of the document.
 #text(fill: white)[machine learning kubernetes terraform distributed systems]
+"""
+
+# A grey too light to read against a white page but well above the old,
+# incorrect `>= 0.95` component floor. Measured: 90% grey quantizes to
+# 230/255 = 0.90196 and contrasts at 1.25:1 against white -- comfortably
+# under this module's 1.5:1 floor, and comfortably below anything WCAG
+# would call legible, but `>= 0.95` on that same value is False, so the
+# pre-fix code let this straight through.
+GREY_INVISIBLE = """
+#set page(paper: "us-letter", margin: 0.5in)
+#set text(font: "Libertinus Serif", size: 10pt)
+Visible line of the document.
+#text(fill: rgb(90%, 90%, 90%))[kubernetes terraform hidden in light grey]
+"""
+
+# A grey pale enough to be a deliberate low-emphasis design choice, not an
+# attempt to hide anything. Measured: 80% grey contrasts at 1.61:1 against
+# white, just clear of this module's 1.5:1 floor -- this fixture's role is
+# proving the floor does not reach this far, not that anything here should
+# be flagged.
+GREY_LEGIBLE = """
+#set page(paper: "us-letter", margin: 0.5in)
+#set text(font: "Libertinus Serif", size: 10pt)
+Visible line of the document.
+#text(fill: rgb(80%, 80%, 80%))[a faintly styled secondary line]
+"""
+
+# A page with a painted, non-white background, and text drawn in that same
+# colour -- invisible for a reason the old `>= 0.95`-from-white test could
+# never see, because the text is nowhere near white.
+NAVY_ON_NAVY = """
+#set page(paper: "us-letter", margin: 0.5in, fill: rgb(20%, 20%, 40%))
+#set text(font: "Libertinus Serif", size: 10pt, fill: white)
+Visible line of the document.
+#text(fill: rgb(20%, 20%, 40%))[kubernetes terraform hidden on a navy page]
+"""
+
+# The false-positive case the old test made unavoidable: a painted
+# non-white background with fully legible, high-contrast text drawn on it.
+# Measured: white text against this page's rgb(20%, 20%, 40%) background
+# contrasts at 11.63:1, far above the 1.5:1 floor -- clearly legible, and
+# the point of this fixture is that it must never be flagged.
+NAVY_BACKGROUND_WHITE_TEXT = """
+#set page(paper: "us-letter", margin: 0.5in, fill: rgb(20%, 20%, 40%))
+#set text(font: "Libertinus Serif", size: 10pt, fill: white)
+Visible line of the document on a navy background.
 """
 
 # Text sized well under the 6.0pt floor, next to an ordinary 10pt line.
@@ -59,24 +111,54 @@ ZERO_WIDTH = f"""
 Visible{ZERO_WIDTH_SPACE}line with an invisible separator.
 """
 
-# A soft hyphen (U+00AD): survives rendering, is category `Cf`, but falls
-# outside every range `_INVISIBLE_RANGES` covers -- this is one of the two
-# code points that regex is documented to miss and the category test must
-# catch on its own.
+# A soft hyphen (U+00AD): survives rendering and is inside the
+# `Default_Ignorable_Code_Point` range table's first entry.
 SOFT_HYPHEN = f"""
 #set page(paper: "us-letter", margin: 0.5in)
 #set text(font: "Libertinus Serif", size: 10pt, hyphenate: false)
 Infra{SOFT_HYPHEN_CHAR}structure engineering role.
 """
 
-# A text variation selector (U+FE0F): survives rendering, is category `Mn`
-# (a combining mark, not `Cf`/`Cn`), but falls inside the U+FE00-U+FE0F
-# range the regex covers -- the code point the category test is documented
-# to miss and the regex must catch on its own.
+# A text variation selector (U+FE0F): survives rendering and is inside the
+# `Default_Ignorable_Code_Point` range table's U+FE00-U+FE0F entry.
 VARIATION_SELECTOR = f"""
 #set page(paper: "us-letter", margin: 0.5in)
 #set text(font: "Libertinus Serif", size: 10pt)
 Alpha1{VARIATION_SELECTOR_16} Beta
+"""
+
+# A byte-order mark (U+FEFF): survives rendering and is inside the
+# `Default_Ignorable_Code_Point` range table's own entry for it.
+BYTE_ORDER_MARK = f"""
+#set page(paper: "us-letter", margin: 0.5in)
+#set text(font: "Libertinus Serif", size: 10pt)
+Alpha{BYTE_ORDER_MARK_CHAR}Beta
+"""
+
+# A combining grapheme joiner (U+034F): survives rendering, is category
+# `Mn` (a combining mark, like an ordinary accent) rather than `Cf`, and
+# falls outside every hand-picked range the previous, narrower regex
+# checked -- the code point neither of that regex's two mechanisms caught,
+# and the reason this module now checks the full
+# `Default_Ignorable_Code_Point` set instead of an ad hoc approximation
+# of it.
+COMBINING_GRAPHEME_JOINER = f"""
+#set page(paper: "us-letter", margin: 0.5in)
+#set text(font: "Libertinus Serif", size: 10pt)
+Alpha{COMBINING_GRAPHEME_JOINER_CHAR}Beta
+"""
+
+# Three ordinary names, each spelled with a *decomposed* combining accent
+# (a base letter followed by a separate combining mark) rather than a
+# single precomposed character -- the same category (`Mn`) as the
+# combining grapheme joiner above, but not itself default-ignorable.
+# Proves the default-ignorable set is the right property to check rather
+# than "is this character a combining mark," which would also catch every
+# one of these and reject ordinary accented names.
+ACCENTED_NAMES = f"""
+#set page(paper: "us-letter", margin: 0.5in)
+#set text(font: "Libertinus Serif", size: 10pt)
+Jose{COMBINING_ACUTE_ACCENT} Mu{COMBINING_DIAERESIS}ller S{COMBINING_CARON}koda
 """
 
 # A right-to-left override: renders as nine ordinary, fully visible letters

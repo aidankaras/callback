@@ -1,17 +1,34 @@
 from __future__ import annotations
 
-import unicodedata
 from pathlib import Path
 
 import pdfplumber
 import pytest
 from pypdf import PdfReader
 
-from core.checks.hidden import MIN_FONT_SIZE, HiddenKind, check_hidden
+from core.checks.hidden import (
+    MIN_CONTRAST_RATIO,
+    MIN_FONT_SIZE,
+    HiddenKind,
+    check_hidden,
+    contrast_ratio,
+    is_default_ignorable,
+    page_background,
+    to_rgb,
+)
 from core.render.typst import FONT_DIR
 from tests.fixtures.make_hidden import (
+    ACCENTED_NAMES,
     BIDI_OVERRIDE,
+    BYTE_ORDER_MARK,
+    BYTE_ORDER_MARK_CHAR,
+    COMBINING_GRAPHEME_JOINER,
+    COMBINING_GRAPHEME_JOINER_CHAR,
+    GREY_INVISIBLE,
+    GREY_LEGIBLE,
     METADATA_LEAK,
+    NAVY_BACKGROUND_WHITE_TEXT,
+    NAVY_ON_NAVY,
     OFFPAGE,
     OFFPAGE_VERTICAL,
     RIGHT_TO_LEFT_OVERRIDE,
@@ -32,22 +49,162 @@ def test_white_on_white_text_is_detected(tmp_path: Path) -> None:
     out = tmp_path / "white.pdf"
     build(WHITE, out, FONT_DIR)
 
-    # The fixture's own premise: at least one non-blank glyph is filled
-    # near-white. Mutation: change WHITE's "fill: white" to "fill: black"
+    # The fixture's own premise: at least one non-blank glyph contrasts
+    # below the floor against the page's actual (here, implicit white)
+    # background. Mutation: change WHITE's "fill: white" to "fill: black"
     # -- this assertion fails, proving it actually inspects the fixture's
     # colour rather than assuming the source text implies it.
     with pdfplumber.open(str(out)) as pdf:
-        near_white = [
+        page = pdf.pages[0]
+        background = page_background(page)
+        below_floor = [
             c
-            for c in pdf.pages[0].chars
+            for c in page.chars
             if str(c.get("text", "")).strip()
-            and all(float(v) >= 0.95 for v in c.get("non_stroking_color") or ())
+            and (fg := to_rgb(c.get("non_stroking_color"))) is not None
+            and contrast_ratio(fg, background) < MIN_CONTRAST_RATIO
         ]
-    assert near_white, "fixture did not render any near-white glyph"
+    assert below_floor, "fixture did not render any low-contrast glyph"
 
     verdict, findings = check_hidden(out)
     assert verdict == "fail"
     assert any(f.kind == HiddenKind.INVISIBLE_TEXT for f in findings), findings
+
+
+@pytest.mark.slow
+def test_grey_below_the_old_component_floor_is_detected(tmp_path: Path) -> None:
+    """90% grey quantizes to 0.90196 and contrasts at 1.25:1 against white --
+    below this module's 1.5:1 floor, but the pre-fix `>= 0.95` per-component
+    test let it straight through (0.90196 < 0.95 on every component, so the
+    old `_is_background` returned False -- "not background" -- for exactly
+    the fill this fixture uses).
+
+    Mutation: revert core.checks.hidden._invisible_fill to call the pre-fix
+    `_is_background(fill) -> all components >= 0.95` test instead of a
+    contrast check -- this test fails, since 0.90196 clears neither `>=
+    0.95` component threshold and the old code would report this document
+    as clean.
+    """
+    out = tmp_path / "grey_invisible.pdf"
+    build(GREY_INVISIBLE, out, FONT_DIR)
+
+    with pdfplumber.open(str(out)) as pdf:
+        page = pdf.pages[0]
+        background = page_background(page)
+        greys = [
+            c
+            for c in page.chars
+            if str(c.get("text", "")).strip()
+            and (fg := to_rgb(c.get("non_stroking_color"))) is not None
+            and 0.85 < fg[0] < 0.95
+        ]
+    assert greys, "fixture did not render any glyph under the old 0.95 floor"
+    contrast = contrast_ratio(to_rgb(greys[0].get("non_stroking_color")) or (0, 0, 0), background)
+    assert contrast == pytest.approx(1.248, abs=0.01), contrast
+    assert contrast < MIN_CONTRAST_RATIO
+
+    verdict, findings = check_hidden(out)
+    assert verdict == "fail"
+    assert any(f.kind == HiddenKind.INVISIBLE_TEXT for f in findings), findings
+
+
+@pytest.mark.slow
+def test_pale_grey_is_not_a_false_positive(tmp_path: Path) -> None:
+    """80% grey contrasts at 1.61:1 against white -- just clear of the
+    1.5:1 floor, and this fixture's whole point is that a legitimate
+    faint design choice at that contrast must not be flagged.
+
+    Mutation: lower MIN_CONTRAST_RATIO from 1.5 to 1.7 -- this test fails,
+    since 1.61 < 1.7 would then flag this fixture's text as invisible.
+    """
+    out = tmp_path / "grey_legible.pdf"
+    build(GREY_LEGIBLE, out, FONT_DIR)
+
+    with pdfplumber.open(str(out)) as pdf:
+        page = pdf.pages[0]
+        background = page_background(page)
+        styled = [
+            c
+            for c in page.chars
+            if str(c.get("text", "")).strip()
+            and (fg := to_rgb(c.get("non_stroking_color"))) is not None
+            and 0.75 < fg[0] < 0.85
+        ]
+    assert styled, "fixture did not render any styled glyph"
+    contrast = contrast_ratio(to_rgb(styled[0].get("non_stroking_color")) or (0, 0, 0), background)
+    assert contrast == pytest.approx(1.606, abs=0.01), contrast
+    assert contrast >= MIN_CONTRAST_RATIO
+
+    verdict, findings = check_hidden(out)
+    assert verdict == "pass", findings
+
+
+@pytest.mark.slow
+def test_navy_on_navy_text_is_detected(tmp_path: Path) -> None:
+    """Text drawn in the same colour as a painted, non-white page
+    background -- invisible for a reason the old white-only test could
+    never see.
+
+    Mutation: revert core.checks.hidden.page_background to always return
+    white regardless of any painted rect -- this test fails, since the
+    navy text here computed against an assumed white background contrasts
+    at 11.63:1 (measured), comfortably above the 1.5:1 floor, so nothing
+    would be flagged.
+    """
+    out = tmp_path / "navy_on_navy.pdf"
+    build(NAVY_ON_NAVY, out, FONT_DIR)
+
+    with pdfplumber.open(str(out)) as pdf:
+        page = pdf.pages[0]
+        background = page_background(page)
+        assert background == pytest.approx((0.2, 0.2, 0.4), abs=0.01), background
+        hidden_candidates = [
+            c
+            for c in page.chars
+            if str(c.get("text", "")).strip()
+            and (fg := to_rgb(c.get("non_stroking_color"))) is not None
+            and contrast_ratio(fg, background) < MIN_CONTRAST_RATIO
+        ]
+    assert hidden_candidates, "fixture did not render any glyph invisible against its background"
+
+    verdict, findings = check_hidden(out)
+    assert verdict == "fail"
+    assert any(f.kind == HiddenKind.INVISIBLE_TEXT for f in findings), findings
+
+
+@pytest.mark.slow
+def test_white_text_on_navy_background_is_not_a_false_positive(tmp_path: Path) -> None:
+    """The false positive the old `>= 0.95`-from-white test made
+    unavoidable: legible white text on a painted navy background, which
+    the old test flagged as invisible purely because the text's own
+    colour happened to be near white.
+
+    Mutation: revert core.checks.hidden._invisible_fill to the pre-fix
+    `_is_background(fill) -> fill near white` test -- this test then fails,
+    since the white text here is near-white and would be flagged as
+    invisible despite being the only legible colour choice against this
+    background.
+    """
+    out = tmp_path / "navy_bg_white.pdf"
+    build(NAVY_BACKGROUND_WHITE_TEXT, out, FONT_DIR)
+
+    with pdfplumber.open(str(out)) as pdf:
+        page = pdf.pages[0]
+        background = page_background(page)
+        assert background == pytest.approx((0.2, 0.2, 0.4), abs=0.01), background
+        white_chars = [
+            c
+            for c in page.chars
+            if str(c.get("text", "")).strip()
+            and (fg := to_rgb(c.get("non_stroking_color"))) is not None
+            and fg[0] > 0.9
+        ]
+    assert white_chars, "fixture did not render any near-white glyph"
+    contrast = contrast_ratio((1.0, 1.0, 1.0), background)
+    assert contrast > 10, contrast
+
+    verdict, findings = check_hidden(out)
+    assert verdict == "pass", findings
 
 
 @pytest.mark.slow
@@ -86,12 +243,13 @@ def test_zero_width_character_is_detected(tmp_path: Path) -> None:
 
 
 @pytest.mark.slow
-def test_soft_hyphen_is_caught_by_category_not_regex(tmp_path: Path) -> None:
-    """A soft hyphen is category Cf but outside every _INVISIBLE_RANGES entry.
+def test_soft_hyphen_is_detected(tmp_path: Path) -> None:
+    """A soft hyphen (U+00AD) is inside the Default_Ignorable_Code_Point
+    range table's own entry for it.
 
-    Mutation: delete the unicodedata.category(...) in {"Cf", "Cn"} branch
-    from core.checks.hidden._unicode_channel, leaving only the regex --
-    this test fails, because the regex alone never matches U+00AD.
+    Mutation: delete the (0x00AD, 0x00AD) tuple from
+    core.checks.hidden._DEFAULT_IGNORABLE_RANGES -- this test fails, since
+    no other entry in the table covers U+00AD.
     """
     out = tmp_path / "soft_hyphen.pdf"
     build(SOFT_HYPHEN, out, FONT_DIR)
@@ -99,7 +257,6 @@ def test_soft_hyphen_is_caught_by_category_not_regex(tmp_path: Path) -> None:
     with pdfplumber.open(str(out)) as pdf:
         raw = pdf.pages[0].extract_text() or ""
     assert SOFT_HYPHEN_CHAR in raw, repr(raw)
-    assert unicodedata.category(SOFT_HYPHEN_CHAR) == "Cf"
 
     verdict, findings = check_hidden(out)
     assert verdict == "fail"
@@ -107,13 +264,13 @@ def test_soft_hyphen_is_caught_by_category_not_regex(tmp_path: Path) -> None:
 
 
 @pytest.mark.slow
-def test_variation_selector_is_caught_by_regex_not_category(tmp_path: Path) -> None:
-    """A variation selector is category Mn, not Cf/Cn, but is inside the
-    U+FE00-U+FE0F range the regex covers.
+def test_variation_selector_is_detected(tmp_path: Path) -> None:
+    """A text variation selector (U+FE0F) is inside the
+    Default_Ignorable_Code_Point range table's U+FE00-U+FE0F entry.
 
-    Mutation: delete the _INVISIBLE.search(text) branch from
-    core.checks.hidden._unicode_channel, leaving only the category test --
-    this test fails, because U+FE0F's category never matches {"Cf", "Cn"}.
+    Mutation: delete the (0xFE00, 0xFE0F) tuple from
+    core.checks.hidden._DEFAULT_IGNORABLE_RANGES -- this test fails, since
+    no other entry in the table covers U+FE0F.
     """
     out = tmp_path / "vs16.pdf"
     build(VARIATION_SELECTOR, out, FONT_DIR)
@@ -121,11 +278,80 @@ def test_variation_selector_is_caught_by_regex_not_category(tmp_path: Path) -> N
     with pdfplumber.open(str(out)) as pdf:
         raw = pdf.pages[0].extract_text() or ""
     assert VARIATION_SELECTOR_16 in raw, repr(raw)
-    assert unicodedata.category(VARIATION_SELECTOR_16) == "Mn"
 
     verdict, findings = check_hidden(out)
     assert verdict == "fail"
     assert any(f.kind == HiddenKind.UNICODE_CHANNEL for f in findings), findings
+
+
+@pytest.mark.slow
+def test_byte_order_mark_is_detected(tmp_path: Path) -> None:
+    """A byte-order mark (U+FEFF) is inside the Default_Ignorable_Code_Point
+    range table's own entry for it.
+
+    Mutation: delete the (0xFEFF, 0xFEFF) tuple from
+    core.checks.hidden._DEFAULT_IGNORABLE_RANGES -- this test fails, since
+    no other entry in the table covers U+FEFF.
+    """
+    out = tmp_path / "bom.pdf"
+    build(BYTE_ORDER_MARK, out, FONT_DIR)
+
+    with pdfplumber.open(str(out)) as pdf:
+        raw = pdf.pages[0].extract_text() or ""
+    assert BYTE_ORDER_MARK_CHAR in raw, repr(raw)
+
+    verdict, findings = check_hidden(out)
+    assert verdict == "fail"
+    assert any(f.kind == HiddenKind.UNICODE_CHANNEL for f in findings), findings
+
+
+@pytest.mark.slow
+def test_combining_grapheme_joiner_is_detected(tmp_path: Path) -> None:
+    """A combining grapheme joiner (U+034F) is category Mn, not Cf/Cn, and
+    falls outside every range the pre-fix regex checked -- the code point
+    that regex-or-category design missed by both mechanisms simultaneously,
+    and the reason this module now checks the full
+    Default_Ignorable_Code_Point set instead of an ad hoc approximation.
+
+    Mutation: delete the (0x034F, 0x034F) tuple from
+    core.checks.hidden._DEFAULT_IGNORABLE_RANGES -- this test fails, since
+    no other entry in the table covers U+034F.
+    """
+    out = tmp_path / "cgj.pdf"
+    build(COMBINING_GRAPHEME_JOINER, out, FONT_DIR)
+
+    with pdfplumber.open(str(out)) as pdf:
+        raw = pdf.pages[0].extract_text() or ""
+    assert COMBINING_GRAPHEME_JOINER_CHAR in raw, repr(raw)
+
+    verdict, findings = check_hidden(out)
+    assert verdict == "fail"
+    assert any(f.kind == HiddenKind.UNICODE_CHANNEL for f in findings), findings
+
+
+@pytest.mark.slow
+def test_accented_names_are_not_flagged(tmp_path: Path) -> None:
+    """Three ordinary names, each spelled with a decomposed combining
+    accent -- the same Unicode category (Mn) as the combining grapheme
+    joiner above, but not itself default-ignorable. Proves the property
+    checked is "is this specified to render with no glyph," not "is this a
+    combining mark," which would also reject every one of these.
+
+    Mutation: widen core.checks.hidden._unicode_channel to flag any
+    character whose unicodedata.category is "Mn" (in addition to the
+    default-ignorable regex) -- this test fails, since every accent below
+    is category Mn and would then be flagged.
+    """
+    out = tmp_path / "accented.pdf"
+    build(ACCENTED_NAMES, out, FONT_DIR)
+
+    with pdfplumber.open(str(out)) as pdf:
+        raw = pdf.pages[0].extract_text() or ""
+    assert "Jos" in raw and "ller" in raw and "koda" in raw, repr(raw)
+    assert not is_default_ignorable(raw), repr(raw)
+
+    verdict, findings = check_hidden(out)
+    assert verdict == "pass", findings
 
 
 @pytest.mark.slow
@@ -237,19 +463,22 @@ def test_clean_render_passes(tmp_path: Path) -> None:
     # The premise this test depends on, enforced rather than assumed: a
     # real render of this template stays comfortably clear of every
     # threshold this gate checks. Mutation: lower MIN_FONT_SIZE past 16.0
-    # -- the last assertion below fails, because the template's own 16pt
+    # -- the size assertion below fails, because the template's own 16pt
     # name heading would then fall under the floor.
     with pdfplumber.open(str(out)) as pdf:
         page = pdf.pages[0]
         sizes = {round(float(c["size"]), 2) for c in page.chars}
         colours = {c.get("non_stroking_color") for c in page.chars}
         raw = page.extract_text() or ""
+        background = page_background(page)
     reader = PdfReader(str(out))
     metadata_keys = set(dict(reader.metadata or {}).keys())
 
     assert sizes == {9.0, 10.0, 11.0, 16.0}, sizes
     assert colours == {(0.0,)}, colours
-    assert not any(unicodedata.category(ch) in {"Cf", "Cn"} for ch in raw)
+    assert background == (1.0, 1.0, 1.0), background
+    assert contrast_ratio((0.0, 0.0, 0.0), background) > MIN_CONTRAST_RATIO
+    assert not is_default_ignorable(raw)
     allowed = {"/Title", "/Author", "/Producer", "/Creator", "/CreationDate", "/ModDate"}
     assert metadata_keys <= allowed
     assert min(sizes) > MIN_FONT_SIZE
