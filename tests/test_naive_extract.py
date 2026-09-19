@@ -1,4 +1,3 @@
-import inspect
 import re
 from pathlib import Path
 
@@ -52,30 +51,34 @@ def test_wide_gap_becomes_a_segment_boundary(tmp_path: Path) -> None:
 
 
 @pytest.mark.slow
-def test_gap_threshold_separates_word_gap_from_field_gap(tmp_path: Path) -> None:
-    """The `gap_factor * space` threshold `naive_segments` depends on must
-    sit strictly between an ordinary word gap and a real field gap on a
-    real render, not just in the module docstring's measured numbers. On
-    this fixture's rendered PDF, "Northwind Analytics" is one heading with
-    an ordinary within-heading word gap, immediately followed on the same
-    visual row by "Boston, MA" — a real field boundary — so both a
-    below-threshold and an above-threshold gap exist side by side to pin
-    the threshold between.
+def test_gap_threshold_holds_in_both_directions(tmp_path: Path) -> None:
+    """The gap threshold must split a real field boundary while leaving an
+    ordinary word gap alone, and one rendered row exercises both at once:
+    "Northwind Analytics" is a two-word heading immediately followed on the
+    same visual row by its right-aligned location, so the row contains a
+    within-heading word gap (measured 2.5pt) and a templated field gap
+    (measured 308.9pt) side by side.
 
-    Mutation: moving `gap_factor`'s default in
-    `core.checks.naive_extract.naive_segments` far enough in either
-    direction breaks one of the two assertions below — raising it past
-    roughly 65 pushes the threshold above the measured 308.9pt
-    employer/location gap, and lowering it below roughly 0.5 pushes it
-    below the measured 2.5pt heading word gap. A future template change
-    that shrank body text far enough would move the measured gaps
-    themselves and could break this the same way.
+    Asserted through `naive_segments` rather than by recomputing the
+    threshold, deliberately. An arithmetic assertion would have to
+    reproduce `_space_advance`'s formula, and a copy of that formula in a
+    test cannot notice when the real one changes — it would keep passing
+    while the production threshold moved underneath it. Segmentation is the
+    behaviour that actually matters, so a change to how the threshold is
+    computed fails here exactly when it changes what gets split, and stays
+    silent when it does not.
+
+    Mutations: raising `gap_factor`'s default to 70.0 puts the threshold
+    above the 308.9pt field gap, merging the row into one segment and
+    failing the two-segment assertion; lowering it to 0.3 puts the
+    threshold below the 2.5pt word gap, splitting the heading into
+    "Northwind" and "Analytics" and failing the exact-heading assertion. A
+    template change that shrank body text far enough would break it the
+    same way, which is the realistic trigger.
     """
     from core.profile.models import Identity
     from core.render.typst import render
     from core.resume.models import Entry, ResumeDoc, Section
-
-    gap_factor = inspect.signature(naive_segments).parameters["gap_factor"].default
 
     doc = ResumeDoc(
         identity=Identity(name="Dana Vex", email="d@example.com"),
@@ -96,34 +99,20 @@ def test_gap_threshold_separates_word_gap_from_field_gap(tmp_path: Path) -> None
     out = tmp_path / "gap.pdf"
     render(doc, out)
 
-    with pdfplumber.open(str(out)) as pdf:
-        page = pdf.pages[0]
-        words = page.extract_words(use_text_flow=False)
-        by_text = {str(w["text"]): w for w in words}
-        # Recomputes the same median-per-character-advance formula
-        # `naive_extract._space_advance` uses, rather than importing that
-        # leading-underscore helper across the module boundary (pyright
-        # strict flags that as `reportPrivateUsage`, and no other test in
-        # this project reaches into a private symbol). Keep this in step
-        # with `_space_advance` if that formula ever changes.
-        char_widths = sorted(
-            (float(w["x1"]) - float(w["x0"])) / max(len(str(w["text"])), 1)
-            for w in words
-            if str(w["text"]).strip()
-        )
-        space = char_widths[len(char_widths) // 2]
-        threshold = gap_factor * space
-        word_gap = float(by_text["Analytics"]["x0"]) - float(by_text["Northwind"]["x1"])
-        field_gap = float(by_text["Boston,"]["x0"]) - float(by_text["Analytics"]["x1"])
+    row = next(r for r in naive_segments(out) if any("Northwind" in s for s in r))
 
-    assert word_gap < threshold, (
-        f"ordinary heading word gap {word_gap:.2f}pt is not below the "
-        f"{threshold:.2f}pt threshold; body text may have shrunk"
+    # One assertion, both failure directions: too low a threshold splits the
+    # heading's own word gap and this reads "Northwind"; too high a threshold
+    # merges the field gap and it reads the whole row. Either way the heading
+    # did not come back as exactly itself, so the message names both causes
+    # rather than guessing which one fired.
+    assert row[0] == "Northwind Analytics", (
+        f"the heading did not come back as exactly one segment: {row}. Either "
+        "an ordinary word gap was split (threshold too low, e.g. body text "
+        "shrank) or the field gap was merged (threshold too high)"
     )
-    assert field_gap > threshold, (
-        f"employer/location field gap {field_gap:.2f}pt is not above the "
-        f"{threshold:.2f}pt threshold"
-    )
+    assert len(row) == 2, f"expected heading and location as two segments: {row}"
+    assert "Boston" in row[1]
 
 
 @pytest.mark.slow
