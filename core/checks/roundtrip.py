@@ -20,7 +20,7 @@ document can fail either one without failing the other:
   and a position-based reader disagree about which text comes first, and a
   presence-only check cannot tell the two cases apart. Measured on a
   24-entry two-column fixture (`tests.fixtures.make_two_column`): every
-  declared entry heading is recoverable by substring search, while 11 of
+  declared entry heading is recoverable by substring search, while 10 of
   them are unreachable in declared order.
 
 Order is checked across entries, by heading only, not within an entry: the
@@ -46,6 +46,7 @@ content loss.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -160,23 +161,59 @@ def _flatten(rows: list[list[str]]) -> list[str]:
     return [segment for row in rows for segment in row]
 
 
-def _find(value: str, flat: list[str], *, start: int = 0) -> int | None:
-    """The position of the first segment at or after `start` that contains
-    `value`, both sides normalized and casefolded, or `None`.
+def _matches(value: str, segment: str, declared_values: Sequence[str]) -> bool:
+    """Whether `value` can be read out of `segment`, given every other
+    string the document declares (`declared_values`).
+
+    Bare substring containment lets a short declared value "win" by
+    matching inside a *longer declared value's own text* -- an entry
+    heading that happens to be a substring of another entry's heading
+    (`"Analytics"` sitting inside a different entry's `"Northwind Analytics
+    Group"`), or a fabricated field that happens to be spelled inside an
+    unrelated field's genuine text (a wrong `location="NY"` matching inside
+    a real subheading `"NY Ops Lead"`). Blocking specifically on the
+    *proper containment* relation between two declared values -- not on
+    "any other declared value is also present in this segment" -- is what
+    keeps two genuinely distinct fields sharing one segment (a location and
+    a date span both landing in `"Boston, MA Jun 2024 - Aug 2025"`) from
+    blocking each other: neither is a substring of the other, so neither
+    blocks the other's match there.
+
+    This rule can refuse a legitimate match, never grant an illegitimate
+    one: a segment reading `"NY Ops Lead in NY"` contains both the longer
+    declared value `"NY Ops Lead"` and a genuinely separate, standalone
+    `"NY"` later in the same segment, and this function refuses the
+    shorter value's match there anyway, because it reasons about whole-
+    segment containment and cannot tell those two occurrences of "NY"
+    apart. A missed recovery is the safe direction for a gate whose job is
+    to reject documents it cannot vouch for, so that spurious failure is
+    accepted here rather than chased with position tracking this module
+    does not otherwise need.
+    """
+    v = normalize(value).casefold()
+    s = segment.casefold()
+    if not v or v not in s:
+        return False
+    return not any(
+        (w := normalize(other).casefold()) != v and v in w and w in s for other in declared_values
+    )
+
+
+def _find(
+    value: str, flat: list[str], declared_values: Sequence[str], *, start: int = 0
+) -> int | None:
+    """The position of the first segment at or after `start` that `value`
+    can be read out of -- see `_matches` for what that excludes and why.
 
     `start` is inclusive rather than exclusive of a previous match's
     position: two anchors can legitimately share one segment (a merged
-    field, or a heading that is itself a substring of the next one), and
-    requiring strictly-increasing positions would report that as an order
-    failure it isn't. `naive_segments` already normalizes its output, so
-    only `value` needs it here, but both sides are casefolded regardless of
-    which one produced the case difference.
+    field), and requiring strictly-increasing positions would report that
+    as an order failure it isn't.
     """
-    target = normalize(value).casefold()
-    if not target:
+    if not normalize(value):
         return None
     for i in range(start, len(flat)):
-        if target in flat[i].casefold():
+        if _matches(value, flat[i], declared_values):
             return i
     return None
 
@@ -207,7 +244,8 @@ def check_roundtrip(doc: ResumeDoc, pdf_path: Path) -> RoundTripResult:
     findings: list[str] = []
 
     declared = _declared_fields(doc)
-    positions = {d.field: _find(d.value, flat) for d in declared}
+    declared_values = [d.value for d in declared]
+    positions = {d.field: _find(d.value, flat, declared_values) for d in declared}
 
     critical = [_field_result(d, positions[d.field], flat) for d in declared if d.critical]
     missing = [f.field for f in critical if not f.recovered]
@@ -227,7 +265,7 @@ def check_roundtrip(doc: ResumeDoc, pdf_path: Path) -> RoundTripResult:
     out_of_order: list[str] = []
     cursor = 0
     for heading in _entry_headings(doc):
-        forward = _find(heading, flat, start=cursor)
+        forward = _find(heading, flat, declared_values, start=cursor)
         if forward is not None:
             cursor = forward
             continue
@@ -237,7 +275,7 @@ def check_roundtrip(doc: ResumeDoc, pdf_path: Path) -> RoundTripResult:
         # the latter is already reported above as a `critical` recovery
         # failure on this heading's `employer[i]` entry, not an ordering
         # problem.
-        if _find(heading, flat) is not None:
+        if _find(heading, flat, declared_values) is not None:
             out_of_order.append(heading)
     order_ok = not out_of_order
     if out_of_order:

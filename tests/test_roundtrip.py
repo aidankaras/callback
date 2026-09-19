@@ -138,7 +138,7 @@ def test_char_ratio_falls_when_declared_content_is_absent(tmp_path: Path) -> Non
 @pytest.mark.slow
 def test_two_column_document_fails_on_order_not_recovery(tmp_path: Path) -> None:
     """The document this gate exists to reject. Every declared entry heading is
-    recoverable by substring search, so a presence-only gate passes it; 11 of
+    recoverable by substring search, so a presence-only gate passes it; 10 of
     24 are unreachable in declared order, so this one must not. The final
     assertion is the point of the test: it proves the weaker check would have
     passed, so a future change back to presence-only fails here rather than
@@ -160,11 +160,14 @@ def test_two_column_document_fails_on_order_not_recovery(tmp_path: Path) -> None
     ), "an out-of-order anchor was also missing outright; this fixture should fail on order alone"
 
     # The docstring above claims this document fails on order *alone*, so pin
-    # the other two paths shut rather than trusting them to stay open. Measured
-    # here: 99 critical fields all recovered, and a character ratio of 0.9947 --
-    # only 0.0147 above the 0.98 threshold, close enough that a fixture or
-    # template change could push it under and silently turn this into a
-    # recovery test that still passes for the wrong reason.
+    # the other two paths shut rather than trusting them to stay open, using
+    # targeted checks rather than a finding count: a count couples this test
+    # to the total number of finding *types* the gate can ever produce, so an
+    # unrelated future finding would break it even though order isolation
+    # would be untouched. Measured here: every critical field recovers, and
+    # the character ratio is exactly 1.0 (the fixture now renders every
+    # string it declares, including its section title), so neither path is
+    # anywhere near its own threshold.
     assert [f.field for f in result.critical if not f.recovered] == [], (
         "a critical field was unrecoverable, so this no longer isolates order"
     )
@@ -172,7 +175,113 @@ def test_two_column_document_fails_on_order_not_recovery(tmp_path: Path) -> None
         f"character ratio {result.char_ratio:.4f} is itself failing the document, "
         "so this no longer isolates order"
     )
-    assert len(result.findings) == 1, f"expected one order finding, got {result.findings}"
+    assert any(
+        finding.startswith("entry headings present but not reachable in declared reading order")
+        for finding in result.findings
+    ), result.findings
+
+
+@pytest.mark.slow
+def test_colliding_heading_reports_out_of_order(tmp_path: Path) -> None:
+    """A short heading that is itself a substring of a different entry's
+    heading can match that other entry's segment under bare containment,
+    pinning the order cursor there and letting a genuinely inverted
+    document read as perfectly ordered.
+
+    The document below declares "Analytics" (Boston) first and "Northwind
+    Analytics Group" (NYC) second, but is physically rendered in the
+    opposite order -- "Northwind Analytics Group" first, "Analytics"
+    second -- by rendering a copy with the entries reversed. Under bare
+    substring containment, looking up "Analytics" matches wherever it
+    first appears in reading order, which is *inside* "Northwind Analytics
+    Group"'s own segment (since "analytics" is a substring of "northwind
+    analytics group"); the cursor then pins there, and the following
+    lookup for "Northwind Analytics Group" matches the same segment again
+    (a segment always contains itself), so the whole document reads as
+    ascending. No existing fixture in this module exercised this: every
+    heading in every other document here is unique and not a substring of
+    any other declared value, so a matcher that finds *a* segment
+    containing the right text, without checking whether a longer declared
+    value owns that segment instead, was never exercised against a
+    colliding pair -- which is how this shipped.
+    """
+    physical = ResumeDoc(
+        identity=Identity(name="Dana Vex", email="dana@example.com", phone="+1 555 0100"),
+        sections=[
+            Section(
+                title="Experience",
+                entries=[
+                    Entry(
+                        heading="Northwind Analytics Group",
+                        location="NYC, NY",
+                        start="Jan 2020",
+                        end="May 2023",
+                        bullets=[Bullet(text="Led the migration effort", sources=["a"])],
+                    ),
+                    Entry(
+                        heading="Analytics",
+                        location="Boston, MA",
+                        start="Jun 2024",
+                        end="Aug 2025",
+                        bullets=[Bullet(text="Owned the reporting pipeline", sources=["b"])],
+                    ),
+                ],
+            )
+        ],
+    )
+    declared = physical.model_copy(deep=True)
+    declared.sections[0].entries.reverse()
+
+    out = tmp_path / "colliding.pdf"
+    render(physical, out)
+    result = check_roundtrip(declared, out)
+
+    assert not result.order_ok, "a fully inverted document reported as reading in order"
+    assert result.out_of_order == ["Northwind Analytics Group"]
+
+
+@pytest.mark.slow
+def test_coincidental_substring_is_not_recovered(tmp_path: Path) -> None:
+    """A fabricated field value that happens to be spelled inside a
+    genuinely different field's text must not be reported as recovered:
+    appearing inside someone else's field is not the same as being on the
+    page in its own right.
+
+    The rendered document below has `location="Remote"` and a subheading
+    "NY Ops Lead"; the document checked against it claims `location="NY"`
+    instead -- a value that never appears anywhere as a location, but
+    which is a coincidental substring of the genuine "NY Ops Lead" text.
+    """
+    rendered = ResumeDoc(
+        identity=Identity(name="Dana Vex", email="dana@example.com", phone="+1 555 0100"),
+        sections=[
+            Section(
+                title="Experience",
+                entries=[
+                    Entry(
+                        heading="Northwind Analytics",
+                        subheading="NY Ops Lead",
+                        location="Remote",
+                        start="Jun 2024",
+                        end="Aug 2025",
+                        bullets=[Bullet(text="Cut the queue to 300 items", sources=["a"])],
+                    )
+                ],
+            )
+        ],
+    )
+    out = tmp_path / "coincidence.pdf"
+    render(rendered, out)
+
+    claimed = rendered.model_copy(deep=True)
+    claimed.sections[0].entries[0].location = "NY"
+    result = check_roundtrip(claimed, out)
+
+    location = next(f for f in result.critical if f.field == "location[0]")
+    assert not location.recovered, (
+        f"'NY' was reported recovered from segment {location.segment!r}, "
+        "which is a different field's text, not a location"
+    )
 
 
 @pytest.mark.slow

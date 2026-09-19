@@ -60,6 +60,9 @@ _RESUME_TEMPLATE = """#let data = json(bytes({json_data}))
   #text(size: 9pt)[#data.identity.contact_line]
 ]
 #v(6pt)
+#text(size: 11pt, weight: "bold")[#upper(data.section_title)]
+#line(length: 100%, stroke: 0.5pt)
+#v(2pt)
 #columns(2, gutter: 24pt)[
 #for entry in data.entries [
   #grid(
@@ -95,6 +98,7 @@ def _two_column_payload(doc: ResumeDoc) -> dict[str, object]:
         )
     return {
         "identity": {"name": doc.identity.name, "contact_line": contact},
+        "section_title": doc.sections[0].title,
         "entries": entries,
     }
 
@@ -106,13 +110,15 @@ def build_two_column_resume(
     write it to `out_pdf`, returning the document alongside the path so the
     same scrambled PDF can be checked with `check_roundtrip`.
 
-    Every entry's fields (heading, subheading, location, dates, one bullet)
-    and every identity field are individually substring-recoverable
-    somewhere on the page -- a presence-only check would pass this document.
-    What the layout breaks is declared reading *order*: measured at
-    `entries=24`, every heading is recoverable, and 11 of the 24 are
-    unreachable by a cursor that only moves forward through the page in the
-    order a naive parser reads it (`core.checks.naive_extract.naive_segments`)
+    Every entry's fields (heading, subheading, location, dates, one bullet),
+    the section title, and every identity field are individually
+    substring-recoverable somewhere on the page -- a presence-only check
+    would pass this document, and its character ratio is exactly 1.0
+    because nothing declared is actually absent. What the layout breaks is
+    declared reading *order*: measured at `entries=24`, every heading is
+    recoverable, and 10 of the 24 are unreachable by a cursor that only
+    moves forward through the page in the order a naive parser reads it
+    (`core.checks.naive_extract.naive_segments`)
     -- see the constant `_RESUME_TEMPLATE` above for why a two-column layout
     produces that specific failure. At `entries=10` the body fits inside a
     single column and nothing overflows into column two at all, so the
