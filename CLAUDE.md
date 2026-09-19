@@ -179,6 +179,14 @@ explanatory text written carefully:
 - a test named for an en dash that this renderer never emits: Typst folds `--` but leaves a
   single spaced hyphen alone, so the test passed with nothing to absorb.
 
+A docstring that explains *why* something is true is a second claim, independent of the
+first, and the tests only ever check the first. Every instance of this found here had a
+correct conclusion resting on a false mechanism: the NFKC entry above is one, and a
+determinism note once justified a decision by a precision loss that does not occur — the
+decision was right, the stated reason was not, and no passing test could have said so
+because the defeat was in the explanation rather than the behaviour. When a comment answers
+"why", verify the "why" separately from the "what".
+
 A number in a docstring is a claim. Re-derive it with the function it describes, not with an
 equivalent you wrote while documenting — `statistics.median` averages the two central values
 of an even-length list where this codebase's helper takes the upper one, which is how a
