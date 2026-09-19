@@ -25,6 +25,14 @@
     text(size: 11pt, weight: "bold")[#upper(section.title)]
     line(length: 100%, stroke: 0.5pt)
     v(2pt)
+    if section.skills.len() > 0 {
+      // Body size and weight, deliberately: a skills run rendered at
+      // heading weight reads as an employer name to a parser that anchors
+      // on bold text, and this project's own round-trip gate anchors on
+      // entry headings.
+      par(justify: false)[#section.skills.join(", ")]
+      v(2pt)
+    }
     for entry in section.entries {
       grid(
         columns: (1fr, auto),

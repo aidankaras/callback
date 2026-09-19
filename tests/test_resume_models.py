@@ -38,6 +38,17 @@ def test_bullet_requires_at_least_one_source() -> None:
         Bullet(text="Did a thing", sources=[])
 
 
+def test_a_section_can_hold_a_skills_list_with_no_entries() -> None:
+    section = Section(title="Skills", skills=["Python", "PostgreSQL"])
+    assert section.entries == []
+    assert section.skills == ["Python", "PostgreSQL"]
+
+
+def test_a_section_cannot_hold_both_entries_and_skills() -> None:
+    with pytest.raises(ValidationError, match="both entries and skills"):
+        Section(title="Skills", entries=[Entry(heading="X")], skills=["Python"])
+
+
 def test_resume_doc_round_trips_sources_through_sections() -> None:
     doc = ResumeDoc(
         identity=IDENTITY,

@@ -91,6 +91,7 @@ def _payload(doc: ResumeDoc) -> dict[str, object]:
         "sections": [
             {
                 "title": section.title,
+                "skills": section.skills,
                 "entries": [
                     {
                         "heading": entry.heading,

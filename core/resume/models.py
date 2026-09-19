@@ -18,7 +18,7 @@ unsourced bullet, which defeats the point of grounding as a whole.
 
 from __future__ import annotations
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from core.profile.models import Identity
 
@@ -59,12 +59,28 @@ class Entry(BaseModel):
 
 
 class Section(BaseModel):
-    """A titled group of entries (e.g. "Experience", "Education")."""
+    """A titled group of entries (e.g. "Experience", "Education"), or a
+    titled list of skills — never both.
+
+    The two are mutually exclusive because they render differently and are
+    checked differently. An entry has a heading a parser can anchor on; a
+    skills list is a run of short comma-separated names with no heading of
+    its own, and treating one as the other would make a skills list look
+    like an employer name to anything that anchors on entry headings (the
+    round-trip gate's ordering check, in particular).
+    """
 
     model_config = {"extra": "forbid"}
 
     title: str
     entries: list[Entry] = Field(default_factory=list[Entry])
+    skills: list[str] = Field(default_factory=list[str])
+
+    @model_validator(mode="after")
+    def _entries_or_skills(self) -> Section:
+        if self.entries and self.skills:
+            raise ValueError(f"section {self.title!r} has both entries and skills; pick one")
+        return self
 
 
 class ResumeDoc(BaseModel):

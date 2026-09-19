@@ -80,6 +80,26 @@ shares `_entry_spans`'s accepted imprecision on purpose -- see that
 function's docstring for what that imprecision is and why it is accepted
 rather than chased down.
 
+A section's skills get the same region as its title, one `_Declared` per
+skill: a skills run has no heading of its own to anchor on (`Section`
+forbids a section from carrying both entries and skills -- see
+`core.resume.models.Section`), so there is no narrower region to give it
+than the one already computed for the section it belongs to. Matching a
+skill is not, however, the same operation as matching a title or a heading:
+`_matches`'s ownership rule -- refuse a value when a *longer* declared
+value contains it in the same segment -- is right for values competing to
+own a segment, but a skills run renders every skill into *one* comma-joined
+segment, so its own siblings are routinely proper substrings of each other
+("SQL" inside "PostgreSQL", "Go" inside "Golang", "Java" inside
+"JavaScript") without anything being wrong. Applying the ownership rule
+there would refuse a majority of ordinary skill pairings on a completely
+honest document. `_find_skill` and `_row_items` are the second, narrower
+matching rule this calls for: a skill matches only when it equals one of a
+segment's comma-delimited items exactly, never merely when it is contained
+somewhere in the segment's raw text -- see `_find_skill`'s own docstring
+for how a skill split across two rows by line-wrap is still recovered
+without that rule ever reasoning about ownership at all.
+
 `char_ratio` compares like with like: the summed length of every string the
 document declares that a naive parser actually recovered, over the summed
 length of everything it declares (every critical field, plus bullet text,
@@ -92,7 +112,12 @@ A value long enough to wrap across several rows is reported unrecovered,
 and that is correct, not a bug to chase away: matching only ever looks
 inside one segment at a time (see `_matches`), and a naive, position-based
 reader has no more ability to reassemble a heading split across rows than
-this gate does. Checked against its own render, a heading that wraps across
+this gate does. A skill is the one deliberate exception, and only across
+one row boundary at a time -- see `_find_skill`'s docstring for why a
+comma-delimited run tolerates being reassembled where a heading must not:
+a skills run's own structure (each item bounded by a comma the renderer
+put there) is what a naive reader can lean on that free prose has no
+equivalent of. Checked against its own render, a heading that wraps across
 three rows with the location column interleaved between its fragments
 (`'Company 12 Extended International A Truly Extremely Long City Name
 Metropolitan Area, Massachusetts March 2021 - April 2022'` /
@@ -174,26 +199,40 @@ class _Scope(Enum):
 
     Every declared value gets one of these, chosen explicitly at the point
     it is declared (`_Declared.scope` has no default) -- there is no
-    "otherwise" case a fifth kind of value could fall into without a
-    reader having to decide where it belongs. `DOCUMENT` is not that
-    fallback: it is a fourth, equally deliberate choice, made for exactly
-    one reason and used for exactly one kind of value. Three other kinds
-    of declared value were each, in turn, given `DOCUMENT` scope by
-    omission before this type existed, and each time an unscoped search
-    let a value missing from where it belonged be satisfied by an
-    unrelated, genuine value somewhere else on the page (see the module
-    docstring). `DOCUMENT` survives only for the one case where scoping is
-    actually impossible, not merely inconvenient: an entry's own heading
-    defines that entry's region, so searching for it *within* that region
-    would be circular.
+    "otherwise" case a kind of value could fall into without a reader
+    having to decide where it belongs. `DOCUMENT` is not that fallback: it
+    is a fourth, equally deliberate choice, made for exactly one reason and
+    used for exactly one kind of value. Three other kinds of declared value
+    were each, in turn, given `DOCUMENT` scope by omission before this type
+    existed, and each time an unscoped search let a value missing from
+    where it belonged be satisfied by an unrelated, genuine value somewhere
+    else on the page (see the module docstring). `DOCUMENT` survives only
+    for the one case where scoping is actually impossible, not merely
+    inconvenient: an entry's own heading defines that entry's region, so
+    searching for it *within* that region would be circular. A fifth
+    category -- a section's declared skills -- was added after this type
+    existed, which is the case this type was built for: it does not get a
+    fifth *member*, because unlike the first four it has a real region
+    already on offer (its own section's), so it is placed on `SECTION`
+    deliberately rather than by omission -- see `SECTION`'s own docstring.
     """
 
     HEADER = "header"
     """Identity (name, email, phone): the region before the first entry."""
 
     SECTION = "section"
-    """A section's own title: the region between the previous section's
-    last found entry and this section's own first found entry."""
+    """A section's own title, and every skill declared on it: the region
+    between the previous section's last found entry and this section's own
+    first found entry. A skill shares its section's region rather than
+    getting a scope of its own, because it has no narrower anchor to be
+    scoped to -- a skills run carries no heading, by construction (see
+    `core.resume.models.Section`), so there is nothing under it to define
+    an `ENTRY`-sized region the way an entry's own fields get one. This is
+    the fifth category of declared value this module has had to place (see
+    the class docstring), and it is placed here rather than given a scope
+    of its own because the fix for the first four categories was "give the
+    value its own boundary" -- for a skill, that boundary already exists
+    and is exactly its section's."""
 
     ENTRY = "entry"
     """Everything an entry owns except its own heading (subheading,
@@ -224,6 +263,16 @@ class _Declared:
     only one header region, and `DOCUMENT` scope names no region at all);
     for `SECTION` scope it is that section's index, and for `ENTRY` scope
     it is that entry's index.
+
+    `is_skill` selects which of the module's two matching rules applies
+    when this value's region is searched: `False` (every field above) uses
+    `_matches`'s ownership rule, `True` uses `_find_skill`'s delimited-item
+    rule instead. It defaults to `False` rather than joining `scope` as a
+    third thing every call site must choose, because only one caller in
+    `_declared_fields` ever needs it -- unlike `scope`, there is no fifth
+    kind of value that could silently default into the wrong choice here,
+    since every other field in this module is still `False` and always
+    will be.
     """
 
     field: str
@@ -231,6 +280,7 @@ class _Declared:
     critical: bool
     scope: _Scope
     region_index: int | None = None
+    is_skill: bool = False
 
 
 def _declared_fields(doc: ResumeDoc) -> list[_Declared]:
@@ -251,6 +301,17 @@ def _declared_fields(doc: ResumeDoc) -> list[_Declared]:
                 region_index=section_index,
             )
         )
+        for skill_index, skill in enumerate(section.skills):
+            out.append(
+                _Declared(
+                    f"skill[{section_index}][{skill_index}]",
+                    skill,
+                    critical=False,
+                    scope=_Scope.SECTION,
+                    region_index=section_index,
+                    is_skill=True,
+                )
+            )
         for entry in section.entries:
             out.append(
                 _Declared(f"employer[{index}]", entry.heading, critical=True, scope=_Scope.DOCUMENT)
@@ -308,6 +369,16 @@ def _entries(doc: ResumeDoc) -> list[Entry]:
     check and `_entry_spans` both walk. `_section_regions` walks the same
     flattened `anchors` list in slices, one per section, rather than
     re-deriving entry order itself.
+
+    A section carrying skills instead of entries contributes nothing here,
+    with no extra check needed to make that true: `Section` forbids a
+    section from declaring both (`core.resume.models.Section`), so
+    `section.entries` is always empty on a skills section and the
+    comprehension below already skips it for free. This matters because a
+    skills section contributing a phantom entry anchor would collapse its
+    own title's region -- `_section_regions` ends a section's region at the
+    first anchor found among its *own* entries, so a spurious anchor there
+    would cut the region off before the title it needs to contain.
     """
     return [entry for section in doc.sections for entry in section.entries]
 
@@ -406,6 +477,83 @@ def _find(
     limit = len(flat) if end is None else end
     for i in range(start, limit):
         if _matches(value, flat[i], declared_values):
+            return i
+    return None
+
+
+def _row_items(segment: str) -> list[str]:
+    """A skills segment's comma-delimited items, normalised and casefolded.
+
+    Only `_find_skill` calls this. `_matches`'s ownership rule reasons about
+    which of several declared values gets to own a whole segment, which is
+    the wrong question for a skills run: every skill in it shares one
+    segment by construction (see the module docstring's skills paragraph),
+    so "SQL" sitting inside "PostgreSQL" there is two honest, adjacent
+    skills, not one value stealing another's segment. Splitting on the
+    comma the renderer itself put there and comparing an item exactly is
+    what makes that distinction, in place of ownership, correctly reject
+    `"Go"` against `"Going through the migration backlog"` (no comma
+    delimits "Go" out of "Going" at all, so it never becomes an item) while
+    accepting `"Go"` against `"SQL, PostgreSQL, Go, Golang"` (a standalone
+    item, `casefold()`-equal to the target, that `"Golang"` sitting next to
+    it does not disturb).
+    """
+    return [normalize(item).casefold() for item in segment.split(",")]
+
+
+def _find_skill(
+    value: str, flat: list[str], *, start: int = 0, end: int | None = None
+) -> int | None:
+    """The position of the first segment in `[start, end)` where `value` is
+    itself one of a skills run's comma-delimited items -- see `_row_items`
+    for why item-equality, not containment, is the right test for a skill.
+
+    A skills run long enough to wrap is split across *consecutive
+    segments*, one per physical row (`naive_segments` gives each wrapped
+    row its own segment; see the module docstring), and Typst only ever
+    breaks that wrap between words -- never inside a word -- so at most one
+    item is ever split by a row boundary, and the row receiving the split
+    item's tail always begins with that tail as its own first
+    comma-delimited item. Rejoining the last item of row `i` with the first
+    item of row `i + 1`, and testing that joined string as one further
+    candidate alongside each row's own items, recovers exactly that case.
+    Measured on this project's own render: a 20-skill run wraps across
+    three rows, and the boundary reads `'... Google Cloud'` then
+    `'Platform, Machine Learning ...'` -- the joined candidate
+    `'Google Cloud Platform'` is what a listed skill of that name is
+    actually compared against, and no other row in that render is touched.
+
+    The join is deliberately pairwise -- exactly one adjacent row on each
+    side of a boundary, never the whole region -- rather than joining every
+    segment `[start, end)` covers. A skills-only section (skills and
+    entries are mutually exclusive; see `core.resume.models.Section`)
+    always resolves an unbounded region (`_Scope.SECTION`'s own region ends
+    at its section's first found *entry* anchor, and a skills section has
+    none), so joining the whole region would, whenever anything follows
+    it, absorb a later section's own content into the last skill's text.
+    Checked directly: a five-skill run immediately followed by an
+    entry-less "Education" section, joined whole, turns the genuinely
+    listed `"Kubernetes"` into an unmatchable `"Kubernetes EDUCATION"`. The
+    pairwise join cannot do that: the extra candidate it offers at an
+    ordinary (non-wrap) row boundary is a nonsense concatenation no real
+    skill is ever named after, while each row's own, unjoined items --
+    including the genuine `"Kubernetes"` -- are still offered exactly as
+    they would be without this rule at all.
+    """
+    target = normalize(value).casefold()
+    if not target:
+        return None
+    limit = len(flat) if end is None else end
+    for i in range(start, limit):
+        items = _row_items(flat[i])
+        if target in items:
+            return i
+        if (
+            items
+            and i + 1 < len(flat)
+            and (following := _row_items(flat[i + 1]))
+            and f"{items[-1]} {following[0]}" == target
+        ):
             return i
     return None
 
@@ -591,7 +739,15 @@ def check_roundtrip(doc: ResumeDoc, pdf_path: Path) -> RoundTripResult:
         start, end = _region(
             d, header_end=header_end, section_regions=section_regions, entry_spans=entry_spans
         )
-        positions[d.field] = _find(d.value, flat, declared_values, start=start, end=end)
+        # A skill uses `_find_skill`'s delimited-item rule instead of
+        # `_matches`'s ownership rule -- see `_row_items`'s docstring for
+        # why the two must differ, and the module docstring's skills
+        # paragraph for where a reader meets this split for the first time.
+        positions[d.field] = (
+            _find_skill(d.value, flat, start=start, end=end)
+            if d.is_skill
+            else _find(d.value, flat, declared_values, start=start, end=end)
+        )
 
     critical = [_field_result(d, positions[d.field], flat) for d in declared if d.critical]
     missing = [f.field for f in critical if not f.recovered]

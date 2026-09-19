@@ -809,3 +809,145 @@ def test_every_font_carries_a_tounicode_map(tmp_path: Path) -> None:
                         break
             assert found_on_descendant, f"font without ToUnicode: {font.get('/BaseFont')}"
     assert checked > 0, "no embedded fonts found; the assertion above never ran"
+
+
+@pytest.mark.slow
+def test_skills_with_substring_siblings_are_all_recovered(tmp_path: Path) -> None:
+    """The defect a plain declaration would have shipped: a skills run
+    renders every skill into one comma-joined segment
+    (`['SQL, PostgreSQL, Go, Golang, Java, JavaScript, Python']`), so
+    `_matches`'s ownership rule -- refuse a value contained inside a
+    *longer* declared value in the same segment -- would refuse "SQL"
+    (inside "PostgreSQL"), "Go" (inside "Golang") and "Java" (inside
+    "JavaScript") on this completely honest list. `char_ratio == 1.0`
+    fails to hold unless every one of the seven skills below, not just the
+    four that survive bare containment, is individually recovered.
+    """
+    doc = ResumeDoc(
+        identity=Identity(name="Dana Vex", email="dana@example.com"),
+        sections=[
+            Section(
+                title="Skills",
+                skills=["SQL", "PostgreSQL", "Go", "Golang", "Java", "JavaScript", "Python"],
+            )
+        ],
+    )
+    out = tmp_path / "skills_siblings.pdf"
+    render(doc, out)
+    result = check_roundtrip(doc, out)
+    assert result.char_ratio == 1.0, result.char_ratio
+    assert result.verdict == "pass", result.findings
+
+
+@pytest.mark.slow
+def test_a_fabricated_skill_matching_no_delimited_item_is_not_recovered(tmp_path: Path) -> None:
+    """Guards the other direction: the delimited-item rule must still
+    reject a value that is a genuine substring of a rendered item but not
+    itself one of the run's items -- "SQ" inside the real "SQL" -- the same
+    way `_matches`'s ownership rule would have (for a different reason),
+    so replacing bare containment with delimited-item equality must not
+    also replace it with a looser containment check of its own.
+
+    Kept to a two-field document (no `Experience` section, no phone) so a
+    two-character miss is large enough, relative to the whole document's
+    declared characters, to cross `_CHAR_RATIO_THRESHOLD` rather than
+    disappearing into rounding.
+    """
+    rendered = ResumeDoc(
+        identity=Identity(name="Dana Vex", email="dana@example.com"),
+        sections=[Section(title="Skills", skills=["Python", "PostgreSQL", "SQL"])],
+    )
+    out = tmp_path / "fabricated_skill.pdf"
+    render(rendered, out)
+
+    claimed = rendered.model_copy(deep=True)
+    claimed.sections[0].skills.append("SQ")
+    result = check_roundtrip(claimed, out)
+
+    assert result.char_ratio < 0.98, result.char_ratio
+    assert result.verdict == "fail"
+
+
+@pytest.mark.slow
+def test_a_skill_split_across_a_line_wrap_is_still_recovered(tmp_path: Path) -> None:
+    """The consequence of matching by delimited item instead of raw
+    containment: a skill long enough that Typst's own line-wrap breaks it
+    across two rows no longer appears whole in either row's text. Measured
+    on this exact list: the wrap lands `'... Google Cloud'` /
+    `'Platform, Machine Learning ...'`, splitting "Google Cloud Platform"
+    across the boundary `_find_skill`'s row-pair bridge exists to close.
+    """
+    skills = [
+        "Python",
+        "PostgreSQL",
+        "Apache Airflow",
+        "Docker",
+        "Kubernetes",
+        "JavaScript",
+        "TypeScript",
+        "Amazon Web Services",
+        "Google Cloud Platform",
+        "Machine Learning",
+        "Natural Language Processing",
+        "Apache Spark",
+        "Pandas",
+        "NumPy",
+        "scikit-learn",
+        "TensorFlow",
+        "PyTorch",
+        "SQL",
+        "R",
+        "Continuous Integration",
+    ]
+    doc = ResumeDoc(
+        identity=Identity(name="Dana Vex", email="dana@example.com"),
+        sections=[Section(title="Skills", skills=skills)],
+    )
+    out = tmp_path / "skills_wrap.pdf"
+    render(doc, out)
+
+    rows = [seg for row in naive_segments(out) for seg in row]
+    wrapped = [r for r in rows if "Google Cloud" in r or "Platform" in r]
+    assert len(wrapped) == 2 and wrapped[0].endswith("Google Cloud"), (
+        f"fixture no longer wraps mid-item the way this test assumes: {wrapped}"
+    )
+
+    result = check_roundtrip(doc, out)
+    assert result.char_ratio == 1.0, result.char_ratio
+    assert result.verdict == "pass", result.findings
+
+
+@pytest.mark.slow
+def test_skills_only_section_does_not_break_a_later_sections_title(tmp_path: Path) -> None:
+    """A skills section always has zero entries of its own (entries and
+    skills are mutually exclusive -- `core.resume.models.Section`), so it
+    contributes no anchor to `_entries()`. This proves that absence doesn't
+    corrupt the flattened entry order a later section's own title region is
+    computed from: `Education`'s title and its one entry's heading must
+    both still be found, in order, with a `Skills` section sitting between
+    them and the document's own header.
+    """
+    doc = ResumeDoc(
+        identity=Identity(name="Dana Vex", email="dana@example.com"),
+        sections=[
+            Section(title="Skills", skills=["Python", "SQL"]),
+            Section(
+                title="Education",
+                entries=[
+                    Entry(
+                        heading="State University",
+                        location="Amherst, MA",
+                        start="Sep 2018",
+                        end="May 2022",
+                        bullets=[Bullet(text="Studied computer science", sources=["a"])],
+                    )
+                ],
+            ),
+        ],
+    )
+    out = tmp_path / "skills_then_education.pdf"
+    render(doc, out)
+    result = check_roundtrip(doc, out)
+    assert result.order_ok, result.out_of_order
+    assert result.char_ratio == 1.0, result.char_ratio
+    assert result.verdict == "pass", result.findings
