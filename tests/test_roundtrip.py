@@ -567,6 +567,100 @@ def test_name_whose_surname_appears_inside_an_employer_name_still_passes(
 
 
 @pytest.mark.slow
+def test_fabricated_section_title_matching_an_employer_is_not_recovered(
+    tmp_path: Path,
+) -> None:
+    """A section's title must be scoped to its own section's region for the
+    same reason identity is scoped to the header: an unscoped search for a
+    fabricated title that happens to equal an entry's employer name finds
+    that entry's genuine segment, and reports a heading that was dropped
+    from the page as fully recovered. Section titles are `critical=False`,
+    so this shows up as a `char_ratio` drop rather than a critical miss --
+    but the realistic form is a renderer losing a "Skills" heading while
+    the word "skills" survives somewhere in a bullet, and the ratio must
+    not report full recovery of a heading that is not on the page.
+
+    The rendered document's real section title is "Experience"; its one
+    entry's employer is "Skills Matrix Group". The document checked
+    against it declares the section title as "Skills Matrix Group" too --
+    a value that never appears anywhere as a title, but is the genuine text
+    of that entry's own heading.
+    """
+    rendered = ResumeDoc(
+        identity=Identity(name="Dana Vex", email="dana@example.com", phone="+1 555 0100"),
+        sections=[
+            Section(
+                title="Experience",
+                entries=[
+                    Entry(
+                        heading="Skills Matrix Group",
+                        location="Boston, MA",
+                        start="Jun 2024",
+                        end="Aug 2025",
+                        bullets=[Bullet(text="Owned the pipeline", sources=["a"])],
+                    )
+                ],
+            )
+        ],
+    )
+    out = tmp_path / "fabricated_title.pdf"
+    render(rendered, out)
+
+    claimed = rendered.model_copy(deep=True)
+    claimed.sections[0].title = "Skills Matrix Group"
+    result = check_roundtrip(claimed, out)
+
+    assert result.char_ratio < 1.0, "the fabricated title was scored as fully recovered characters"
+    assert result.verdict == "fail", result.findings
+
+
+@pytest.mark.slow
+def test_two_sections_with_honest_titles_are_both_recovered(tmp_path: Path) -> None:
+    """The regression section-region scoping could most easily cause: two
+    real sections, each with its own honest title, both still recovered.
+    Section 0's region ends at its own first found entry anchor, and
+    section 1's region starts just past it -- get either boundary wrong by
+    one segment and one of the two titles lands outside the region it
+    should have been found within.
+    """
+    doc = ResumeDoc(
+        identity=Identity(name="Dana Vex", email="dana@example.com", phone="+1 555 0100"),
+        sections=[
+            Section(
+                title="Experience",
+                entries=[
+                    Entry(
+                        heading="Northwind Analytics",
+                        location="Boston, MA",
+                        start="Jun 2024",
+                        end="Aug 2025",
+                        bullets=[Bullet(text="Owned the pipeline", sources=["a"])],
+                    )
+                ],
+            ),
+            Section(
+                title="Education",
+                entries=[
+                    Entry(
+                        heading="State University",
+                        location="Amherst, MA",
+                        start="Sep 2018",
+                        end="May 2022",
+                        bullets=[Bullet(text="Studied computer science", sources=["b"])],
+                    )
+                ],
+            ),
+        ],
+    )
+    out = tmp_path / "two_sections.pdf"
+    render(doc, out)
+    result = check_roundtrip(doc, out)
+
+    assert result.char_ratio == 1.0, result.char_ratio
+    assert result.verdict == "pass", result.findings
+
+
+@pytest.mark.slow
 def test_missing_phone_is_a_failure(tmp_path: Path) -> None:
     doc = DOC.model_copy(deep=True)
     out = tmp_path / "nophone.pdf"

@@ -34,42 +34,51 @@ date span and one location is ordinary); independent first-match lookup
 would resolve every repeated value back to the first entry that used it and
 manufacture inversions in a document that reads perfectly in order.
 
-Every other entry-owned field (subheading, location, dates, bullets) is
-recovered only from *its own entry's region* of the page, not from anywhere
-in the document. Searching the whole document for each field independently
-means a value missing from entry 0 can be satisfied by an identical value
-that legitimately belongs to entry 1 -- two jobs in the same city is
-ordinary, and a location genuinely dropped from one of them must not be
-covered for by the other one's. An entry's region runs from its own
-heading's position (found by the same forward-moving cursor the order
-check uses, advanced strictly past that position so two entries sharing one
-heading still claim two different regions) to the next entry's heading
-position, or the end of the document for the last entry. An entry whose own
-heading could not be found forward of the cursor has no region to scope
-into; its other fields fall back to a document-wide search rather than
-being reported as a pile of unrelated recovery failures on top of the one
-real ordering problem.
+**Every declared value belongs to a region of the page, and recovery is
+checked only within that region.** This is the load-bearing idea the rest
+of the module exists to implement, arrived at the hard way: three separate
+categories of declared value were each found, in turn, to be searched
+against the whole document with no region at all, and each time the same
+failure shape followed -- a value missing from where it belongs is
+satisfied by an *equal*, genuine value that belongs somewhere else. An
+entry's location dropped from entry 0 was satisfied by entry 1's identical
+city; a fabricated candidate name was satisfied by an unrelated entry's
+employer name; a fabricated section title was satisfied by an entry's
+heading. `_Scope` (below) is the fourth category found this way -- a
+section's own title -- closed the same way as the first three: give it a
+region. There is exactly one declared value that does *not* get a region of
+its own, and it is a deliberate, named exception rather than a leftover
+default: an entry's own heading, which cannot be scoped to the region it is
+what defines. See `_Scope`'s own docstring for the shape this takes in
+code, and `_region` for how a value's scope resolves to an actual
+`[start, end)` range.
 
-Identity fields (name, email, phone) get the same treatment for the same
-reason, scoped to the header block instead of an entry's region: the
-region running from the start of the document up to the first entry anchor
-that was actually found. A document-wide search for a fabricated name that
-happens to equal an unrelated entry's employer name would find that
-entry's genuine segment and report the fabrication as recovered -- the
-identical failure shape as an entry's dropped location being covered for by
-a different entry's identical city, just one level up. The header's end is
-defined by the first *found* anchor, not a fixed row count, so a template
-that adds a summary line above the first entry still gets a correctly
-sized header region rather than one hard-coded to today's layout. When no
-entry anchor was found at all (a document with no entries, or one where
-every entry's own heading search failed), identity falls back to a
-document-wide search too, since there is then no entry region for an
-identity value to be mistaken for.
+An entry's own region runs from its own heading's position (found by a
+cursor that only ever moves forward, advanced strictly past that position
+so two entries sharing one heading still claim two different regions) to
+the next entry's heading position, or the end of the document for the last
+entry. An entry whose own heading could not be found forward of the cursor
+has no region to scope into; its other fields fall back to an unscoped
+search rather than being reported as a pile of unrelated recovery failures
+on top of the one real ordering problem.
 
-A section's title is not treated as an identity field and stays
-document-scoped: it belongs to no entry either, but nothing yet has shown a
-section title colliding with an entry's content the way a name or a
-location can.
+Identity (name, email, phone) gets the header region: everything before the
+first entry anchor that was actually found. The header's end is defined by
+the first *found* anchor, not a fixed row count, so a template that adds a
+summary line above the first entry still gets a correctly sized header
+region rather than one hard-coded to today's layout. When no entry anchor
+was found at all (a document with no entries, or one where every entry's
+own heading search failed), identity falls back to an unscoped search too,
+since there is then no entry region for an identity value to be mistaken
+for.
+
+A section's title gets the region between sections: it starts just past the
+last entry anchor found in any section before it (or the start of the
+document, for the first section) and ends at the first anchor found among
+its *own* section's entries, unbounded if none of them have one. This
+shares `_entry_spans`'s accepted imprecision on purpose -- see that
+function's docstring for what that imprecision is and why it is accepted
+rather than chased down.
 
 `char_ratio` compares like with like: the summed length of every string the
 document declares that a naive parser actually recovered, over the summed
@@ -108,6 +117,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass, field
+from enum import Enum
 from pathlib import Path
 
 import pdfplumber
@@ -160,6 +170,41 @@ class RoundTripResult:
     findings: list[str] = field(default_factory=list[str])
 
 
+class _Scope(Enum):
+    """Which region of the page a declared value is allowed to be found in.
+
+    Every declared value gets one of these, chosen explicitly at the point
+    it is declared (`_Declared.scope` has no default) -- there is no
+    "otherwise" case a fifth kind of value could fall into without a
+    reader having to decide where it belongs. `DOCUMENT` is not that
+    fallback: it is a fourth, equally deliberate choice, made for exactly
+    one reason and used for exactly one kind of value. Three other kinds
+    of declared value were each, in turn, given `DOCUMENT` scope by
+    omission before this type existed, and each time an unscoped search
+    let a value missing from where it belonged be satisfied by an
+    unrelated, genuine value somewhere else on the page (see the module
+    docstring). `DOCUMENT` survives only for the one case where scoping is
+    actually impossible, not merely inconvenient: an entry's own heading
+    defines that entry's region, so searching for it *within* that region
+    would be circular.
+    """
+
+    HEADER = "header"
+    """Identity (name, email, phone): the region before the first entry."""
+
+    SECTION = "section"
+    """A section's own title: the region between the previous section's
+    last found entry and this section's own first found entry."""
+
+    ENTRY = "entry"
+    """Everything an entry owns except its own heading (subheading,
+    location, dates, bullets): that entry's own region."""
+
+    DOCUMENT = "document"
+    """An entry's own heading. The one deliberate exception -- see the
+    class docstring."""
+
+
 @dataclass(frozen=True)
 class _Declared:
     """One string the rendered document is expected to contain.
@@ -171,69 +216,82 @@ class _Declared:
     `char_ratio` measures, since they are still text the document declared
     and a naive parser was asked to recover.
 
-    `entry_index` is `None` for a field that belongs to no entry (identity,
-    a section's title); otherwise it names which entry's region (see
-    `check_roundtrip`) the field must be found within. `is_anchor` marks the
-    one field per entry -- its heading -- that defines that region rather
-    than being searched inside it: an entry's own heading is always
-    searched document-wide, because scoping it to "its own region" would be
-    circular, and because whether a naive parser can find a heading
-    *anywhere* is a question independent of whether it can find it in the
-    declared reading position (see the module docstring on why recovery and
-    order are checked separately). `is_identity` marks `name`, `email` and
-    `phone` for the header-block scoping described in the module
-    docstring; a section's title has `entry_index=None` too but
-    `is_identity=False`, and stays on an unscoped, document-wide search.
+    `scope` and `region_index` together say where this value is allowed to
+    be found -- see `_region` for how they resolve to an actual range.
+    `region_index` is `None` for `HEADER` and `DOCUMENT` scope (there is
+    only one header region, and `DOCUMENT` scope names no region at all);
+    for `SECTION` scope it is that section's index, and for `ENTRY` scope
+    it is that entry's index.
     """
 
     field: str
     value: str
     critical: bool
-    entry_index: int | None = None
-    is_anchor: bool = False
-    is_identity: bool = False
+    scope: _Scope
+    region_index: int | None = None
 
 
 def _declared_fields(doc: ResumeDoc) -> list[_Declared]:
     out: list[_Declared] = [
-        _Declared("name", doc.identity.name, critical=True, is_identity=True),
-        _Declared("email", doc.identity.email, critical=True, is_identity=True),
+        _Declared("name", doc.identity.name, critical=True, scope=_Scope.HEADER),
+        _Declared("email", doc.identity.email, critical=True, scope=_Scope.HEADER),
     ]
     if doc.identity.phone:
-        out.append(_Declared("phone", doc.identity.phone, critical=True, is_identity=True))
+        out.append(_Declared("phone", doc.identity.phone, critical=True, scope=_Scope.HEADER))
     index = 0
     for section_index, section in enumerate(doc.sections):
-        out.append(_Declared(f"section_title[{section_index}]", section.title, critical=False))
+        out.append(
+            _Declared(
+                f"section_title[{section_index}]",
+                section.title,
+                critical=False,
+                scope=_Scope.SECTION,
+                region_index=section_index,
+            )
+        )
         for entry in section.entries:
             out.append(
-                _Declared(
-                    f"employer[{index}]",
-                    entry.heading,
-                    critical=True,
-                    entry_index=index,
-                    is_anchor=True,
-                )
+                _Declared(f"employer[{index}]", entry.heading, critical=True, scope=_Scope.DOCUMENT)
             )
             if entry.subheading:
                 out.append(
-                    _Declared(f"title[{index}]", entry.subheading, critical=True, entry_index=index)
+                    _Declared(
+                        f"title[{index}]",
+                        entry.subheading,
+                        critical=True,
+                        scope=_Scope.ENTRY,
+                        region_index=index,
+                    )
                 )
             if entry.location:
                 out.append(
                     _Declared(
-                        f"location[{index}]", entry.location, critical=True, entry_index=index
+                        f"location[{index}]",
+                        entry.location,
+                        critical=True,
+                        scope=_Scope.ENTRY,
+                        region_index=index,
                     )
                 )
             if entry.start:
                 span = f"{entry.start} - {entry.end}" if entry.end else entry.start
-                out.append(_Declared(f"dates[{index}]", span, critical=True, entry_index=index))
+                out.append(
+                    _Declared(
+                        f"dates[{index}]",
+                        span,
+                        critical=True,
+                        scope=_Scope.ENTRY,
+                        region_index=index,
+                    )
+                )
             for bullet_index, bullet in enumerate(entry.bullets):
                 out.append(
                     _Declared(
                         f"bullet[{index}][{bullet_index}]",
                         bullet.text,
                         critical=False,
-                        entry_index=index,
+                        scope=_Scope.ENTRY,
+                        region_index=index,
                     )
                 )
             index += 1
@@ -243,9 +301,11 @@ def _declared_fields(doc: ResumeDoc) -> list[_Declared]:
 def _entries(doc: ResumeDoc) -> list[Entry]:
     """Every entry, in declared order, across all sections.
 
-    This flattened order is what `entry_index` in `_declared_fields`
-    counts against, and what the order check and the per-entry regions in
-    `check_roundtrip` both walk.
+    This flattened order is what `region_index` counts against for
+    `_Scope.ENTRY`-scoped fields in `_declared_fields`, and what the order
+    check and `_entry_spans` both walk. `_section_regions` walks the same
+    flattened `anchors` list in slices, one per section, rather than
+    re-deriving entry order itself.
     """
     return [entry for section in doc.sections for entry in section.entries]
 
@@ -282,21 +342,21 @@ def _matches(value: str, segment: str, declared_values: Sequence[str]) -> bool:
     entries sharing one date span) doesn't block itself, but that same
     exemption means two *equal* values that the document declares in two
     logically distinct places pass straight through this function
-    unblocked. That has shown up twice, in the same shape: a location
-    genuinely missing from entry 0, satisfied by an identical city that
-    legitimately belongs to entry 1, and a fabricated name equal to an
-    unrelated entry's employer name, satisfied by that entry's own segment.
-    Neither is a defect in this function to fix -- `check_roundtrip` closes
-    both by deciding, before it ever calls this function, which segments a
-    given value is even allowed to be searched against (an entry's own
-    region, or the header block before the first entry, via `_find`'s
-    `start`/`end`); this function has no notion of "region" at all and
-    reasons about the segment it is handed on its own terms. Second, this
-    function only ever inspects one segment at a time, so a value that
-    spans several segments (a heading long enough to wrap across two or
-    three rows) never appears whole in any single segment and so never
-    reaches the point where this rule would even apply -- that case fails
-    for an unrelated reason (see the module docstring's closing
+    unblocked. That has shown up several times, in the same shape: a
+    location genuinely missing from entry 0, satisfied by an identical city
+    that legitimately belongs to entry 1; a fabricated name equal to an
+    unrelated entry's employer name; a fabricated section title equal to an
+    entry's heading. Neither this function nor any of its callers fixes
+    that by comparing values more cleverly -- `check_roundtrip` closes it
+    for every declared value by deciding, before it ever calls this
+    function, which segments that value is even allowed to be searched
+    against (see `_Scope` and `_region`); this function has no notion of
+    "region" at all and reasons about the segment it is handed on its own
+    terms. Second, this function only ever inspects one segment at a time,
+    so a value that spans several segments (a heading long enough to wrap
+    across two or three rows) never appears whole in any single segment and
+    so never reaches the point where this rule would even apply -- that
+    case fails for an unrelated reason (see the module docstring's closing
     paragraphs), not because this rule caught or missed anything.
 
     Within what it does check -- whether `value` is a legitimate reading of
@@ -309,9 +369,8 @@ def _matches(value: str, segment: str, declared_values: Sequence[str]) -> bool:
     anyway, because it reasons about whole-segment containment and cannot
     tell those two occurrences of "NY" apart. A missed recovery is the safe
     direction for a gate whose job is to reject documents it cannot vouch
-    for, so that
-    spurious failure is accepted here rather than chased with position
-    tracking this module does not otherwise need.
+    for, so that spurious failure is accepted here rather than chased with
+    position tracking this module does not otherwise need.
     """
     v = normalize(value).casefold()
     s = segment.casefold()
@@ -337,8 +396,8 @@ def _find(
     position: two anchors can legitimately share one segment (a merged
     field), and requiring strictly-increasing positions would report that
     as an order failure it isn't. `end` defaults to the whole of `flat`;
-    callers scoping a search to one entry's region (`check_roundtrip`) pass
-    the next entry's anchor position instead.
+    every caller that scopes a search to a region narrower than the whole
+    document (`_region`) passes an explicit boundary instead.
     """
     if not normalize(value):
         return None
@@ -387,6 +446,11 @@ def _entry_spans(anchors: list[int | None], flat_len: int) -> list[tuple[int, in
     The verdict is sound; do not read a passing `FieldResult` for a
     specific field as proof that field's own value was what was actually
     found there.
+
+    `_section_regions` shares this same imprecision, for the same reason,
+    one level up: a section whose every entry fails its own anchor search
+    contributes no boundary either, and the previous section's title region
+    widens past it in exactly the same way.
     """
     spans: list[tuple[int, int] | None] = []
     for i, position in enumerate(anchors):
@@ -396,6 +460,73 @@ def _entry_spans(anchors: list[int | None], flat_len: int) -> list[tuple[int, in
         following = next((q for q in anchors[i + 1 :] if q is not None), flat_len)
         spans.append((position, following))
     return spans
+
+
+def _section_regions(doc: ResumeDoc, anchors: list[int | None]) -> list[tuple[int, int | None]]:
+    """The `[start, end)` region each section's own title must be found
+    within, one entry per section, in declared order.
+
+    A section's region starts just past the last entry anchor found in any
+    section before it (or `0`, for the first section) and ends at the first
+    anchor found among its *own* entries, or is left unbounded (`None`) if
+    none of them have one -- `_find`'s own `end=None` already means "search
+    to the end of `flat`", so leaving the end as `None` here gives that
+    fallback for free, the same trick `check_roundtrip` uses for the header
+    region. `anchors` is walked in slices matching each section's entry
+    count, rather than re-searching anything: it is the same list, built
+    once, that the order check and `_entry_spans` also consume. See
+    `_entry_spans` for the imprecision this shares with entry regions when
+    a whole section's worth of anchors fails to be found.
+    """
+    regions: list[tuple[int, int | None]] = []
+    start = 0
+    index = 0
+    for section in doc.sections:
+        count = len(section.entries)
+        section_anchors = anchors[index : index + count]
+        end = next((a for a in section_anchors if a is not None), None)
+        regions.append((start, end))
+        found = [a for a in section_anchors if a is not None]
+        if found:
+            start = max(found) + 1
+        index += count
+    return regions
+
+
+def _region(
+    d: _Declared,
+    *,
+    header_end: int | None,
+    section_regions: list[tuple[int, int | None]],
+    entry_spans: list[tuple[int, int] | None],
+) -> tuple[int, int | None]:
+    """The `[start, end)` range `d.value` is allowed to be found within,
+    resolved from `d.scope` -- the one place this module maps "which kind
+    of declared value is this" to "which segments may it come from."
+
+    Every `_Scope` member is handled by name, including `DOCUMENT`, so
+    that an unscoped search stays a visible, deliberate branch rather than
+    something a value falls into by not matching an earlier case.
+    """
+    if d.scope is _Scope.HEADER:
+        return (0, header_end)
+    if d.scope is _Scope.SECTION:
+        assert d.region_index is not None, "a section-scoped field always names its section"
+        return section_regions[d.region_index]
+    if d.scope is _Scope.ENTRY:
+        assert d.region_index is not None, "an entry-scoped field always names its entry"
+        span = entry_spans[d.region_index]
+        if span is not None:
+            return span
+        # This entry's own heading couldn't be found forward of the
+        # cursor, so it has no region to scope into. Falling back to an
+        # unscoped search here means one ordering problem is reported
+        # once, not amplified into a recovery failure on every other field
+        # this entry declares.
+        return (0, None)
+    # `_Scope.DOCUMENT`: an entry's own heading, which cannot be scoped to
+    # the region it is what defines -- see `_Scope`'s own docstring.
+    return (0, None)
 
 
 def _field_result(d: _Declared, position: int | None, flat: list[str]) -> FieldResult:
@@ -442,38 +573,23 @@ def check_roundtrip(doc: ResumeDoc, pdf_path: Path) -> RoundTripResult:
         anchors.append(position)
         if position is not None:
             cursor = position + 1
-    spans = _entry_spans(anchors, len(flat))
 
-    # The header block: everything before the first entry anchor that was
-    # actually found. `None` (no entry anchor found at all -- no entries,
-    # or every entry's own heading search failed) means there is no entry
-    # region for an identity value to be confused with, so identity falls
-    # back to an unscoped search -- `_find`'s own `end=None` already means
-    # "search to the end of `flat`", so passing `first_anchor` straight
-    # through as `end` gives the fallback for free.
-    first_anchor = next((a for a in anchors if a is not None), None)
+    entry_spans = _entry_spans(anchors, len(flat))
+    section_regions = _section_regions(doc, anchors)
+    # The header region: everything before the first entry anchor found
+    # anywhere in the document. `None` (no entry anchor found at all -- no
+    # entries, or every entry's own heading search failed) means there is
+    # no entry region for an identity value to be confused with, and
+    # `_region` passes that straight through as `_find`'s `end`, which
+    # already means "search to the end of `flat`" when it is `None`.
+    header_end = next((a for a in anchors if a is not None), None)
 
     positions: dict[str, int | None] = {}
     for d in declared:
-        if d.is_identity:
-            positions[d.field] = _find(d.value, flat, declared_values, end=first_anchor)
-            continue
-        if d.entry_index is None or d.is_anchor:
-            # Document-scoped: a section's title, or an entry's own
-            # heading (which cannot be scoped to a region it is what
-            # defines).
-            positions[d.field] = _find(d.value, flat, declared_values)
-            continue
-        span = spans[d.entry_index]
-        if span is None:
-            # This entry's own heading couldn't be found forward of the
-            # cursor, so it has no region to scope into. Falling back to a
-            # document-wide search here means one ordering problem is
-            # reported once, not amplified into a recovery failure on
-            # every other field this entry declares.
-            positions[d.field] = _find(d.value, flat, declared_values)
-        else:
-            positions[d.field] = _find(d.value, flat, declared_values, start=span[0], end=span[1])
+        start, end = _region(
+            d, header_end=header_end, section_regions=section_regions, entry_spans=entry_spans
+        )
+        positions[d.field] = _find(d.value, flat, declared_values, start=start, end=end)
 
     critical = [_field_result(d, positions[d.field], flat) for d in declared if d.critical]
     missing = [f.field for f in critical if not f.recovered]
