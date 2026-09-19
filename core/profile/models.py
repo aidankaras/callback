@@ -11,9 +11,9 @@ from pydantic import BaseModel, Field, model_validator
 class Identity(BaseModel):
     """Contact details for the candidate: name, email, and other reachable-by info.
 
-    Document rendering, and the round-trip check that will validate this
-    against a generated PDF, are not built yet; today this model only
-    validates shape.
+    This model only validates shape; whether these values actually survive
+    rendering into a readable PDF is `core.checks.roundtrip.check_roundtrip`'s
+    job, not this class's.
     """
 
     model_config = {"extra": "forbid"}
