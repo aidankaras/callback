@@ -13,6 +13,7 @@ from core.checks.hidden import (
     check_hidden,
     contrast_ratio,
     is_default_ignorable,
+    is_explicit_colour,
     page_background,
     to_rgb,
 )
@@ -24,16 +25,20 @@ from tests.fixtures.make_hidden import (
     BYTE_ORDER_MARK_CHAR,
     COMBINING_GRAPHEME_JOINER,
     COMBINING_GRAPHEME_JOINER_CHAR,
+    GRADIENT_BACKGROUND,
     GREY_INVISIBLE,
     GREY_LEGIBLE,
+    JUSTIFIED_HYPHENATED,
     METADATA_LEAK,
     NAVY_BACKGROUND_WHITE_TEXT,
     NAVY_ON_NAVY,
     OFFPAGE,
     OFFPAGE_VERTICAL,
+    OUTLINE_HEADING,
     RIGHT_TO_LEFT_OVERRIDE,
     SOFT_HYPHEN,
     SOFT_HYPHEN_CHAR,
+    THICK_WHITE_STROKE,
     TINY,
     VARIATION_SELECTOR,
     VARIATION_SELECTOR_16,
@@ -57,6 +62,7 @@ def test_white_on_white_text_is_detected(tmp_path: Path) -> None:
     with pdfplumber.open(str(out)) as pdf:
         page = pdf.pages[0]
         background = page_background(page)
+        assert background is not None
         below_floor = [
             c
             for c in page.chars
@@ -91,6 +97,7 @@ def test_grey_below_the_old_component_floor_is_detected(tmp_path: Path) -> None:
     with pdfplumber.open(str(out)) as pdf:
         page = pdf.pages[0]
         background = page_background(page)
+        assert background is not None
         greys = [
             c
             for c in page.chars
@@ -123,6 +130,7 @@ def test_pale_grey_is_not_a_false_positive(tmp_path: Path) -> None:
     with pdfplumber.open(str(out)) as pdf:
         page = pdf.pages[0]
         background = page_background(page)
+        assert background is not None
         styled = [
             c
             for c in page.chars
@@ -157,6 +165,7 @@ def test_navy_on_navy_text_is_detected(tmp_path: Path) -> None:
     with pdfplumber.open(str(out)) as pdf:
         page = pdf.pages[0]
         background = page_background(page)
+        assert background is not None
         assert background == pytest.approx((0.2, 0.2, 0.4), abs=0.01), background
         hidden_candidates = [
             c
@@ -191,6 +200,7 @@ def test_white_text_on_navy_background_is_not_a_false_positive(tmp_path: Path) -
     with pdfplumber.open(str(out)) as pdf:
         page = pdf.pages[0]
         background = page_background(page)
+        assert background is not None
         assert background == pytest.approx((0.2, 0.2, 0.4), abs=0.01), background
         white_chars = [
             c
@@ -205,6 +215,175 @@ def test_white_text_on_navy_background_is_not_a_false_positive(tmp_path: Path) -
 
     verdict, findings = check_hidden(out)
     assert verdict == "pass", findings
+
+
+@pytest.mark.slow
+def test_default_stroke_does_not_rescue_invisible_fill(tmp_path: Path) -> None:
+    """`pdfplumber` reports a stroke colour for every character, including
+    ordinary text that never set one -- confirmed directly: an untouched
+    stroke colour is `(0,)`, a plain Python `int`, because `pdfminer`
+    initializes it to the literal `int` `0` and only ever replaces it with
+    a `float`-valued tuple built from a real colour operator. Reading the
+    stroke naively, without `is_explicit_colour`'s guard, would let that
+    default -- black, always high-contrast against a light page -- rescue
+    the contrast of any invisible white-fill glyph for free.
+
+    Mutation: remove the `is_explicit_colour(raw_stroke)` guard from
+    core.checks.hidden._invisible_fill, treating every reported stroke
+    colour as real -- this test fails, since WHITE's fill-only glyphs
+    would then read as visible through their untouched default black
+    stroke.
+    """
+    out = tmp_path / "white_for_stroke_guard.pdf"
+    build(WHITE, out, FONT_DIR)
+
+    with pdfplumber.open(str(out)) as pdf:
+        page = pdf.pages[0]
+        payload_chars = [
+            c
+            for c in page.chars
+            if str(c.get("text", "")).strip() and c["text"] not in "Visible line of the document."
+        ]
+    assert payload_chars, "fixture did not render any payload glyph"
+    # Fixture premise: this fixture never sets a stroke, so pdfplumber's
+    # reported stroke colour for its payload text is the untouched
+    # pdfminer default, not a real, explicit colour.
+    assert not is_explicit_colour(payload_chars[0]["stroking_color"]), payload_chars[0][
+        "stroking_color"
+    ]
+
+    verdict, findings = check_hidden(out)
+    assert verdict == "fail"
+    assert any(f.kind == HiddenKind.INVISIBLE_TEXT for f in findings), findings
+
+
+@pytest.mark.slow
+def test_outline_heading_is_not_a_false_positive(tmp_path: Path) -> None:
+    """The false positive a fill-only check cannot avoid: white fill
+    (matching the page) traced with an explicit, high-contrast black
+    stroke -- a legible outlined heading, not hidden text. The fill alone
+    contrasts at 1.0:1, indistinguishable from genuine white-on-white
+    text, but the stroke that actually delineates every letter contrasts
+    at roughly 21:1.
+
+    Mutation: remove the stroke-reading branch from
+    core.checks.hidden._invisible_fill, leaving only the fill's own
+    contrast -- this test fails, since the fill alone reads as invisible.
+    """
+    out = tmp_path / "outline.pdf"
+    build(OUTLINE_HEADING, out, FONT_DIR)
+
+    with pdfplumber.open(str(out)) as pdf:
+        page = pdf.pages[0]
+        background = page_background(page)
+        assert background is not None
+        heading_chars = [
+            c
+            for c in page.chars
+            if str(c.get("text", "")).strip() and c["text"] not in "Visible line of the document."
+        ]
+    assert heading_chars, "fixture did not render any heading glyph"
+    char = heading_chars[0]
+    fill = to_rgb(char["non_stroking_color"])
+    stroke_raw = char["stroking_color"]
+    assert fill is not None
+    # Fixture premise: the fill alone would fail contrast, and the stroke
+    # really is an explicit, high-contrast colour -- both are load-bearing
+    # for this test to mean anything.
+    assert contrast_ratio(fill, background) < MIN_CONTRAST_RATIO
+    assert is_explicit_colour(stroke_raw)
+    stroke = to_rgb(stroke_raw)
+    assert stroke is not None
+    assert contrast_ratio(stroke, background) >= MIN_CONTRAST_RATIO
+
+    verdict, findings = check_hidden(out)
+    assert verdict == "pass", findings
+
+
+@pytest.mark.slow
+def test_thick_occluding_stroke_is_a_documented_blind_spot(tmp_path: Path) -> None:
+    """A fill (black) that contrasts perfectly well on its own, paired with
+    an explicit, low-contrast stroke (white) wide enough (3pt on 10pt text)
+    to paint over nearly all of that fill -- rendered directly to an image,
+    the payload is blank but for a single stray mark. `_invisible_fill`
+    takes the *better* of the fill's and the stroke's own contrast against
+    the background (see its docstring for why), so the fill's good contrast
+    alone reports this glyph as visible. Distinguishing this from a
+    thin, genuinely decorative stroke needs the stroke's actual width,
+    which `pdfplumber` does not expose per character -- see the module
+    docstring's "Documented, not implemented" section.
+
+    This fixture is not a regression test in the usual sense: no mutation
+    of `_invisible_fill`'s combining rule closes this gap without breaking
+    `test_outline_heading_is_not_a_false_positive` above (verified: trusting
+    an explicit stroke outright, instead of the better of the two, flags a
+    decorative low-contrast stroke on already-legible fill text as
+    invisible). It exists to keep this known gap under a real, running
+    fixture rather than only as prose.
+    """
+    out = tmp_path / "thick_stroke.pdf"
+    build(THICK_WHITE_STROKE, out, FONT_DIR)
+
+    with pdfplumber.open(str(out)) as pdf:
+        page = pdf.pages[0]
+        background = page_background(page)
+        assert background is not None
+        payload_chars = [
+            c
+            for c in page.chars
+            if str(c.get("text", "")).strip() and c["text"] not in "Visible line of the document."
+        ]
+    assert payload_chars, "fixture did not render any payload glyph"
+    char = payload_chars[0]
+    fill = to_rgb(char["non_stroking_color"])
+    stroke_raw = char["stroking_color"]
+    assert fill is not None
+    # Fixture premise: the fill contrasts fine on its own, and the stroke
+    # really is an explicit, low-contrast colour -- exactly the shape that
+    # defeats the "better of the two" rule.
+    assert contrast_ratio(fill, background) >= MIN_CONTRAST_RATIO
+    assert is_explicit_colour(stroke_raw)
+    stroke = to_rgb(stroke_raw)
+    assert stroke is not None
+    assert contrast_ratio(stroke, background) < MIN_CONTRAST_RATIO
+
+    verdict, findings = check_hidden(out)
+    assert verdict == "pass", findings
+
+
+@pytest.mark.slow
+def test_gradient_background_reports_unknown(tmp_path: Path) -> None:
+    """A gradient page fill still produces the page-covering rect
+    `page_background` looks for, but that rect's colour is a pattern name
+    (`"p0"`), not a colour `to_rgb` can parse.
+
+    Mutation: revert core.checks.hidden.page_background to fall back to
+    white whenever it found *any* colour on a qualifying rect, dropping
+    the `found_unreadable` tracking -- this test fails, since the page
+    would then silently default to a white background instead of
+    reporting `background_unknown`.
+    """
+    out = tmp_path / "gradient.pdf"
+    build(GRADIENT_BACKGROUND, out, FONT_DIR)
+
+    with pdfplumber.open(str(out)) as pdf:
+        page = pdf.pages[0]
+        covering_rects = [
+            r
+            for r in page.rects
+            if r.get("fill")
+            and float(r.get("width", 0)) * float(r.get("height", 0))
+            >= 0.9 * float(page.width) * float(page.height)
+        ]
+        assert covering_rects, "fixture did not render a page-covering rect"
+        colour = covering_rects[0]["non_stroking_color"]
+        assert isinstance(colour, str), colour
+        assert to_rgb(colour) is None
+        assert page_background(page) is None
+
+    verdict, findings = check_hidden(out)
+    assert verdict == "fail"
+    assert any(f.kind == HiddenKind.BACKGROUND_UNKNOWN for f in findings), findings
 
 
 @pytest.mark.slow
@@ -243,13 +422,16 @@ def test_zero_width_character_is_detected(tmp_path: Path) -> None:
 
 
 @pytest.mark.slow
-def test_soft_hyphen_is_detected(tmp_path: Path) -> None:
-    """A soft hyphen (U+00AD) is inside the Default_Ignorable_Code_Point
-    range table's own entry for it.
+def test_soft_hyphen_is_not_flagged(tmp_path: Path) -> None:
+    """A soft hyphen (U+00AD) survives rendering but is deliberately absent
+    from `_DEFAULT_IGNORABLE_RANGES` -- see the note beside that table for
+    why: it carries no letters, so it cannot smuggle a keyword, and it is a
+    routine artefact of ordinary hyphenated, justified typesetting.
 
-    Mutation: delete the (0x00AD, 0x00AD) tuple from
+    Mutation: add (0x00AD, 0x00AD) back into
     core.checks.hidden._DEFAULT_IGNORABLE_RANGES -- this test fails, since
-    no other entry in the table covers U+00AD.
+    the character this fixture's own premise confirms is present would
+    then be flagged.
     """
     out = tmp_path / "soft_hyphen.pdf"
     build(SOFT_HYPHEN, out, FONT_DIR)
@@ -257,10 +439,33 @@ def test_soft_hyphen_is_detected(tmp_path: Path) -> None:
     with pdfplumber.open(str(out)) as pdf:
         raw = pdf.pages[0].extract_text() or ""
     assert SOFT_HYPHEN_CHAR in raw, repr(raw)
+    assert not is_default_ignorable(raw)
 
     verdict, findings = check_hidden(out)
-    assert verdict == "fail"
-    assert any(f.kind == HiddenKind.UNICODE_CHANNEL for f in findings), findings
+    assert verdict == "pass", findings
+
+
+@pytest.mark.slow
+def test_justified_hyphenation_is_not_flagged(tmp_path: Path) -> None:
+    """A realistic ordinarily-hyphenated, justified column -- the shape a
+    genuine imported resume would actually produce, not a single contrived
+    character. Measured: this fixture's own paragraph, at this column
+    width, produces four soft hyphens.
+
+    Mutation: add (0x00AD, 0x00AD) back into
+    core.checks.hidden._DEFAULT_IGNORABLE_RANGES -- this test fails, since
+    a document that legitimately contains four of them would then fail the
+    gate entirely.
+    """
+    out = tmp_path / "justified.pdf"
+    build(JUSTIFIED_HYPHENATED, out, FONT_DIR)
+
+    with pdfplumber.open(str(out)) as pdf:
+        raw = pdf.pages[0].extract_text() or ""
+    assert raw.count(SOFT_HYPHEN_CHAR) == 4, repr(raw)
+
+    verdict, findings = check_hidden(out)
+    assert verdict == "pass", findings
 
 
 @pytest.mark.slow
@@ -476,6 +681,7 @@ def test_clean_render_passes(tmp_path: Path) -> None:
 
     assert sizes == {9.0, 10.0, 11.0, 16.0}, sizes
     assert colours == {(0.0,)}, colours
+    assert background is not None
     assert background == (1.0, 1.0, 1.0), background
     assert contrast_ratio((0.0, 0.0, 0.0), background) > MIN_CONTRAST_RATIO
     assert not is_default_ignorable(raw)

@@ -32,15 +32,15 @@ only caller renders documents of the safer kind.
 This module looks for the five channels that let a document diverge that
 way, each closing a distinct attack and each blind to the others:
 
-- `invisible_text`: a glyph whose fill fails to contrast against the fill
-  actually behind it. Closes colour-matching keyword stuffing, including
-  against a non-white page background (a coloured banner or panel), and
-  does not flag legible text set against such a background purely for
-  visual contrast. Misses a fill that is contrast-adequate but drawn behind
-  a *different*, opaque shape occupying the same region (that is `pdfplumber`'s
-  reported fill colour disagreeing with what a viewer actually sees, a
-  distinct mechanism from anything checked here) and misses opacity
-  entirely -- see "Documented, not implemented" below.
+- `invisible_text`: a glyph whose fill and, if the document set one, stroke
+  both fail to contrast against the fill actually behind it. Closes
+  colour-matching keyword stuffing, including against a non-white page
+  background (a coloured banner or panel), and reading both channels closes
+  a false positive the fill-only version of this check could not avoid:
+  stroke-only outlined text (a white-filled, black-stroked heading) is
+  legible and must not be flagged just because its *fill* happens to match
+  the page. See `_invisible_fill` for what reading both channels does and
+  does not close.
 - `tiny_text`: a glyph below `MIN_FONT_SIZE`. Closes text shrunk small
   enough that a reader skims past it without ever consciously reading it.
   Misses anything at or above the floor, however densely packed or
@@ -60,23 +60,47 @@ way, each closing a distinct attack and each blind to the others:
   files, or any other part of the PDF structure this check never opens.
 - `unicode_channel`: a code point in the extracted text with Unicode's own
   `Default_Ignorable_Code_Point` property -- the set Unicode itself defines
-  as "specified to have no visible glyph." Closes content smuggled through
-  characters a compliant renderer draws with no ink even though the glyph
-  run "contains" them. A right-to-left or left-to-right override is also
-  flagged separately as `bidi_override`; see `check_hidden`'s docstring for
-  why.
+  as "specified to have no visible glyph," with one deliberate exclusion
+  (the soft hyphen; see the note beside `_DEFAULT_IGNORABLE_RANGES`).
+  Closes content smuggled through characters a compliant renderer draws
+  with no ink even though the glyph run "contains" them. A right-to-left
+  or left-to-right override is also flagged separately as `bidi_override`;
+  see `check_hidden`'s docstring for why.
 
-None of these five is a substitute for another; a document that clears all
-five still is not proven free of every conceivable hidden channel (XMP
+A sixth finding, `background_unknown`, is not a channel of its own but a
+signal that `invisible_text` could not be checked at all on a page: see
+`page_background`.
+
+None of these six is a substitute for another; a document that clears all
+of them still is not proven free of every conceivable hidden channel (XMP
 metadata and embedded-file streams are two channels no check here reads at
 all), only free of the ones a resume actually has reason to carry.
 
-**Documented, not implemented.** Three further channels were found by
-direct measurement against real renders and are not checked here, because
-closing any of them needs content-stream analysis this module's
-colour/size/position approach cannot reach -- reading the operators that
-built the page, not just the geometry `pdfplumber` derives from them. A
-half-implementation of any of these would be worse than stating the gap:
+**Documented, not implemented.** Every case below shares one root cause:
+visibility is a property of what gets *painted*, and every check in this
+module infers it instead from partial content-stream metadata -- a colour
+value, a reported size, a bounding box. That inference is an unbounded
+chase: closing one gap this way just reveals the next piece of metadata a
+document could vary instead. A real content-stream walker (tracking the
+graphics-state stack across every `q`/`Q`, every `gs`, every `w`) would
+close some of these; a genuinely structural answer closes all of them at
+once by comparing rendered *pixels* rather than any content-stream metadata
+-- what a page looks like does not care which operator produced it.
+
+A first attempt at that structural answer was tried and rejected: counting
+the number of distinct colours inside a glyph's rendered bounding box
+(rendered with `pypdfium2`, already available transitively through
+`pdfplumber`, and BSD-3 licensed like it) measures 1 distinct colour for a
+genuinely invisible glyph (the thick-stroke case below) and 129 for an
+ordinary, clearly visible letter -- but it also measures 12 for the
+opaque-box case and 110 for the gradient-background case below, both
+reading as "visible" by that count, because the box's edge and the
+gradient's own variation inside the glyph's box are what get counted, not
+the text. A real pixel-based check needs an inset margin that avoids
+whatever is drawn at the very edge of a glyph's box, a local-contrast
+measure rather than a raw colour count, and a calibrated threshold -- a
+design in its own right, not a drop-in replacement for what this module
+does today.
 
 - *Zero opacity.* `#text(fill: rgb(0%, 0%, 0%, 0%))` paints nothing, yet
   `pdfplumber`'s char dict reports a fully opaque `(0.0, 0.0, 0.0)` for it
@@ -105,6 +129,67 @@ half-implementation of any of these would be worse than stating the gap:
   the vertical one. Weaker than the other two even as a gap: a visible
   smudge of compressed ink remains on the page, so this is not fully
   invisible the way the other two are, only unreadable.
+- *An opaque shape drawn behind matching text.* `#box(fill: rgb(20%, 20%,
+  40%))[#text(fill: rgb(20%, 20%, 40%))[...]]` paints the text in the exact
+  colour of a shape sitting directly behind it, which `_invisible_fill`
+  cannot see: it only ever compares a glyph's own fill against
+  `page_background`, and `page_background` only recognises a rect covering
+  at least 90% of the page, not a small box sized to one line of text --
+  measured: a box around one payload line covers 172.61pt x 6.58pt, about
+  0.23% of a 612x792 page. `pdfplumber`'s reported fill colour is correct
+  here (it does match the true background at that point on the page); the
+  gap is that this module never looks at anything smaller than the whole
+  page when asking what a glyph sits on.
+- *A non-solid page background.* `#set page(fill: gradient.linear(...))`
+  still produces a single rect covering the whole page, so `page_background`
+  finds it -- but its `non_stroking_color` is the string `"p0"`, a pattern
+  name, not a colour tuple, because a gradient or tiling pattern fill is a
+  separate PDF resource referenced by name rather than a colour value in
+  the content stream. `to_rgb` correctly returns `None` for it, and
+  `page_background` reports `background_unknown` rather than guessing --
+  see `page_background` -- but that only makes the *uncertainty* visible;
+  it does not let `invisible_text` actually check a page like this at all,
+  since there is no single background colour to check contrast against in
+  the first place.
+- *The CMYK-to-RGB conversion this module uses is not the only one, and
+  they disagree.* `to_rgb` converts CMYK multiplicatively
+  (`r = (1-c)(1-k)`, and so on), while the PDF specification's own
+  fallback conversion for a device that cannot render CMYK directly is
+  additive (`r = 1 - min(1, c+k)`). The two formulas model different
+  physical assumptions about how ink layers combine, and they diverge
+  measurably: `cmyk(50%, 30%, 20%, 40%)` computes a contrast of 5.67:1
+  against white under the multiplicative formula this module uses versus
+  9.20:1 under the additive one -- both clear `MIN_CONTRAST_RATIO` here,
+  but a random search over CMYK values found real combinations where they
+  do not agree which side of the floor a colour falls on (for example,
+  `cmyk(23.4%, 8.5%, 18.7%, 5.7%)` measures 1.491:1 under this module's
+  formula -- just under the floor, flagged invisible -- and 1.516:1 under
+  the additive one -- just over it, correctly visible). Neither formula is
+  what a real print RIP or an on-screen viewer's colour management
+  actually produces, which depends on device profiles this module has no
+  access to; a CMYK colour's true rendered appearance is not reliably
+  recoverable from its four numbers at all, only from the pixels a
+  specific renderer actually produced.
+- *A stroke wide enough to paint over its own fill.* `#text(fill: black,
+  stroke: 3pt + white)[...]` reports a fill (black) that contrasts well and
+  an explicit stroke (white) that does not; `_invisible_fill` takes the
+  *better* of the two (see its docstring), which reports this glyph as
+  visible because its fill does contrast -- but rendered at 3pt on 10pt
+  text, the stroke's width exceeds the glyph's own strokes and paints over
+  almost the entire fill, leaving the page visually blank (confirmed by
+  rendering it: nothing survives but a single stray mark). The
+  distinguishing fact is stroke *width* relative to the glyph's own size,
+  and `pdfplumber` does not expose a per-character line width at all --
+  confirmed against its full documented attribute set. A rule that instead
+  trusted the stroke whenever one was explicitly set (rather than the
+  better of the two) would close this specific case, but was rejected here
+  because it opens a different one: a decorative, low-contrast stroke
+  meant only as a subtle trim on already-legible, high-contrast fill text
+  would then be flagged as invisible on the stroke's contrast alone, even
+  though the fill alone is perfectly readable. Both rules are wrong for
+  some real document; only the glyph's actual rendered width -- pixels, or
+  the line-width operand this module cannot currently read -- resolves it
+  correctly in both directions.
 """
 
 from __future__ import annotations
@@ -167,7 +252,7 @@ ALLOWED_METADATA = {"/Title", "/Author", "/Producer", "/Creator", "/CreationDate
 MIN_CONTRAST_RATIO = 1.5
 
 # The ranges Unicode's own `Default_Ignorable_Code_Point` derived property
-# covers: code points explicitly specified to render with no visible glyph,
+# covers, minus one deliberate exclusion -- see the note below the table --
 # rather than an ad hoc guess at which formatting/joining characters happen
 # to be invisible. Verified against this project's vendored font: a
 # combining grapheme joiner (U+034F) survives compilation and extraction
@@ -189,7 +274,6 @@ MIN_CONTRAST_RATIO = 1.5
 # exactly the kind of thing this module exists to catch a document for
 # doing, and would be unreadable in a diff besides.
 _DEFAULT_IGNORABLE_RANGES: list[tuple[int, int]] = [
-    (0x00AD, 0x00AD),  # SOFT HYPHEN
     (0x034F, 0x034F),  # COMBINING GRAPHEME JOINER
     (0x061C, 0x061C),  # ARABIC LETTER MARK
     (0x115F, 0x1160),  # HANGUL CHOSEONG/JUNGSEONG FILLER
@@ -207,6 +291,28 @@ _DEFAULT_IGNORABLE_RANGES: list[tuple[int, int]] = [
     (0x1D173, 0x1D17A),  # musical symbol format controls
     (0xE0000, 0xE0FFF),  # Unicode tag block + variation selectors supplement
 ]
+
+# U+00AD SOFT HYPHEN is deliberately absent from the table above, even
+# though it is one of Unicode's own default-ignorable code points. It is
+# not a hidden-payload vector: it carries no letters of its own, so it
+# cannot smuggle a keyword the way a zero-width space between two real
+# letters can, and inserting one into a word only ever makes that word
+# *harder* to match against a naive extractor, never easier -- the
+# opposite of what hiding a keyword would want. It is instead a routine
+# typesetting artefact: any hyphenated, justified column -- produced by
+# Word, LibreOffice, InDesign, LaTeX, or this project's own template with
+# `hyphenate: true` instead of the `false` it actually sets -- inserts one
+# at every soft break point a line-breaking algorithm considered, whether
+# or not the break was taken there. Flagging it here would fail exactly
+# the ordinarily-typeset imported PDFs this gate exists to check, on a
+# character whose only real effect is on parseability, not concealment --
+# and parseability is already `core.checks.roundtrip`'s job, whose
+# `normalize` step strips this exact character before comparing text.
+# (A resume author trying to defeat a *repetition* check by breaking up a
+# repeated word with soft hyphens is a real technique, but the corpus-wide
+# repetition analysis that would need to see through is out of scope for
+# this module -- it belongs with whatever gate implements that check, not
+# with the hidden-payload detector.)
 _DEFAULT_IGNORABLE = re.compile(
     "[" + "".join(f"{chr(lo)}-{chr(hi)}" for lo, hi in _DEFAULT_IGNORABLE_RANGES) + "]"
 )
@@ -231,7 +337,9 @@ _BIDI_CONTROL = re.compile("[" + "".join(f"{chr(lo)}-{chr(hi)}" for lo, hi in _B
 
 
 def is_default_ignorable(text: str) -> bool:
-    """True if `text` contains any code point in `Default_Ignorable_Code_Point`."""
+    """True if `text` contains any code point in `Default_Ignorable_Code_Point`
+    (as narrowed by this module -- see the note beside `_DEFAULT_IGNORABLE_RANGES`).
+    """
     return _DEFAULT_IGNORABLE.search(text) is not None
 
 
@@ -244,6 +352,7 @@ class HiddenKind(StrEnum):
     METADATA_LEAK = "metadata_leak"
     UNICODE_CHANNEL = "unicode_channel"
     BIDI_OVERRIDE = "bidi_override"
+    BACKGROUND_UNKNOWN = "background_unknown"
 
 
 @dataclass(frozen=True)
@@ -259,11 +368,15 @@ def to_rgb(colour: object) -> tuple[float, float, float] | None:
 
     `non_stroking_color` arrives as a greyscale `(g,)` tuple, an RGB
     `(r, g, b)` tuple, a CMYK 4-tuple, or a bare number for a greyscale fill
-    applied outside a colour-space wrapper. CMYK is converted with the
-    naive, uncalibrated formula PDF viewers use when no ICC profile is
-    attached (`r = (1-c)(1-k)`, and so on) -- exact colour management is not
-    the point here, only recovering enough of the colour to judge whether a
-    human could tell it apart from what's behind it.
+    applied outside a colour-space wrapper -- or, for a gradient or tiling
+    pattern fill, a `str` pattern name rather than a colour at all, which
+    this function correctly reports as unrecoverable (`None`) rather than
+    guessing. CMYK is converted with a naive, uncalibrated formula -- exact
+    colour management is not the point here, only recovering enough of the
+    colour to judge whether a human could tell it apart from what's behind
+    it -- and it is not the *only* naive formula in use for this purpose;
+    see the CMYK entry under the module docstring's "Documented, not
+    implemented" section for how much that choice can matter.
     """
     if colour is None:
         return None
@@ -301,8 +414,35 @@ def contrast_ratio(a: tuple[float, float, float], b: tuple[float, float, float])
     return (lighter + 0.05) / (darker + 0.05)
 
 
-def page_background(page: Any) -> tuple[float, float, float]:
-    """The fill colour behind ordinary text on `page`.
+def is_explicit_colour(colour: object) -> bool:
+    """True when `colour` was set by a real content-stream colour operator,
+    not left at `pdfminer`'s internal *never-set* default.
+
+    `pdfminer.pdfinterp.PDFGraphicState` initializes both its stroke and
+    fill colour attributes to the literal Python `int` `0` and only ever
+    replaces that sentinel with a `float`-valued tuple, built from an
+    actual `g`/`rg`/`k`/`scn` operator's parsed operands -- confirmed by
+    reading that class directly. A colour that survives untouched from
+    that default is therefore always an `int` (or a tuple of them), while
+    a colour a document's own content stream chose is always built from
+    `float`s, *including* when that choice happens to equal the default
+    numeric value. This module depends on that type distinction, not the
+    value, because `pdfplumber` reports a stroke colour for every
+    character regardless of whether that character's text-rendering mode
+    ever paints with it, and does not expose the rendering mode itself --
+    so a colour this function calls unset is one this module has no way to
+    know is actually meaningful, and one it calls explicit is one a real
+    operator in the page's own content stream produced.
+    """
+    if isinstance(colour, tuple | list):
+        values = cast("tuple[object, ...] | list[object]", colour)
+        return bool(values) and all(isinstance(v, float) for v in values)
+    return isinstance(colour, float)
+
+
+def page_background(page: Any) -> tuple[float, float, float] | None:
+    """The fill colour behind ordinary text on `page`, or `None` if this
+    module cannot determine one.
 
     A page with no explicit background is implicitly white. A page whose
     background was painted (`#set page(fill: ...)`) renders as a single
@@ -312,11 +452,32 @@ def page_background(page: Any) -> tuple[float, float, float]:
     0.4)`, while an unpainted page produces no rect at all. This looks for
     a filled rect covering at least 90% of the page area -- "substantially
     the whole page," not a decorative panel confined to one region -- and
-    takes the last one found if more than one qualifies, since later
+    uses the last one found if more than one qualifies, since later
     drawing paints over earlier drawing at the same location.
+
+    Finding no such rect and finding one this module cannot read are
+    different situations, and this function is written to keep them
+    different rather than collapsing both into a default. A gradient or
+    tiling-pattern background produces exactly the qualifying rect this
+    function looks for, but its `non_stroking_color` is a pattern *name*
+    (a `str`), not a colour `to_rgb` can parse -- confirmed directly:
+    `#set page(fill: gradient.linear(...))` produces a page-covering rect
+    whose colour is the string `"p0"`. Silently falling back to white
+    there would mean answering a contrast question about a page this
+    module never actually looked at, on a page that is almost certainly
+    not white at all. Returning `None` instead means "this page has a
+    background, but not one I can read" is reported as its own outcome
+    (`background_unknown` in `check_hidden`) rather than folded into either
+    "white" or "invisible" -- consistent with this project's rule that a
+    gate should say it cannot answer rather than guess and possibly answer
+    wrongly. The cost is a real one: an ordinary resume with a legitimate
+    gradient header would also report `background_unknown`, not a clean
+    pass, until this module (or its future pixel-based replacement) can
+    read that kind of fill.
     """
     area = float(page.width) * float(page.height)
     background: tuple[float, float, float] | None = None
+    found_unreadable = False
     if area > 0:
         for rect in page.rects:
             if not rect.get("fill"):
@@ -327,20 +488,65 @@ def page_background(page: Any) -> tuple[float, float, float]:
             colour = to_rgb(rect.get("non_stroking_color"))
             if colour is not None:
                 background = colour
+                found_unreadable = False
+            else:
+                background = None
+                found_unreadable = True
+    if found_unreadable:
+        return None
     return background if background is not None else (1.0, 1.0, 1.0)
 
 
 def _invisible_fill(
     page: Any, page_number: int, background: tuple[float, float, float]
 ) -> list[HiddenFinding]:
+    """Flag a glyph whose fill, and whose stroke if one was actually set,
+    both fail to contrast against `background`.
+
+    A glyph's visible ink can come from its fill, its stroke, or both --
+    PDF's "fill then stroke" text-rendering mode paints the fill first and
+    the stroke on top of it -- so a check that only ever reads the fill
+    (as this module did before) flags a legitimate stroke-only-visible
+    design (`fill: white, stroke: 0.5pt + black`, a classic outlined
+    heading) as invisible purely because its *fill* matches the page,
+    even though the black outline it actually paints is entirely legible.
+    Taking the *better* of the two contrasts -- not requiring both to pass,
+    which would flag that same outlined heading on its non-contrasting
+    fill; not requiring only one, which would flag ordinary text through
+    an unrelated stroke colour, see below -- fixes exactly that false
+    positive.
+
+    The stroke is read only when `is_explicit_colour` says it was actually
+    set: `pdfplumber` reports *some* stroke colour for every character
+    regardless of whether its rendering mode paints with one at all, and
+    the unset default happens to be plain black, which would otherwise
+    "rescue" the contrast of any invisible white-fill glyph for free,
+    reopening the exact channel this check exists to close. See
+    `is_explicit_colour` for how that default is told apart from a real
+    one.
+
+    Taking the better of the two contrasts does not close every stroke-based
+    trick: a stroke wide enough to overpaint most of an otherwise-visible
+    fill can still render a glyph blank even though its fill alone would
+    contrast fine, and this function has no way to read how wide a stroke
+    actually is. See the module docstring's "Documented, not implemented"
+    section for the measured evidence and why the alternative (trusting an
+    explicit stroke outright) was rejected instead of adopted.
+    """
     for char in page.chars:
         text = str(char.get("text", ""))
         if not text.strip():
             continue
-        fg = to_rgb(char.get("non_stroking_color"))
-        if fg is None:
-            continue
-        if contrast_ratio(fg, background) < MIN_CONTRAST_RATIO:
+        contrasts: list[float] = []
+        fill = to_rgb(char.get("non_stroking_color"))
+        if fill is not None:
+            contrasts.append(contrast_ratio(fill, background))
+        raw_stroke = char.get("stroking_color")
+        if is_explicit_colour(raw_stroke):
+            stroke = to_rgb(raw_stroke)
+            if stroke is not None:
+                contrasts.append(contrast_ratio(stroke, background))
+        if contrasts and max(contrasts) < MIN_CONTRAST_RATIO:
             return [
                 HiddenFinding(
                     HiddenKind.INVISIBLE_TEXT,
@@ -421,6 +627,14 @@ def check_hidden(pdf_path: Path) -> tuple[str, list[HiddenFinding]]:
     checked once for the whole document, since PDF document-info metadata
     is not a per-page concept.
 
+    When `page_background` cannot determine a page's background, this
+    reports `background_unknown` for that page instead of running
+    `invisible_text` against a guessed background -- a page whose
+    background this module cannot read is a page it cannot answer the
+    contrast question on, and `background_unknown` says so explicitly
+    rather than the page silently passing `invisible_text` by skipping it
+    with no signal at all.
+
     `bidi_override` earns a finding kind separate from `unicode_channel`
     because the two name different harms. Every other channel in this
     module hides a payload a reader never sees at all; a bidirectional
@@ -441,7 +655,16 @@ def check_hidden(pdf_path: Path) -> tuple[str, list[HiddenFinding]]:
     with pdfplumber.open(str(pdf_path)) as pdf:
         for page_number, page in enumerate(pdf.pages):
             background = page_background(page)
-            findings.extend(_invisible_fill(page, page_number, background))
+            if background is None:
+                findings.append(
+                    HiddenFinding(
+                        HiddenKind.BACKGROUND_UNKNOWN,
+                        f"page {page_number}: background fill could not be determined; "
+                        "invisible-text check skipped for this page",
+                    )
+                )
+            else:
+                findings.extend(_invisible_fill(page, page_number, background))
             findings.extend(_tiny_text(page, page_number))
             findings.extend(_offpage_text(page, page_number))
             findings.extend(_unicode_channel(page, page_number))

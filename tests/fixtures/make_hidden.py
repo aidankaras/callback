@@ -87,6 +87,49 @@ NAVY_BACKGROUND_WHITE_TEXT = """
 Visible line of the document on a navy background.
 """
 
+# The false positive a fill-only check cannot avoid: white fill (matching
+# the white page) traced with a thin black stroke, the classic look of an
+# outlined heading. The fill alone contrasts at 1.0:1 against the page --
+# indistinguishable from genuinely invisible white-on-white text -- but the
+# stroke that actually delineates every letter contrasts at roughly 21:1,
+# and the heading is entirely legible.
+OUTLINE_HEADING = """
+#set page(paper: "us-letter", margin: 0.5in)
+#set text(font: "Libertinus Serif", size: 10pt)
+Visible line of the document.
+#text(fill: white, stroke: 0.5pt + black)[OUTLINED HEADING]
+"""
+
+# A payload this module still misses, documented rather than silently left
+# unmentioned: a fill (black) that contrasts perfectly well on its own, and
+# an explicit stroke (white) that does not -- but the stroke is 3pt wide on
+# 10pt text, six times the width of the glyphs' own strokes, so painted on
+# top of the fill it covers nearly all of it. Rendered directly to an
+# image, the payload text is entirely blank but for a single stray mark.
+# `check_hidden` still reports this document as clean, because
+# `_invisible_fill` takes the better of the fill's and the stroke's own
+# contrast, and the fill's contrast alone is fine -- see the module
+# docstring's "Documented, not implemented" section for why the fix in
+# this round could not close this specific shape without also reopening a
+# different one.
+THICK_WHITE_STROKE = """
+#set page(paper: "us-letter", margin: 0.5in)
+#set text(font: "Libertinus Serif", size: 10pt)
+Visible line of the document.
+#text(fill: black, stroke: 3pt + white)[kubernetes terraform hidden by stroke]
+"""
+
+# `gradient.linear(...)` as a page fill still produces the single,
+# page-covering rect `page_background` looks for, but that rect's
+# `non_stroking_color` is the pattern name `"p0"` -- a string, not a
+# colour `to_rgb` can parse. `page_background` reports this as
+# unrecoverable rather than defaulting to white.
+GRADIENT_BACKGROUND = """
+#set page(paper: "us-letter", margin: 0.5in, fill: gradient.linear(rgb(20%, 20%, 40%), white))
+#set text(font: "Libertinus Serif", size: 10pt)
+Visible line of the document.
+"""
+
 # Text sized well under the 6.0pt floor, next to an ordinary 10pt line.
 TINY = """
 #set page(paper: "us-letter", margin: 0.5in)
@@ -111,12 +154,34 @@ ZERO_WIDTH = f"""
 Visible{ZERO_WIDTH_SPACE}line with an invisible separator.
 """
 
-# A soft hyphen (U+00AD): survives rendering and is inside the
-# `Default_Ignorable_Code_Point` range table's first entry.
+# A soft hyphen (U+00AD): survives rendering, and is deliberately *not* in
+# this module's default-ignorable table (see the note in `core.checks.hidden`
+# beside `_DEFAULT_IGNORABLE_RANGES`) -- it carries no letters of its own,
+# so it cannot smuggle a keyword, and it is a routine artefact of ordinary
+# hyphenated, justified typesetting rather than a hiding technique.
 SOFT_HYPHEN = f"""
 #set page(paper: "us-letter", margin: 0.5in)
 #set text(font: "Libertinus Serif", size: 10pt, hyphenate: false)
 Infra{SOFT_HYPHEN_CHAR}structure engineering role.
+"""
+
+# A realistic version of the same thing: an ordinarily hyphenated,
+# justified two-inch column -- the shape a genuine Word or LaTeX resume
+# section, or this project's own template with `hyphenate: true` instead
+# of the `false` it actually sets, would produce. Measured: this specific
+# paragraph, at this width, produces four soft hyphens in the compiled
+# PDF's extracted text -- a real typesetting artefact, not a contrived
+# single character.
+JUSTIFIED_HYPHENATED = """
+#set page(paper: "us-letter", margin: 0.5in)
+#set text(font: "Libertinus Serif", size: 10pt, hyphenate: true)
+#set par(justify: true)
+#box(width: 2in)[
+Distinguished accomplishments encompassing organizational transformation \
+initiatives, comprehensive stakeholder communications, and \
+interdisciplinary collaboration across multinational engineering \
+departments throughout the entire organization.
+]
 """
 
 # A text variation selector (U+FE0F): survives rendering and is inside the
