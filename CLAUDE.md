@@ -155,6 +155,24 @@ equivalent you wrote while documenting — `statistics.median` averages the two 
 of an even-length list where this codebase's helper takes the upper one, which is how a
 whole table of figures came to be 2–3% wrong.
 
+**7. A mutation that preserves a file's byte count can be invisible, which makes the
+mutation evidence itself vacuous.** CPython invalidates a cached `.pyc` on the pair
+(source mtime **truncated to whole seconds**, source size). A mutate-test-revert cycle
+that rewrites a file to the same length inside one second therefore runs against stale
+bytecode: the test passes, and it looks exactly like a mutation the test failed to catch
+being reported as one it did. Measured directly — writing `VALUE = 9` over `VALUE = 1`
+within the same second imports as `1`, while `VALUE = 123` over `VALUE = 1` imports as
+`123`, because only the second changes the size.
+
+This was caught here on a `1pt` → `8pt` edit in a fixture, which is size-preserving, and it
+threatens every mutation claim in this repository rather than one test. Two mutations used
+during this build were size-preserving (`gap_factor: float = 2.0` → `0.3` among them) and
+had to be re-verified afterwards to confirm the evidence was real.
+
+When running a mutation, either change the byte count, clear `__pycache__`, or set
+`PYTHONDONTWRITEBYTECODE=1`. Prefer clearing the cache: it costs nothing and does not make
+the choice of mutation depend on an implementation detail of the interpreter.
+
 **6. Record a tolerance's margin, not its ratio.** "A tolerance of 0.3x the font size" tells
 a reader nothing about whether it is safe. "3.0pt against this template's 5.5pt line pitch,
 roughly 1.8x" tells them what breaks it. Where a default is safe only because of a template
