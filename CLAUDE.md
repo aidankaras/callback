@@ -74,11 +74,17 @@ even if every test passes.
     and an adversarial fixture that quietly failed to become adversarial is the most
     expensive kind of passing test. See the failure modes below.
 
-## Reporting standards for anyone dispatching or reviewing work here
+## Ways a check can pass without running
 
 The non-negotiables above constrain what the code must do. These constrain what may be
-*claimed* about it, and each one exists because a verification can appear to have
-happened without happening.
+*claimed* about it, and they share one shape: a verification that reports success without
+having executed. The check was not wrong — it never ran, said nothing, and silence renders
+as a pass.
+
+The diagnostic question is therefore not "is this check correct?" but **"what would it print
+if it hadn't happened?"** When the answer is the same thing it prints on success, it belongs
+in this section. Every entry below was found the hard way, and each was invisible until
+someone asked that question of it.
 
 - **A claimed test count is verified independently, not trusted.** This build has already
   shipped one report that stated "28/28 full suite" passing when the real, independently
@@ -86,12 +92,25 @@ happened without happening.
   report is the only evidence a reviewer has unless they rerun the suite themselves.
   Before treating any "N passed" claim as done, run `uv run pytest -q` and read the tail
   line yourself.
+- **A mutation's restore is verified, not assumed.** Copy the file aside, restore from the
+  copy, and `cmp` to confirm the restore happened. `git checkout -- <path>` silently does
+  nothing on an untracked file — it prints a pathspec error and returns non-zero, which a
+  script without `set -e` walks straight past. A sibling project stacked four mutations on
+  one file that way, and every result after the first measured a file nobody had read; the
+  output table looked entirely normal, because nothing in it could say "these rows are
+  garbage."
 - **A mutation is run with the bytecode cache cleared, or its result means nothing.**
   `find . -name __pycache__ -type d -exec rm -rf {} +` before each one, or
   `PYTHONDONTWRITEBYTECODE=1`. CPython invalidates a `.pyc` on the source's size and its
   mtime truncated to whole seconds, so a same-length edit tested within one second never
   takes effect and the suite stays green for the wrong reason. Failure mode 7 below has the
   measurement.
+- **Reasoning that outlives its evidence is an anecdote.** A conclusion recorded without
+  the measurement that produced it cannot be re-checked when the method turns out to be
+  flawed — it can only be withdrawn. This applies to where the record lives as well as
+  whether it exists: notes kept only in a git-ignored scratch directory read as absent once
+  that directory is removed, and absent is indistinguishable from never-written. Design
+  decisions a future reader would question belong in `docs/lessons/`, not in a working file.
 - **Pinned Action SHAs and dependency versions are verified against the source, not
   assumed correct because they appear in a plan.** `gh api repos/<org>/<repo>/git/ref/tags/<tag>
   --jq .object.sha` before any CI change lands (this caught a wrong SHA in the plan itself
