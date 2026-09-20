@@ -50,8 +50,9 @@ even if every test passes.
    build converged on after the leak recurred once with a narrower pattern.
 8. **Planning documents live outside the repo.** The spec and phase plans live under
    `~/.claude/references/callback/`, never inside this tree, so planning and personal
-   context can never reach what will become a public repo. Do not create a `docs/plan/`
-   or similar inside this tree, however convenient it seems mid-task.
+   context can never reach what will become a public repo. Do not add a planning or
+   scratch-notes directory inside this tree, however convenient it seems mid-task —
+   naming one here would also make this sentence assert a path that should never exist.
 9. **No PII in the repo, checked structurally, not by memory.** `.gitignore` already
    covers `*.db`, `*.pdf`, `inbox/`, `outputs/`, `.callback/`. All fixtures are synthetic
    personas — a real resume, including the maintainer's own, must never produce a
