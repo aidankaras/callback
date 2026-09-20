@@ -123,6 +123,28 @@ someone asked that question of it.
   --jq .object.sha` before any CI change lands (this caught a wrong SHA in the plan itself
   during Task 1).
 
+## Reviewing work here
+
+Per-change review in this repository has found more by asking a reviewer a *specific falsifiable
+question* than by handing it a rubric — "which declared value could be satisfied by text belonging to
+something else?" found four separate Criticals that "review this diff" did not. Write the question.
+
+But reach for a purpose-built reviewer before writing a generic one, because several of this
+project's risks have a specialist whose whole subject they are:
+
+| Risk | Reviewer |
+|---|---|
+| A gate returning `pass` because something inside it declined to answer | `pr-review-toolkit:silent-failure-hunter` — its subject is exactly "Ways a check can pass without running" below |
+| A type that permits a state its invariants forbid | `pr-review-toolkit:type-design-analyzer` — relevant wherever a frozen model or a validator carries a correctness claim |
+| A docstring whose explanation is wrong while its conclusion is right | `pr-review-toolkit:comment-analyzer` — this has happened four times here, always in careful prose |
+| Whether a test suite's coverage is real or apparent | `pr-review-toolkit:pr-test-analyzer` |
+| Accumulated scaffolding, duplicated logic, unused parameters | `code-simplifier` — run it **after** correctness fixes land, never before: simplifying wrong code produces clean-looking wrong code |
+| Anything touching `$CALLBACK_HOME`, path resolution, or the write guard | `security-review` |
+
+A generic reviewer is still the right tool when the question is specific to this change and no
+specialist owns it — most per-task reviews are that. The mistake is reaching for a generic one
+*by default*.
+
 ## Failure modes this codebase has actually hit
 
 Read this section before reviewing a diff here. Every entry is a real defect from this
