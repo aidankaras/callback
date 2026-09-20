@@ -29,22 +29,22 @@ even if every test passes.
    lint alone.** `DTZ` rules are on: every date/time value is timezone-aware. A naive
    `date.today()` in a stored field is not a style nit; it is undefined behavior across
    a DST boundary or a machine in a different timezone, and it has already been caught
-   once here (Task 3: the fact-store default was corrected to
-   `datetime.now(tz=UTC).date()` before it shipped).
+   once here: the fact-store's default date was corrected to
+   `datetime.now(tz=UTC).date()` before it shipped.
 5. **User data lives only under `$CALLBACK_HOME`** (default `~/.callback`), directories
    `0700`, files `0600`. `core.paths.resolve_inside` is the only sanctioned way to turn a
    relative name into a path; anything that builds a path by string concatenation instead
    is a bug, because it bypasses the traversal and symlink-escape checks that make the
-   later write guard (phase-1 Task 22) meaningful.
+   write guard meaningful once it exists.
 6. **No `Co-Authored-By` trailer, in any commit, ever.** Verified by grep before every
    task closes in this build; keep doing that.
 7. **Audience: every docstring, comment, commit message and doc is written for a senior
    engineer reading this repo cold.** Never reference a plan, a task number, a brief, a
    report, "the controller," "the reviewer," or how a piece of code was produced. This
    constraint has already been violated and caught twice in seven tasks — a docstring in
-   `core/checks/derive.py` once read "see the task report for a documented case" (Task 6
-   review), and an earlier docstring in `core/paths.py` plus a commit message referenced
-   a task number by name (Task 2). Both required a history rewrite to remove. Before any
+   `core/checks/derive.py` once read "see the task report for a documented case", and an
+   earlier docstring in `core/paths.py` plus a commit message referenced a planning
+   document by number. Both required a history rewrite to remove. Before any
    commit, grep the diff for `\bTask [0-9]+\b|superpowers|sdd/|task report|the brief|the
    plan\b|the ruling|controller|reviewer|implementer` — this is the standing pattern this
    build converged on after the leak recurred once with a narrower pattern.
@@ -89,7 +89,7 @@ someone asked that question of it.
 
 - **A claimed test count is verified independently, not trusted.** This build has already
   shipped one report that stated "28/28 full suite" passing when the real, independently
-  verified count was 39/39 (Task 4) — nothing was lost, but the report was wrong, and the
+  verified count was 39/39 — nothing was lost, but the report was wrong, and the
   report is the only evidence a reviewer has unless they rerun the suite themselves.
   Before treating any "N passed" claim as done, run `uv run pytest -q` and read the tail
   line yourself.
@@ -121,8 +121,8 @@ someone asked that question of it.
   decisions a future reader would question belong in `docs/lessons/`, not in a working file.
 - **Pinned Action SHAs and dependency versions are verified against the source, not
   assumed correct because they appear in a plan.** `gh api repos/<org>/<repo>/git/ref/tags/<tag>
-  --jq .object.sha` before any CI change lands (this caught a wrong SHA in the plan itself
-  during Task 1).
+  --jq .object.sha` before any CI change lands; this caught a wrong pinned SHA before it
+  shipped.
 
 ## Reviewing work here
 

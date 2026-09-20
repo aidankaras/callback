@@ -33,7 +33,7 @@ cannot answer, and saying so beats guessing.
 `core/checks/grounding.py`.
 
 ```python
-check_document([])       # (Verdict.PASS, [])
+check_document([])  # (Verdict.PASS, [])
 check_document_gate([])  # verdict=Verdict.PASS, ok=True
 ```
 
