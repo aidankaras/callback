@@ -18,3 +18,4 @@ uselessness.
 |---|---|
 | [01 — Adversarial extraction](01-adversarial-extraction.md) | `checks/naive_extract`, `checks/roundtrip` |
 | [02 — Gate result shapes](02-gate-result-shapes.md) | `checks/result`, `checks/grounding`, `checks/roundtrip`, `checks/hidden` |
+| [03 — Open findings](03-open-findings.md) | `checks/hidden`, `checks/grounding`, `checks/roundtrip`, `checks/numbers` |
