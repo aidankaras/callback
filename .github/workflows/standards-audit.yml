@@ -42,10 +42,19 @@ jobs:
   audit:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955  # v4.3.0
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6
+        with:
+          # Full history: the audit checks whether files keep being amended for
+          # the same defect class, which a shallow clone cannot show.
+          fetch-depth: 0
+
+      # The report's directory exists before the audit runs, so its single
+      # permitted Write is to a path, never a directory it must create.
+      - name: Prepare the report directory
+        run: mkdir -p reports
 
       - name: Run the audit
-        uses: anthropics/claude-code-action@4036a180cf690f49529f5d8c79c998855287f590  # v1.0.230
+        uses: anthropics/claude-code-action@cfc3eb22bfed5c26ef66e3223c982af27e4524de  # v1
         with:
           # The OAuth token, not an API key: this project runs on a subscription
           # and a metered key would bill every scheduled run. The repository has
