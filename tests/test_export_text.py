@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from core.export.text import check_text_export, to_text
@@ -102,3 +104,16 @@ def test_wrapping_never_splits_a_hyphenated_token() -> None:
     for width in range(20, 61):
         lines = to_text(doc, width=width).splitlines()
         assert not any(line.endswith("-") for line in lines), (width, lines)
+
+
+def test_the_cli_prints_the_text_and_exits_on_its_check(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from core.cli import main
+    from core.resume.io import dump_doc
+
+    path = tmp_path / "resume.yaml"
+    path.write_text(dump_doc(DOC), encoding="utf-8")
+    assert main(["export", str(path)]) == 0
+    assert capsys.readouterr().out == to_text(DOC)
+    assert main(["export", str(tmp_path / "missing.yaml")]) == 3

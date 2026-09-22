@@ -32,6 +32,12 @@ def build_parser() -> argparse.ArgumentParser:
     build.add_argument("--job", required=True, help="job id: lowercase letters, digits, hyphens")
     build.set_defaults(handler=_cmd_build)
 
+    export = sub.add_parser(
+        "export", help="print a resume document as plain text, for forms that take pasted text"
+    )
+    export.add_argument("doc", type=Path, help="resume document (YAML)")
+    export.set_defaults(handler=_cmd_export)
+
     imp = sub.add_parser("import", help="read an existing resume PDF, screening it for hidden text")
     imp.add_argument("file", type=Path)
     imp.set_defaults(handler=_cmd_import)
@@ -54,6 +60,23 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 _SAFE_STEM = re.compile(r"[^a-z0-9-]+")
+
+
+def _cmd_export(args: argparse.Namespace) -> int:
+    from core.export.text import check_text_export, to_text
+    from core.resume.io import DocumentError, load_doc
+
+    try:
+        doc = load_doc(args.doc)
+    except (DocumentError, OSError) as exc:
+        print(f"callback export: {exc}", file=sys.stderr)
+        return 3
+    text = to_text(doc)
+    verdict, missing = check_text_export(doc, text)
+    sys.stdout.write(text)
+    for field in missing:
+        print(f"callback export: lost in the text export: {field}", file=sys.stderr)
+    return 0 if verdict == "pass" else 2
 
 
 def _cmd_import(args: argparse.Namespace) -> int:
