@@ -34,8 +34,13 @@ def _built(home: Path, job: str, *, verdict: str = "pass", letter: str | None = 
     record = {"verdict": verdict, "pdf_sha256": hashlib.sha256(pdf).hexdigest()}
     (draft / "report.json").write_text(json.dumps(record), encoding="utf-8")
     if letter is not None:
-        (draft / "cover-letter.pdf").write_bytes(b"%PDF-1.7 letter")
-        (draft / "letter-report.md").write_text(f"# {letter}\n", encoding="utf-8")
+        letter_pdf = b"%PDF-1.7 letter"
+        (draft / "cover-letter.pdf").write_bytes(letter_pdf)
+        letter_record = {
+            "verdict": letter.lower(),
+            "pdf_sha256": hashlib.sha256(letter_pdf).hexdigest(),
+        }
+        (draft / "letter-report.json").write_text(json.dumps(letter_record), encoding="utf-8")
 
 
 def _target(job: str = "acme-ml", **kw: str) -> Target:
@@ -162,3 +167,19 @@ def test_the_cli_builds_a_packet_and_says_it_does_not_submit(
     assert main(["outcome", "acme-ml", "interview"]) == 0
     assert main(["applications"]) == 0
     assert "interview" in capsys.readouterr().out
+
+
+def test_a_cover_letter_changed_since_it_was_checked_is_refused(home: Path) -> None:
+    """Mutation: skip the letter's hash check -- this test fails."""
+    _built(home, "acme-ml", letter="PASS")
+    (home / "outputs" / "acme-ml" / "draft" / "cover-letter.pdf").write_bytes(b"%PDF edited")
+    with pytest.raises(ApplyError, match=r"cover-letter\.pdf has changed"):
+        apply(_target(), now=NOW)
+
+
+@pytest.mark.parametrize("body", ["", "not json", "[]"])
+def test_an_unreadable_gate_record_is_refused(home: Path, body: str) -> None:
+    _built(home, "acme-ml")
+    (home / "outputs" / "acme-ml" / "draft" / "report.json").write_text(body, encoding="utf-8")
+    with pytest.raises(ApplyError, match="gate record"):
+        apply(_target(), now=NOW)

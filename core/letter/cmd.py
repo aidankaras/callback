@@ -3,11 +3,14 @@
 The posting is read from `inbox/<job>.md`, where the tailor skill saves it; a
 letter for a job whose posting was never saved is refused, since its company,
 role and every sentence about the job are checked against that text. Output
-goes to the job's draft directory, beside the resume, at 0600.
+goes to the job's draft directory, beside the resume, at 0600; the JSON
+record carries the SHA-256 of the letter PDF it judged.
 """
 
 from __future__ import annotations
 
+import hashlib
+import json
 import shutil
 import tempfile
 from dataclasses import dataclass
@@ -23,7 +26,7 @@ from core.profile.store import load_facts
 from core.render.typst import RenderError
 from core.resume.io import DocumentError, load_doc
 
-_ARTIFACTS = ("cover-letter.pdf", "letter-report.md")
+_ARTIFACTS = ("cover-letter.pdf", "letter-report.md", "letter-report.json")
 
 
 @dataclass(frozen=True)
@@ -78,4 +81,10 @@ def build_letter(path: Path) -> LetterBuild:
     report = ["# FAIL" if findings else "# PASS", ""]
     report += [f"- {f}" for f in findings] or ["- no findings"]
     write_private(out_dir / "letter-report.md", "\n".join(report) + "\n")
+    record = {
+        "verdict": "fail" if findings else "pass",
+        "pdf_sha256": hashlib.sha256(pdf_bytes).hexdigest(),
+        "findings": list(findings),
+    }
+    write_private(out_dir / "letter-report.json", json.dumps(record, indent=2) + "\n")
     return LetterBuild(findings=findings, out_dir=out_dir)

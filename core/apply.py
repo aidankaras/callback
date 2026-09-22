@@ -124,13 +124,24 @@ def _sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def _read_record(path: Path, what: str) -> dict[str, object]:
+    """A gate report's JSON record, refusing one that is missing or unreadable."""
+    try:
+        parsed: object = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ApplyError(f"cannot read the {what}'s gate record {path.name}: {exc}") from exc
+    if not isinstance(parsed, dict):
+        raise ApplyError(f"the {what}'s gate record {path.name} is not a JSON object")
+    return cast("dict[str, object]", parsed)
+
+
 def _check_draft(draft: Path, *, accept_warnings: bool) -> tuple[Path, Path | None]:
     """The resume and letter PDFs to send, once their reports say they may be."""
     report_path = draft / "report.json"
     resume = draft / "resume.pdf"
     if not report_path.is_file() or not resume.is_file():
         raise ApplyError(f"no built resume in {draft}: run `callback build` first")
-    report = json.loads(report_path.read_text(encoding="utf-8"))
+    report = _read_record(report_path, "resume")
     verdict = report.get("verdict")
     if verdict == "warn" and not accept_warnings:
         raise ApplyError("the resume's gates returned warn; read report.md, then accept warnings")
@@ -142,14 +153,13 @@ def _check_draft(draft: Path, *, accept_warnings: bool) -> tuple[Path, Path | No
     letter = draft / "cover-letter.pdf"
     if not letter.is_file():
         return resume, None
-    letter_report = draft / "letter-report.md"
-    first = (
-        letter_report.read_text(encoding="utf-8").splitlines()[:1]
-        if letter_report.is_file()
-        else []
-    )
-    if first != ["# PASS"]:
+    letter_record = _read_record(draft / "letter-report.json", "cover letter")
+    if letter_record.get("verdict") != "pass":
         raise ApplyError("the cover letter did not pass its checks: run `callback letter` again")
+    if _sha256(letter) != letter_record.get("pdf_sha256"):
+        raise ApplyError(
+            "cover-letter.pdf has changed since it was checked: run `callback letter` again"
+        )
     return resume, letter
 
 

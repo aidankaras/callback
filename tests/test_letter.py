@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import json
 import stat
 from pathlib import Path
 
@@ -262,6 +264,10 @@ def test_callback_letter_writes_a_private_pdf_and_report(
     for name in ("cover-letter.pdf", "letter-report.md"):
         assert stat.S_IMODE((draft / name).stat().st_mode) == 0o600, name
     assert (draft / "letter-report.md").read_text().startswith("# PASS")
+    record = json.loads((draft / "letter-report.json").read_text())
+    pdf = (draft / "cover-letter.pdf").read_bytes()
+    assert record["verdict"] == "pass"
+    assert record["pdf_sha256"] == hashlib.sha256(pdf).hexdigest()
 
 
 @pytest.mark.slow
