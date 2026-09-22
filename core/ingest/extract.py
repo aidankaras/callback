@@ -186,8 +186,11 @@ def extract_document(path: Path, *, timeout_s: float = 20.0) -> ExtractResult:
     # else has not been validated at all yet at this point, so reading it in
     # full just to inspect its header would let an oversized file cost
     # memory before a single check has run.
-    with path.open("rb") as handle:
-        header = handle.read(4)
+    try:
+        with path.open("rb") as handle:
+            header = handle.read(len(MAGIC[suffix]))
+    except OSError as exc:
+        raise ExtractionError(f"could not read {path.name}: {exc}") from exc
     if not header.startswith(MAGIC[suffix]):
         raise ExtractionError(f"file contents do not match the {suffix} extension")
 

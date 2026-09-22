@@ -348,3 +348,16 @@ def test_an_unknown_finding_kind_from_the_worker_fails_closed(
     pdf.write_bytes(b"%PDF-1.4")
     with pytest.raises(ExtractionError, match="new_kind"):
         extract_document(pdf)
+
+
+@pytest.mark.parametrize("make", ["missing", "directory"])
+def test_an_unreadable_input_raises_extraction_error_not_os_error(
+    tmp_path: Path, make: str
+) -> None:
+    """The module's contract is that ExtractionError is the only exception it
+    raises. Mutation: take the header read out of its try -- this fails."""
+    path = tmp_path / "resume.pdf"
+    if make == "directory":
+        path.mkdir()
+    with pytest.raises(ExtractionError, match="could not read"):
+        extract_document(path)

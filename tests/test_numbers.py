@@ -146,3 +146,12 @@ def test_number_after_a_letter_prefixed_identifier_is_still_parsed() -> None:
     # preceding letter/digit/dot; a genuine number elsewhere in the same
     # sentence, separated by whitespace, is unaffected.
     assert [n.value for n in parse_numbers("on the H100, cut latency 40%")] == [40.0]
+
+
+def test_the_tolerance_is_half_a_percent_either_side() -> None:
+    """Pinned at the boundary: 0.4% off matches, 0.6% off does not, in both
+    directions. Mutation: loosen the default tenfold -- this fails."""
+    assert values_match(claimed=100.4, source=100.0)
+    assert values_match(claimed=99.6, source=100.0)
+    assert not values_match(claimed=100.6, source=100.0)
+    assert not values_match(claimed=99.4, source=100.0)
