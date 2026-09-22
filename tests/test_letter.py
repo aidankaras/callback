@@ -216,6 +216,8 @@ def test_the_company_and_role_must_be_segments_of_the_posting_heading(
         "I am willing to relocate to Pittsburgh.",
         "I would require visa sponsorship.",
         "I am happy to work unpaid.",
+        "My availability is flexible.",
+        "I am available in June.",
     ],
 )
 def test_commitment_and_negotiation_language_fails(text: str) -> None:

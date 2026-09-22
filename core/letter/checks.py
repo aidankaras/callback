@@ -76,7 +76,7 @@ _FIRST_PERSON = re.compile(
 )
 _COMMITMENT = re.compile(
     r"\b(?:salary|salaries|compensation|stipend|unpaid|pay\s+rate|relocat\w*|visa|"
-    r"sponsor(?:ship)?|start\s+date|available\s+(?:to\s+start|immediately|from)|"
+    r"sponsor(?:ship)?|start\s+date|availability|available\s+(?:to\s+start|immediately|from|in)|"
     r"notice\s+period|willing\s+to|negotiab\w*)\b",
     re.IGNORECASE,
 )
