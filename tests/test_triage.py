@@ -178,3 +178,16 @@ def test_the_triage_commands(
     (home / "inbox" / "ok.md").write_text("# Intern - Acme\n\nPython and SQL.\n")
     assert main(["eligibility", "ok"]) == 0
     assert main(["triage"]) == 0
+
+
+def test_gaps_count_the_technologies_eligible_postings_ask_for_that_facts_do_not_back() -> None:
+    """Knockouts are excluded: a skill only an ineligible posting wants is not a gap
+    worth closing. Mutation: count knockout postings too -- Kubernetes rises to 2."""
+    from core.triage import gaps
+
+    postings = [
+        _posting("a", "ML Intern", "Python, PyTorch and Kubernetes.", days_old=1),
+        _posting("b", "ML Intern", "PyTorch and SQL.", days_old=2),
+        _posting("c", "ML Intern", "Kubernetes. Class of 2027 only.", days_old=0),
+    ]
+    assert gaps(postings, US_JUNIOR, FACTS) == [("PyTorch", 2), ("Kubernetes", 1)]

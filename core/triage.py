@@ -247,3 +247,19 @@ def rank(
             score -= 0.1
         ranked.append(Ranked(posting, round(score, 3), eligibility, (have, missing), age))
     return sorted(ranked, key=lambda r: r.score, reverse=True)
+
+
+def gaps(
+    postings: Sequence[Found], profile: Profile, facts: Mapping[str, Fact]
+) -> list[tuple[str, int]]:
+    """Technologies the eligible postings name that confirmed facts do not back,
+    most frequent first. A posting the candidate is excluded from is left out:
+    what only it asks for is not worth learning for this search."""
+    evidenced = {canonicalize(e) for f in facts.values() if f.selectable() for e in f.entities}
+    counts: dict[str, int] = {}
+    for posting in postings:
+        if check_eligibility(posting.text, profile).verdict == "knockout":
+            continue
+        for tech in _technologies(posting.text) - evidenced:
+            counts[tech] = counts.get(tech, 0) + 1
+    return sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))

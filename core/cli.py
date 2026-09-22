@@ -110,6 +110,12 @@ def build_parser() -> argparse.ArgumentParser:
     interview.add_argument("job")
     interview.set_defaults(handler=_cmd_interview)
 
+    gaps_cmd = sub.add_parser(
+        "gaps", help="technologies eligible postings ask for that your facts do not back"
+    )
+    gaps_cmd.add_argument("--days", type=int, default=None)
+    gaps_cmd.set_defaults(handler=_cmd_gaps)
+
     app = sub.add_parser(
         "apply",
         help="build the application packet for a gated draft and record it (never submits)",
@@ -430,6 +436,27 @@ def _cmd_interview(args: argparse.Namespace) -> int:
         print(f"callback interview: {exc}", file=sys.stderr)
         return 3
     print(f"prep pack: {path}")
+    return 0
+
+
+def _cmd_gaps(args: argparse.Namespace) -> int:
+    from datetime import UTC, datetime, timedelta
+
+    from core.discovery.store import load_postings
+    from core.profile.store import StoreError, load_facts
+    from core.triage import gaps, load_profile
+
+    try:
+        postings = list(load_postings().values())
+        if args.days is not None:
+            cutoff = datetime.now(tz=UTC) - timedelta(days=args.days)
+            postings = [p for p in postings if p.first_seen >= cutoff]
+        found = gaps(postings, load_profile(), load_facts())
+    except (*_discovery_errors(), StoreError, ValueError) as exc:
+        print(f"callback gaps: {exc}", file=sys.stderr)
+        return 3
+    for tech, count in found:
+        print(f"{count:>4}  {tech}")
     return 0
 
 
