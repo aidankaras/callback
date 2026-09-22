@@ -206,7 +206,7 @@ terms, and the check fails on it.
   The sentences follow the cover-letter kinds. `apply` puts passing answers
   in the packet.
 - **Outreach.** Offer to draft a short note to a recruiter, an engineer on
-  the team or a BU alum: `callback outreach <yaml>` with `channel`
+  the team or an alum of the user's school: `callback outreach <yaml>` with `channel`
   (`linkedin-note`, 300 characters; `linkedin-message`; `email`, 150 words)
   and the recipient's name. The name goes in the generated greeting only.
   Never invent a connection ("we met at…") that isn't a confirmed fact.
