@@ -102,6 +102,23 @@ def build_parser() -> argparse.ArgumentParser:
     fit_cmd.add_argument("job", help="job id of a posting saved in inbox/")
     fit_cmd.set_defaults(handler=_cmd_fit)
 
+    templates = sub.add_parser(
+        "template", help="reuse a document that passed as the starting point for the next one"
+    )
+    templates_sub = templates.add_subparsers(dest="template_command", required=True)
+    t_save = templates_sub.add_parser("save", help="save a job's gated draft under a name")
+    t_save.add_argument("job")
+    t_save.add_argument("--name", required=True)
+    t_save.set_defaults(handler=_cmd_template_save)
+    templates_sub.add_parser("list", help="list saved templates").set_defaults(
+        handler=_cmd_template_list
+    )
+    t_use = templates_sub.add_parser("use", help="copy a template into a job's draft")
+    t_use.add_argument("name")
+    t_use.add_argument("--job", required=True)
+    t_use.add_argument("--overwrite", action="store_true", help="replace an existing draft")
+    t_use.set_defaults(handler=_cmd_template_use)
+
     answers = sub.add_parser(
         "answers", help="check free-text application-form answers and write them paste-ready"
     )
@@ -451,6 +468,41 @@ def _cmd_fit(args: argparse.Namespace) -> int:
     for tech in result.missing:
         print(f"  missing  {tech}")
     return {"eligible": 0, "stretch": 0, "unknown": 1, "knockout": 2}[result.eligibility.verdict]
+
+
+def _cmd_template_save(args: argparse.Namespace) -> int:
+    from core.templates import TemplateError, save
+
+    try:
+        out = save(args.job, args.name)
+    except (TemplateError, OSError) as exc:
+        print(f"callback template save: {exc}", file=sys.stderr)
+        return 3
+    print(f"saved {out}")
+    return 0
+
+
+def _cmd_template_list(_args: argparse.Namespace) -> int:
+    from core.templates import listing
+
+    templates = listing()
+    for template in templates:
+        print(f"{template.name:<24} {template.bytes_:>6} bytes")
+    if not templates:
+        print("no templates saved; `callback template save <job> --name <name>`")
+    return 0
+
+
+def _cmd_template_use(args: argparse.Namespace) -> int:
+    from core.templates import TemplateError, use
+
+    try:
+        out = use(args.name, args.job, overwrite=args.overwrite)
+    except (TemplateError, OSError) as exc:
+        print(f"callback template use: {exc}", file=sys.stderr)
+        return 3
+    print(f"{out}\nEdit it for this posting, then run `callback build {out} --job {args.job}`.")
+    return 0
 
 
 def _cmd_answers(args: argparse.Namespace) -> int:

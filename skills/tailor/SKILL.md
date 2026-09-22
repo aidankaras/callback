@@ -155,7 +155,12 @@ Postings come from the employer's own board, never from a scraper.
 3. **Ask about gaps.** List each requirement with no supporting fact and ask
    the user about it (use `AskUserQuestion` for yes/no). Add true answers as
    facts; the user confirms them.
-4. **Phrase.** Write `$CALLBACK_HOME/outputs/<job-id>/draft/resume.yaml`:
+4. **Phrase.** Write `$CALLBACK_HOME/outputs/<job-id>/draft/resume.yaml`. For a
+   role like one already tailored, `callback template list` and
+   `callback template use <name> --job <job-id>` start from that document
+   instead of a blank one -- then edit it down for this posting rather than
+   sending it as it is. After a build passes, offer
+   `callback template save <job-id> --name <name>` for the next one.
    - Keep each bullet's claim exactly as its fact states it. You may reorder
      words and use the posting's term for the same skill.
    - Keep numbers verbatim, or derive them only as the fact's own `derived`
