@@ -29,6 +29,7 @@ below for you, except `facts confirm`, which only you can run.
 | `callback letter <letter.yaml>` | Renders a cover letter and checks it against your facts and the saved posting | 0 pass, 2 fail, 3 could not run |
 | `callback apply <id> --company … --title … --source …` | Builds the application packet from a gated draft and records it; `--refresh` rebuilds it after the draft improves. **Never submits** | 0, 3 refused |
 | `callback outcome <id> <kind>` / `callback applications` | Records what happened; lists applications | 0, 3 unreadable record |
+| `callback interview <id>` | An interview prep pack: the posting, exactly what was sent (verified against the application record) and the facts behind each claim | 0, 3 |
 
 Everything lives under `$CALLBACK_HOME` (default `~/.callback`). Directories there
 are `0700` and files `0600`.

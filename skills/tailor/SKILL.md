@@ -212,6 +212,23 @@ uv run --project <repo root> callback apply <job-id> --company "<company>" --tit
 - Afterwards, record what happened with
   `uv run --project <repo root> callback outcome <job-id> <kind>`.
 
+## When an interview is scheduled
+
+Record it (`callback outcome <job-id> interview`), then run
+`uv run --project <repo root> callback interview <job-id>`. The pack in
+`outputs/<job-id>/interview/prep.md` holds:
+- the posting;
+- exactly what was sent, verified against the application record;
+- each resume claim with the fuller facts behind it.
+
+From it, prepare the user:
+- the questions the posting and their materials invite;
+- a STAR outline for each claim, using only what its facts state;
+- and gaps they should be ready to address honestly.
+
+Anything a story needs that no fact states is a question for the user,
+never a detail to fill in.
+
 ## What the gates check (so you know what "fix the document" means)
 
 | Gate | Fails when |

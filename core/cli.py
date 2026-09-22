@@ -104,6 +104,12 @@ def build_parser() -> argparse.ArgumentParser:
     outreach.add_argument("doc", type=Path, help="outreach note (YAML)")
     outreach.set_defaults(handler=_cmd_outreach)
 
+    interview = sub.add_parser(
+        "interview", help="build an interview prep pack from exactly what you sent"
+    )
+    interview.add_argument("job")
+    interview.set_defaults(handler=_cmd_interview)
+
     app = sub.add_parser(
         "apply",
         help="build the application packet for a gated draft and record it (never submits)",
@@ -413,6 +419,18 @@ def _cmd_outreach(args: argparse.Namespace) -> int:
     for finding in result.findings:
         print(f"  {finding}", file=sys.stderr)
     return 0 if result.verdict == "pass" else 2
+
+
+def _cmd_interview(args: argparse.Namespace) -> int:
+    from core.interview import InterviewError, prepare
+
+    try:
+        path = prepare(args.job)
+    except (InterviewError, OSError) as exc:
+        print(f"callback interview: {exc}", file=sys.stderr)
+        return 3
+    print(f"prep pack: {path}")
+    return 0
 
 
 def _cmd_apply(args: argparse.Namespace) -> int:
