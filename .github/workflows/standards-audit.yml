@@ -61,12 +61,19 @@ jobs:
           # only CLAUDE_CODE_OAUTH_TOKEN set, so asking for ANTHROPIC_API_KEY
           # also meant this job could never start.
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          # Write is allowed without a path: a path-scoped Write rule refused the
+          # report twice, and what reaches the repository is decided by the pull
+          # request step, which commits reports/standards-audit.md and nothing
+          # else, from a runner that is then discarded. Subagents are disallowed:
+          # one run delegated its reading to background agents and ended its turn
+          # waiting for them, which in an unattended run ends the audit unwritten.
           # Printed so a failed run says why; the repository is private and
           # the audit reads nothing a contributor cannot already see.
           show_full_output: true
           claude_args: |
             --max-turns 100
-            --allowedTools "Read,Grep,Glob,Bash(git log:*),Bash(git show:*),Bash(git diff:*),Bash(find:*),Bash(cat:*),Bash(ls:*),Bash(wc:*),Bash(head:*),Bash(tail:*),Bash(sed -n:*),Bash(grep:*),Write(reports/standards-audit.md)"
+            --allowedTools "Read,Grep,Glob,Bash(git log:*),Bash(git show:*),Bash(git diff:*),Bash(find:*),Bash(cat:*),Bash(ls:*),Bash(wc:*),Bash(head:*),Bash(tail:*),Bash(sed -n:*),Bash(grep:*),Write"
+            --disallowedTools "Agent,Task"
           prompt: |
             You are auditing this repository, `callback`, against the properties
             it claims for itself. This is a read-only audit: do not edit, fix, or
@@ -126,6 +133,12 @@ jobs:
                check the arithmetic or the exception types by hand, and flag any
                passage whose register fits neither -- too vague to verify, or too
                dense to orient.
+
+            Do every piece of reading yourself: do not start subagents or
+            background tasks, and do not end your turn to wait for anything.
+            Write the report with the Write tool before your final message --
+            an audit that ends without writing reports/standards-audit.md is
+            lost, however complete its reading was.
 
             Write your findings to reports/standards-audit.md, organized by these
             eight properties. For each one, either cite the specific file, line
