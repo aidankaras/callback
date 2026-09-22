@@ -98,6 +98,13 @@ def test_a_finalised_document_is_not_writable(home: Path) -> None:
         "sed -i s/a/b/ $CALLBACK_HOME/facts.yaml",
         "sed -i s/a/b/ ${{CALLBACK_HOME}}/facts.yaml",
         "uv run --project /repo callback facts confirm",
+        # A boolean uv flag must not swallow the word that names the command,
+        # and `uv run --directory` changes directory exactly as `cd` does.
+        "uv run --locked callback facts confirm",
+        "uv run --locked --project /repo callback facts confirm",
+        "uv run --no-project python -m core.cli facts confirm",
+        "uv run --directory {home}/inbox rm ../facts.yaml",
+        "uv run --frozen --directory {home}/outputs/job cp /tmp/x.pdf final/resume.pdf",
     ],
 )
 def test_bash_forms_that_touch_a_protected_path_are_denied(home: Path, command: str) -> None:

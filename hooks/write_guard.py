@@ -143,17 +143,26 @@ def _segments(command: str) -> list[list[str]]:
 
 
 def _command_words(segment: list[str]) -> list[str]:
-    """`segment` without leading `VAR=value` assignments and a `uv run [--flag value]` prefix."""
+    """`segment` without leading `VAR=value` assignments and a leading `uv run`.
+
+    `uv run`'s own flags are kept rather than skipped. Which of them take a
+    value cannot be known here, and guessing cost the guard twice: consuming
+    the word after every flag hid `uv run --directory <dir> rm ../facts.yaml`
+    from the directory tracking below, and let a boolean flag such as
+    `--locked` swallow the word that named `callback facts confirm`. Left in
+    place, a flag is an unrecognised word, which every check below is safe
+    against."""
     words = list(segment)
     while words and re.fullmatch(r"[A-Za-z_]\w*=.*", words[0]):
         words.pop(0)
-    if words[:2] == ["uv", "run"]:
-        words = words[2:]
-        while words and words[0].startswith("-"):
-            flag = words.pop(0)
-            if "=" not in flag and words:
-                words.pop(0)
-    return words
+    return words[2:] if words[:2] == ["uv", "run"] else words
+
+
+def _runs(words: list[str], wanted: list[str]) -> bool:
+    """Whether `wanted` appears in `words` as consecutive words, anywhere: a
+    wrapper's flags may precede the command, and `uv run --locked callback ...`
+    names the same command as `callback ...`."""
+    return any(words[i : i + len(wanted)] == wanted for i in range(len(words) - len(wanted) + 1))
 
 
 def check_bash(command: str, cwd: Path) -> None:
@@ -162,12 +171,9 @@ def check_bash(command: str, cwd: Path) -> None:
         words = _command_words(segment)
         if not words:
             continue
-        if words[:3] == ["callback", "facts", "confirm"] or words[1:5] == [
-            "-m",
-            "core.cli",
-            "facts",
-            "confirm",
-        ]:
+        if _runs(words, ["callback", "facts", "confirm"]) or _runs(
+            words, ["-m", "core.cli", "facts", "confirm"]
+        ):
             deny("`callback facts confirm` must be typed by the candidate in their own terminal")
         # A redirect turns any command into a write, so a segment with one is
         # never exempt: `ls > facts.yaml` truncates the file as surely as `echo`.
