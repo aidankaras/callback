@@ -1,0 +1,41 @@
+name: Code Review
+
+# Reviews every pull request automatically. The per-change reviews during
+# development are dispatched by hand, which means they stop the moment nobody
+# is dispatching them; this one runs on the pull request itself and keeps
+# running afterwards.
+on:
+  pull_request:
+    types: [opened, synchronize, ready_for_review, reopened]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+      issues: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6
+        with:
+          fetch-depth: 1
+
+      - uses: anthropics/claude-code-action@cfc3eb22bfed5c26ef66e3223c982af27e4524de  # v1
+        with:
+          # OAuth token rather than a metered API key: this project runs on a
+          # subscription, and a pull-request trigger fires far more often than
+          # a schedule does.
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          plugin_marketplaces: "https://github.com/anthropics/claude-code.git"
+          plugins: "code-review@claude-code-plugins"
+          prompt: "/code-review:code-review --comment ${{ github.repository }}/pull/${{ github.event.pull_request.number }}"
+          # Inline comments only. A reviewer that can write to the tree is no
+          # longer a reviewer, and this repository's own guidance says an
+          # unattended fix to a design decision is the failure mode it exists
+          # to catch.
+          claude_args: '--allowedTools "mcp__github_inline_comment__create_inline_comment"'

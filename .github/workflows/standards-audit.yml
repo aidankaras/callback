@@ -1,0 +1,161 @@
+name: Standards audit
+
+# Reads the whole repository against the properties this project claims for
+# itself (see the prompt below) and opens a pull request with the findings
+# in reports/standards-audit.md. It changes nothing else: an unattended fix
+# to a design decision is exactly the confident, plausible, wrong change the
+# gates in this project exist to catch, so the audit is instructed to report
+# only, never to edit core/, tests/, docs/ or its own workflow.
+#
+# Triggers are schedule and workflow_dispatch only -- never an event carrying
+# attacker-influenced content (issue_comment, pull_request_target, etc) -- and
+# nothing from github.event.* is interpolated into the prompt or any shell
+# command below. That is what keeps the injection surface at zero rather than
+# merely small.
+#
+# The day-of-week field is left as `*` deliberately. crontab(5) documents that
+# naming both day-of-month and day-of-week restricts the schedule to the
+# union (OR) of the two, not their intersection -- so day-of-month "1,15"
+# combined with a restricted day-of-week would fire far more often than the
+# 1st/15th intended.
+#
+# The PR below is opened with the default GITHUB_TOKEN, which GitHub
+# deliberately does not let trigger other workflows (this stops an
+# unattended workflow from recursively spawning more workflow runs). CI and
+# any review automation configured on pull_request will NOT run against this
+# PR automatically; a human has to open it (push an empty commit, or use
+# `gh pr checks --watch` / re-run) to get those signals before merging.
+
+on:
+  schedule:
+    - cron: "0 9 1,15 * *"
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955  # v4.3.0
+
+      - name: Run the audit
+        uses: anthropics/claude-code-action@4036a180cf690f49529f5d8c79c998855287f590  # v1.0.230
+        with:
+          # The OAuth token, not an API key: this project runs on a subscription
+          # and a metered key would bill every scheduled run. The repository has
+          # only CLAUDE_CODE_OAUTH_TOKEN set, so asking for ANTHROPIC_API_KEY
+          # also meant this job could never start.
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          claude_args: |
+            --max-turns 40
+            --allowedTools "Read,Grep,Glob,Bash(git log:*),Bash(git show:*),Bash(git diff:*),Bash(find:*),Bash(cat:*),Bash(ls:*),Write(reports/standards-audit.md)"
+          prompt: |
+            You are auditing this repository, `callback`, against the properties
+            it claims for itself. This is a read-only audit: do not edit, fix, or
+            refactor anything. The only file you may write is
+            reports/standards-audit.md. An unattended fix to a design decision is
+            the exact failure mode this project exists to catch in generated text,
+            and it is no more acceptable coming from you.
+
+            Read the whole repository -- core/, tests/, docs/, README.md,
+            pyproject.toml, .github/workflows/ -- and evaluate it against these
+            claimed properties. Each is stated with the kind of defect that has
+            actually occurred in this codebase before, as a guide to the class of
+            problem to look for; it is background, not a claim that the defect is
+            still present today, so verify current behaviour rather than assuming
+            the seed still applies.
+
+            1. No fabrication enforced in code: a claim without user-supplied
+               provenance must not be able to become output. (Previously:
+               `Provenance` was mutable, so one attribute assignment could flip an
+               unconfirmed imported fact into a confirmed one.)
+            2. Grounding as derivability, not containment: a derived figure must be
+               recomputed, not merely matched against text; a plausible
+               interpretation must not be applied without context. (Previously: any
+               1900-2100 integer inside a date hull was read as a year, so "Cut the
+               $2020 licensing cost" passed grounding with no findings.)
+            3. Declared error boundaries hold: each module raises only the
+               exception type(s) it declares at its boundary. (Previously,
+               `store.py` leaked exception types it did not declare.)
+            4. Checks that can actually fail: for every gate, assertion, and metric
+               in the test suite, ask whether a plausible mutation of the code
+               under test would make it fail. (Previously, several checks in this
+               project could not fail no matter what the code under test did,
+               including a test that asserted a finding-kind slice while leaving
+               the headline verdict unchecked.)
+            5. Documentation does not outrun code: prose must not describe, in the
+               present tense, behaviour that is not built. (Previously, the README
+               claimed gates that had no implementation.)
+            6. Design and economy: flag abstractions earning nothing, duplication
+               that should consolidate (and the inverse: over-consolidation that
+               should split), and use `git log` on files under `core/` to find any
+               that have been amended more than twice for what looks like the same
+               class of defect -- a fix that recurs in one file is a design
+               problem, not a sequence of unrelated bugs.
+            7. Dependency reality: every third-party module imported by shipped
+               code under `core/` must resolve from the declared non-optional
+               dependencies in `pyproject.toml`, not from the development
+               environment. Check the import list against
+               `project.dependencies` specifically -- `[dependency-groups]`
+               and any optional extra do not count, because a consumer
+               installing the package does not get them. This is invisible to
+               CI by construction: CI installs the dev group, so a module that
+               only an extra provides imports fine there and fails on a user's
+               machine. State the import list you checked and where each name
+               is declared.
+            8. Prose by audience: identify any section that must orient a reader
+               unfamiliar with the code versus one written for a reader who will
+               check the arithmetic or the exception types by hand, and flag any
+               passage whose register fits neither -- too vague to verify, or too
+               dense to orient.
+
+            Write your findings to reports/standards-audit.md, organized by these
+            eight properties. For each one, either cite the specific file, line
+            range, or test name that demonstrates a finding, or say plainly that
+            you found nothing demonstrable in that category -- do not manufacture
+            a finding to look thorough; a report that invents problems trains its
+            reader to stop trusting the next one. Do not include a finding you
+            cannot point at in the actual current source.
+
+      - name: Fail if the audit produced no report
+        run: |
+          # A run that writes nothing must not go green. The pull-request action
+          # below opens no PR when it finds no change, so without this check a
+          # silently empty audit is indistinguishable from an audit that found
+          # nothing worth saying -- and both look like success.
+          #
+          # `git status --porcelain` rather than `git diff`: this file is untracked
+          # until the first audit commits it, and `git diff` does not report
+          # untracked files, so it would answer "no change" no matter what was
+          # written.
+          report=reports/standards-audit.md
+          test -f "$report" || { echo "::error::$report was not written"; exit 1; }
+          bytes=$(wc -c < "$report")
+          echo "report is $bytes bytes"
+          echo "tree state:"; git status --porcelain
+          if [ "$bytes" -lt 500 ]; then
+            echo "::error::$report is $bytes bytes, too small to be a real audit"
+            exit 1
+          fi
+          for n in 1 2 3 4 5 6 7 8; do
+            grep -q "^#\+ *$n\.\|^$n\." "$report" || \
+              echo "::warning::no section found for claimed property $n"
+          done
+
+      - name: Open a pull request with the findings
+        uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1  # v8.1.1
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          add-paths: reports/standards-audit.md
+          commit-message: "docs: scheduled standards audit"
+          title: "Scheduled standards audit"
+          body: >-
+            Automated audit against this project's own claimed properties.
+            Nothing else was changed; see reports/standards-audit.md for findings.
+            CI will not run automatically on this PR (default-token PRs don't
+            trigger other workflows) -- re-run or push an empty commit to get it.
+          branch: standards-audit/scheduled
+          delete-branch: true
