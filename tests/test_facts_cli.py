@@ -229,3 +229,19 @@ def test_a_fact_added_while_confirming_is_not_lost(tmp_path: Path) -> None:
 
     assert confirm([], open_tty=_Tty) == ["a"]
     assert set(load_facts()) == {"a", "meanwhile"}
+
+
+def test_an_unrecognised_answer_is_asked_again_and_end_of_input_stops(tmp_path: Path) -> None:
+    """Mutation: treat an unrecognised answer as "no" -- "a" is left unconfirmed."""
+    add_from_file(_facts_file(tmp_path, [_imported("a", "one"), _imported("b", "two")]))
+    answers = io.StringIO("yes please\ny\n")  # then end of input
+
+    class _Tty(io.TextIOBase):
+        def readline(self, size: int = -1, /) -> str:
+            return answers.readline()
+
+        def write(self, s: str, /) -> int:
+            return len(s)
+
+    assert confirm([], open_tty=_Tty) == ["a"]
+    assert not load_facts()["b"].selectable()

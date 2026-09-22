@@ -120,6 +120,22 @@ def _confirmed(fact: Fact) -> Fact:
     )
 
 
+def _ask(tty: Terminal) -> str:
+    """One of "y", "n" or "q". An unrecognised answer is asked again rather
+    than read as "no"; end of input is "q", so a closed terminal stops the
+    loop instead of spinning on empty reads."""
+    while True:
+        tty.write("True as written? [y]es / [n]o / [q]uit: ")
+        tty.flush()
+        line = tty.readline()
+        if not line:
+            return "q"
+        answer = line.strip().casefold()
+        if answer in {"y", "n", "q"}:
+            return answer
+        tty.write("Please answer y, n or q.\n")
+
+
 def confirm(ids: list[str], *, open_tty: Callable[[], Terminal] = _open_terminal) -> list[str]:
     """Ask the candidate, fact by fact, whether each is true; return the ids confirmed.
 
@@ -159,9 +175,7 @@ def confirm(ids: list[str], *, open_tty: Callable[[], Terminal] = _open_terminal
                 tty.write(f"  numbers: {fact.model_dump(mode='json')['numbers']}\n")
             if fact.dates:
                 tty.write(f"  dates: {fact.dates.start} .. {fact.dates.end or 'present'}\n")
-            tty.write("True as written? [y]es / [n]o / [q]uit: ")
-            tty.flush()
-            answer = tty.readline().strip().casefold()
+            answer = _ask(tty)
             if answer == "q":
                 break
             if answer == "y":

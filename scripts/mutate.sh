@@ -49,7 +49,12 @@ if ! python3 -m py_compile "$file" 2>/dev/null; then
   exit 0
 fi
 
-result=$(uv run pytest "$tests" -q -p no:cacheprovider 2>&1 | tail -1)
+# A mutant that loops forever is detected, not a survivor; the timeout turns
+# a hang into a result instead of leaving the mutant on disk indefinitely.
+output=$(timeout "${MUTATE_TIMEOUT:-300}" uv run pytest "$tests" -q -p no:cacheprovider 2>&1)
+status=$?
+result=$(printf '%s\n' "$output" | tail -1)
+[ "$status" = 124 ] && result="TIMEOUT (killed: the mutant hangs)"
 
 cp "$backup" "$file"
 if ! cmp -s "$file" "$backup"; then
