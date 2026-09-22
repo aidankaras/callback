@@ -51,6 +51,7 @@ than from job boards. Most LinkedIn and Indeed listings are reposts of these.
 | `callback profile --work-authorization … --graduation … --degree …` | What eligibility is judged against | 0, 3 |
 | `callback eligibility <job-id>` | Knockout requirements in a saved posting, each quoted | 0 eligible or stretch, 1 a question, 2 knockout, 3 |
 | `callback triage [--days N]` | Stored postings ranked: knockouts last, then by evidenced technologies and freshness | 0, 3 |
+| `callback gaps [--days N]` | Technologies the eligible stored postings name that no confirmed fact backs, most frequent first | 0, 3 |
 
 **Network access.** Discovery is the only part of callback that uses the
 network:
