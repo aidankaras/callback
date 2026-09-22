@@ -83,3 +83,9 @@ def test_resume_doc_round_trips_sources_through_sections() -> None:
     entry = doc.sections[0].entries[0]
     assert entry.sources == ["fact-employer-1"]
     assert entry.bullets[0].sources == ["fact-bullet-1"]
+
+
+@pytest.mark.parametrize("text", ["", "   "])
+def test_a_blank_bullet_is_rejected_at_the_model_boundary(text: str) -> None:
+    with pytest.raises(ValidationError, match="blank"):
+        Bullet(text=text, sources=["a"])

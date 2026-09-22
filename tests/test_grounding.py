@@ -1,3 +1,5 @@
+import pytest
+
 from core.checks.grounding import FindingKind, Verdict, check_bullet, check_document
 from core.profile.models import Dates, Derivation, Fact, FactKind, Provenance, Quantity, Trust
 
@@ -640,3 +642,24 @@ def test_check_document_reports_derived_verified_when_no_bullet_fails() -> None:
     verdict, findings = check_document([("Cut review volume 40%", [f])])
     assert verdict is Verdict.DERIVED_VERIFIED
     assert findings == []
+
+
+# --- nothing to ground is not the same as grounded ----------------------------
+
+
+def test_empty_document_fails_rather_than_passing_vacuously() -> None:
+    verdict, findings = check_document([])
+    assert verdict is Verdict.FAIL
+    assert [(f.bullet_index, f.kind) for f in findings] == [(-1, FindingKind.EMPTY_DOCUMENT)]
+
+
+@pytest.mark.parametrize("text", ["", "   ", "\n\t"])
+def test_blank_bullet_fails_even_with_a_valid_source(text: str) -> None:
+    verdict, findings = check_bullet(text, [fact("a")], index=4)
+    assert verdict is Verdict.FAIL
+    assert [(f.bullet_index, f.kind) for f in findings] == [(4, FindingKind.EMPTY_BULLET)]
+
+
+def test_one_grounded_bullet_still_passes_after_the_empty_guards() -> None:
+    f = fact("a", numbers={"queue": Quantity(value=300)})
+    assert check_document([("Cut the review queue to 300 items", [f])]) == (Verdict.PASS, [])

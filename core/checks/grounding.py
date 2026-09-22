@@ -157,11 +157,17 @@ class FindingKind(StrEnum):
     UNRESOLVED_NUMBER = "unresolved_number"
     UNKNOWN_ENTITY = "unknown_entity"
     UNRESOLVED_DATE = "unresolved_date"
+    EMPTY_BULLET = "empty_bullet"
+    EMPTY_DOCUMENT = "empty_document"
 
 
 @dataclass(frozen=True)
 class Finding:
-    """A single reason a bullet failed to ground, or a note on how it passed."""
+    """A single reason a bullet failed to ground, or a note on how it passed.
+
+    `bullet_index` is `-1` for a finding about the document as a whole
+    rather than any one bullet -- today only `EMPTY_DOCUMENT`.
+    """
 
     bullet_index: int
     kind: FindingKind
@@ -225,6 +231,8 @@ def check_bullet(
     derivation, else `ALIAS_MATCH` if any entity needed alias resolution,
     else plain `PASS`.
     """
+    if not text.strip():
+        return Verdict.FAIL, [Finding(index, FindingKind.EMPTY_BULLET, "bullet has no text")]
     if not sources:
         return Verdict.FAIL, [Finding(index, FindingKind.MISSING_SOURCE, "bullet cites no fact")]
 
@@ -373,7 +381,15 @@ def check_document(
     strongest verdict seen across all bullets (derived, then alias, then
     plain pass), so a document composed entirely of literal restatements is
     distinguished from one that leaned on recomputed derivations or aliases.
+
+    A document with no bullets fails: every check below is per-bullet, so
+    with nothing to iterate none of them fires, and a plain pass would be
+    indistinguishable from a document whose every bullet was verified.
     """
+    if not bullets:
+        return Verdict.FAIL, [
+            Finding(-1, FindingKind.EMPTY_DOCUMENT, "document has no bullets to ground")
+        ]
     all_findings: list[Finding] = []
     verdicts: list[Verdict] = []
     for i, (text, sources) in enumerate(bullets):

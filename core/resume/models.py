@@ -31,6 +31,16 @@ class Bullet(BaseModel):
     text: str
     sources: list[str] = Field(min_length=1)
 
+    @field_validator("text")
+    @classmethod
+    def _text_is_not_blank(cls, text: str) -> str:
+        """Refuse a bullet with no text: it makes no claim, so no grounding
+        check has anything to reject, and it would otherwise pass at the
+        strongest verdict its sources allow."""
+        if not text.strip():
+            raise ValueError("a bullet's text cannot be blank")
+        return text
+
 
 class Entry(BaseModel):
     """One employer, role, or program within a section.
