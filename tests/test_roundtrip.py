@@ -951,3 +951,39 @@ def test_skills_only_section_does_not_break_a_later_sections_title(tmp_path: Pat
     assert result.order_ok, result.out_of_order
     assert result.char_ratio == 1.0, result.char_ratio
     assert result.verdict == "pass", result.findings
+
+
+@pytest.mark.slow
+def test_a_skill_missing_from_its_own_section_is_not_recovered_from_a_later_one(
+    tmp_path: Path,
+) -> None:
+    """A skills-only section has no entry anchors, so its region once ran to
+    the end of the document: a skill the render dropped from one skills line
+    was "recovered" from a later skills section that genuinely lists it.
+
+    The collision has to be a delimited item -- `_find_skill` matches whole
+    comma-separated items, so a later *bullet* mentioning the skill could
+    never satisfy it and would make this test pass with no bound at all.
+
+    Mutation: make `_skills_region_end` return `None` -- this test fails.
+    """
+    identity = Identity(name="Dana Vex", email="d@example.com")
+    tools = Section(title="Tools", skills=["Docker", "Kafka"])
+    rendered = ResumeDoc(
+        identity=identity, sections=[Section(title="Languages", skills=["Python", "SQL"]), tools]
+    )
+    declared = ResumeDoc(
+        identity=identity,
+        sections=[Section(title="Languages", skills=["Python", "Kafka", "SQL"]), tools],
+    )
+    out = tmp_path / "resume.pdf"
+    render(rendered, out)
+
+    # Premise: "Kafka" is rendered exactly once, and only after the Tools title.
+    flat = [normalize(s) for page in naive_segments(out) for s in page]
+    kafka_rows = [i for i, s in enumerate(flat) if "Kafka" in s]
+    title_row = next(i for i, s in enumerate(flat) if s.casefold() == "tools")
+    assert len(kafka_rows) == 1 and kafka_rows[0] > title_row, flat
+
+    result = check_roundtrip(declared, out)
+    assert result.skills_unrecovered == ["Kafka"]

@@ -190,6 +190,11 @@ class RoundTripResult:
     char_ratio: float = 1.0
     order_ok: bool = True
     out_of_order: list[str] = field(default_factory=list[str])
+    # Declared skills a naive parser could not read back from their own
+    # section. Not critical -- a missing skill does not fail the document --
+    # but it is exactly what an ATS keyword filter would miss, so it is
+    # reported rather than only folded into `char_ratio`.
+    skills_unrecovered: list[str] = field(default_factory=list[str])
     verdict: str = "pass"
     findings: list[str] = field(default_factory=list[str])
 
@@ -653,6 +658,29 @@ def _section_regions(doc: ResumeDoc, anchors: list[int | None]) -> list[tuple[in
     return regions
 
 
+def _skills_region_end(
+    doc: ResumeDoc,
+    section_index: int,
+    positions: dict[str, int | None],
+    anchors: list[int | None],
+) -> int | None:
+    """Where a skills-only section's region ends: the first position found
+    for anything declared after it -- a later section's title or a later
+    entry's heading -- or `None` if nothing later was found.
+
+    `_section_regions` ends a section at its own first entry anchor, which a
+    skills-only section never has, so without this its region would run to
+    the end of the document and a skill the render dropped from its own line
+    could be "recovered" from an unrelated bullet in a later section.
+    """
+    earlier_entries = sum(len(s.entries) for s in doc.sections[: section_index + 1])
+    candidates = [
+        positions.get(f"section_title[{j}]") for j in range(section_index + 1, len(doc.sections))
+    ] + anchors[earlier_entries:]
+    found = [c for c in candidates if c is not None]
+    return min(found) if found else None
+
+
 def _region(
     d: _Declared,
     *,
@@ -745,7 +773,10 @@ def check_roundtrip(doc: ResumeDoc, pdf_path: Path) -> RoundTripResult:
     header_end = next((a for a in anchors if a is not None), None)
 
     positions: dict[str, int | None] = {}
-    for d in declared:
+    # Skills resolve last: a skills-only section's region is bounded by the
+    # position of whatever follows it, known only once every non-skill field
+    # has been found.
+    for d in [d for d in declared if not d.is_skill] + [d for d in declared if d.is_skill]:
         start, end = _region(
             d, header_end=header_end, section_regions=section_regions, entry_spans=entry_spans
         )
@@ -753,11 +784,13 @@ def check_roundtrip(doc: ResumeDoc, pdf_path: Path) -> RoundTripResult:
         # `_matches`'s ownership rule -- see `_row_items`'s docstring for
         # why the two must differ, and the module docstring's skills
         # paragraph for where a reader meets this split for the first time.
-        positions[d.field] = (
-            _find_skill(d.value, flat, start=start, end=end)
-            if d.is_skill
-            else _find(d.value, flat, declared_values, start=start, end=end)
-        )
+        if d.is_skill:
+            assert d.region_index is not None, "a skill always names its section"
+            if end is None:
+                end = _skills_region_end(doc, d.region_index, positions, anchors)
+            positions[d.field] = _find_skill(d.value, flat, start=start, end=end)
+        else:
+            positions[d.field] = _find(d.value, flat, declared_values, start=start, end=end)
 
     critical = [_field_result(d, positions[d.field], flat) for d in declared if d.critical]
     missing = [f.field for f in critical if not f.recovered]
@@ -803,6 +836,7 @@ def check_roundtrip(doc: ResumeDoc, pdf_path: Path) -> RoundTripResult:
         char_ratio=char_ratio,
         order_ok=order_ok,
         out_of_order=out_of_order,
+        skills_unrecovered=[d.value for d in declared if d.is_skill and positions[d.field] is None],
         verdict=verdict,
         findings=findings,
     )
