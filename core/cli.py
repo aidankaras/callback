@@ -6,6 +6,7 @@ import argparse
 import re
 import sys
 from pathlib import Path
+from typing import cast
 
 from core import __version__
 
@@ -31,6 +32,44 @@ def build_parser() -> argparse.ArgumentParser:
     build.add_argument("doc", type=Path, help="resume document (YAML)")
     build.add_argument("--job", required=True, help="job id: lowercase letters, digits, hyphens")
     build.set_defaults(handler=_cmd_build)
+
+    targets = sub.add_parser("targets", help="the companies whose job boards to watch")
+    targets_sub = targets.add_subparsers(dest="targets_command", required=True)
+    t_add = targets_sub.add_parser("add", help="watch a company's Greenhouse, Lever or Ashby board")
+    t_add.add_argument("company")
+    t_add.add_argument("--ats", required=True, choices=["greenhouse", "lever", "ashby"])
+    t_add.add_argument("--board", required=True, help="the board name in the company's job URLs")
+    t_add.set_defaults(handler=_cmd_targets_add)
+    targets_sub.add_parser("list", help="list watched companies").set_defaults(
+        handler=_cmd_targets_list
+    )
+
+    criteria = sub.add_parser("criteria", help="which posting titles a watch keeps")
+    criteria.add_argument("--include", required=True, help="comma-separated title terms")
+    criteria.add_argument("--exclude", default="", help="comma-separated title terms to skip")
+    criteria.set_defaults(handler=_cmd_criteria)
+
+    sub.add_parser("watch", help="poll watched boards for new matching postings").set_defaults(
+        handler=_cmd_watch
+    )
+
+    postings = sub.add_parser("postings", help="discovered postings")
+    postings_sub = postings.add_subparsers(dest="postings_command", required=True)
+    p_list = postings_sub.add_parser("list", help="list stored postings, newest first")
+    p_list.add_argument(
+        "--days", type=int, default=None, help="only those first seen this recently"
+    )
+    p_list.set_defaults(handler=_cmd_postings_list)
+    p_resolve = postings_sub.add_parser(
+        "resolve", help="fetch the canonical posting behind a Greenhouse, Lever or Ashby URL"
+    )
+    p_resolve.add_argument("url")
+    p_resolve.add_argument("--company", required=True)
+    p_resolve.set_defaults(handler=_cmd_postings_resolve)
+    p_take = postings_sub.add_parser("take", help="save a posting as the posting for a job")
+    p_take.add_argument("posting_id")
+    p_take.add_argument("--job", required=True)
+    p_take.set_defaults(handler=_cmd_postings_take)
 
     app = sub.add_parser(
         "apply",
@@ -97,6 +136,132 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 _SAFE_STEM = re.compile(r"[^a-z0-9-]+")
+
+
+def _fetcher() -> object:
+    """The network fetcher; a single place tests replace."""
+    from core.discovery.fetch import HttpFetcher
+
+    return HttpFetcher()
+
+
+def _discovery_errors() -> tuple[type[Exception], ...]:
+    from pydantic import ValidationError
+
+    from core.discovery.fetch import DiscoveryError
+
+    return (DiscoveryError, ValidationError, OSError)
+
+
+def _cmd_targets_add(args: argparse.Namespace) -> int:
+    from core.discovery.store import Target, add_target
+    from core.paths import ensure_home
+
+    ensure_home()
+    try:
+        added = add_target(Target(company=args.company, ats=args.ats, board=args.board))
+    except _discovery_errors() as exc:
+        print(f"callback targets add: {exc}", file=sys.stderr)
+        return 3
+    print(f"{'watching' if added else 'already watching'} {args.company} ({args.ats}:{args.board})")
+    return 0
+
+
+def _cmd_targets_list(_args: argparse.Namespace) -> int:
+    from core.discovery.store import load_targets
+
+    try:
+        for t in load_targets():
+            print(f"{t.company:<30} {t.ats}:{t.board}")
+    except _discovery_errors() as exc:
+        print(f"callback targets list: {exc}", file=sys.stderr)
+        return 3
+    return 0
+
+
+def _cmd_criteria(args: argparse.Namespace) -> int:
+    from core.discovery.store import Criteria, save_criteria
+    from core.paths import ensure_home
+
+    def terms(raw: str) -> list[str]:
+        return [t.strip() for t in raw.split(",") if t.strip()]
+
+    ensure_home()
+    try:
+        save_criteria(Criteria(include=terms(args.include), exclude=terms(args.exclude)))
+    except _discovery_errors() as exc:
+        print(f"callback criteria: {exc}", file=sys.stderr)
+        return 3
+    return 0
+
+
+def _cmd_watch(_args: argparse.Namespace) -> int:
+    from datetime import UTC, datetime
+
+    from core.discovery.fetch import Fetcher
+    from core.discovery.store import watch
+
+    try:
+        result = watch(cast("Fetcher", _fetcher()), now=datetime.now(tz=UTC))
+    except _discovery_errors() as exc:
+        print(f"callback watch: {exc}", file=sys.stderr)
+        return 3
+    for p in result.new:
+        print(f"NEW  {p.id:<40} {p.company} / {p.title}  [{p.location}]")
+    for target, message in result.errors:
+        print(f"callback watch: could not read {target.company}: {message}", file=sys.stderr)
+    print(f"{len(result.new)} new posting(s)")
+    return 1 if result.errors else 0
+
+
+def _cmd_postings_list(args: argparse.Namespace) -> int:
+    from datetime import UTC, datetime, timedelta
+
+    from core.discovery.store import load_postings
+
+    try:
+        postings = sorted(load_postings().values(), key=lambda p: p.first_seen, reverse=True)
+    except _discovery_errors() as exc:
+        print(f"callback postings list: {exc}", file=sys.stderr)
+        return 3
+    now = datetime.now(tz=UTC)
+    for p in postings:
+        age = now - p.first_seen
+        if args.days is not None and age > timedelta(days=args.days):
+            continue
+        print(f"{age.days:>3}d  {p.id:<40} {p.company} / {p.title}  [{p.location}]")
+    return 0
+
+
+def _cmd_postings_resolve(args: argparse.Namespace) -> int:
+    from datetime import UTC, datetime
+
+    from core.discovery.fetch import Fetcher
+    from core.discovery.store import resolve
+    from core.paths import ensure_home
+
+    ensure_home()
+    try:
+        found = resolve(
+            args.url, args.company, cast("Fetcher", _fetcher()), now=datetime.now(tz=UTC)
+        )
+    except _discovery_errors() as exc:
+        print(f"callback postings resolve: {exc}", file=sys.stderr)
+        return 3
+    print(f"{found.id}  {found.company} / {found.title}")
+    return 0
+
+
+def _cmd_postings_take(args: argparse.Namespace) -> int:
+    from core.discovery.store import take
+
+    try:
+        path = take(args.posting_id, args.job)
+    except _discovery_errors() as exc:
+        print(f"callback postings take: {exc}", file=sys.stderr)
+        return 3
+    print(f"posting saved to {path}")
+    return 0
 
 
 def _cmd_apply(args: argparse.Namespace) -> int:
