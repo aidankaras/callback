@@ -20,6 +20,9 @@ FACTS = {
         id="role",
         kind=FactKind.EXPERIENCE,
         text="Data Engineer at Northwind Analytics in Boston, MA",
+        organization="Northwind Analytics",
+        title="Data Engineer",
+        location="Boston, MA",
         entities=["Northwind Analytics"],
         dates=Dates(start="2024-06", end="2025-08"),
         provenance=CONFIRMED,
@@ -27,9 +30,17 @@ FACTS = {
     "queue": Fact(
         id="queue",
         kind=FactKind.EXPERIENCE_DETAIL,
+        parent="role",
         text="Cut the review queue to 300 items using Python",
         numbers={"queue": Quantity(value=300)},
         entities=["Python"],
+        provenance=CONFIRMED,
+    ),
+    "contact": Fact(
+        id="contact",
+        kind=FactKind.LINKS,
+        text="Dana Vex, d@example.com",
+        entities=["Dana Vex", "d@example.com"],
         provenance=CONFIRMED,
     ),
 }

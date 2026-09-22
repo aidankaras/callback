@@ -1,13 +1,17 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
+
 import pytest
+from pydantic import ValidationError
 
 from core.checks.claims import check_claims
 from core.profile.models import Dates, Fact, FactKind, Identity, Provenance, Trust
 from core.resume.models import Bullet, Entry, ResumeDoc, Section
 
 CONFIRMED = Provenance(source="onboarding_answer", trust=Trust.USER_CONFIRMED)
-IDENTITY = Identity(name="Dana Vex", email="dana@example.com")
+IMPORTED = Provenance(source="import:resume.pdf", trust=Trust.IMPORT_UNCONFIRMED)
+IDENTITY = Identity(name="Dana Vex", email="dana@example.com", links=["github.com/dv"])
 
 
 def fact(fid: str, text: str, **kw: object) -> Fact:
@@ -23,27 +27,60 @@ def fact(fid: str, text: str, **kw: object) -> Fact:
 
 ROLE = fact(
     "role",
-    "Data Engineer at Northwind Analytics in Boston, MA",
-    entities=["Northwind Analytics"],
+    "Data Engineer at Northwind Analytics, consulting for Goldman Sachs; "
+    "reported to the Chief Technology Officer",
+    organization="Northwind Analytics",
+    title="Data Engineer",
+    location="Boston, MA",
+    entities=["Northwind Analytics", "Goldman Sachs"],
     dates=Dates(start="2024-06", end="2025-08"),
+)
+INTERN = fact(
+    "intern",
+    "Data Engineering Intern at Harbor Lab",
+    organization="Harbor Lab",
+    title="Data Engineering Intern",
+    dates=Dates(start="2023-06", end="2023-08"),
 )
 CURRENT = fact(
     "current",
     "Research Assistant at Harbor Lab",
-    entities=["Harbor Lab"],
+    organization="Harbor Lab",
+    title="Research Assistant",
     dates=Dates(start="2025-09"),
+)
+DEGREE = fact(
+    "degree",
+    "BS Data Science, Boston University",
+    kind=FactKind.EDUCATION,
+    organization="Boston University",
+    title="BS Data Science",
+    dates=Dates(start="2019-09", end="2023-05"),
 )
 SKILLS = fact("skills", "Kubernetes", kind=FactKind.SKILL)
 DETAIL = fact(
     "detail",
     "Moved the event bus to Kafka",
     kind=FactKind.EXPERIENCE_DETAIL,
+    parent="role",
     entities=["Kafka"],
 )
-FACTS = {f.id: f for f in (ROLE, CURRENT, SKILLS, DETAIL)}
+CONTACT = fact(
+    "contact",
+    "Dana Vex, dana@example.com, github.com/dv",
+    kind=FactKind.LINKS,
+    entities=["Dana Vex", "dana@example.com", "github.com/dv"],
+)
+FACTS = {f.id: f for f in (ROLE, INTERN, CURRENT, DEGREE, SKILLS, DETAIL, CONTACT)}
 
 
-def doc(*, entry: dict[str, object] | None = None, skills: list[str] | None = None) -> ResumeDoc:
+def doc(
+    *,
+    entry: Mapping[str, object] | None = None,
+    skills: list[str] | None = None,
+    identity: Identity = IDENTITY,
+    title: str = "Experience",
+) -> ResumeDoc:
     body: dict[str, object] = {
         "heading": "Northwind Analytics",
         "subheading": "Data Engineer",
@@ -54,40 +91,79 @@ def doc(*, entry: dict[str, object] | None = None, skills: list[str] | None = No
         "bullets": [Bullet(text="Moved the event bus to Kafka", sources=["detail"])],
     }
     body.update(entry or {})
-    sections = [Section(title="Experience", entries=[Entry.model_validate(body)])]
+    sections = [Section(title=title, entries=[Entry.model_validate(body)])]
     if skills is not None:
         sections.append(Section(title="Skills", skills=skills))
-    return ResumeDoc(identity=IDENTITY, sections=sections)
+    return ResumeDoc(identity=identity, sections=sections)
 
 
-def test_an_honest_header_passes() -> None:
-    assert check_claims(doc(skills=["Kubernetes", "Kafka"]), FACTS).verdict == "pass"
+def findings_for(document: ResumeDoc, facts: dict[str, Fact] | None = None) -> tuple[str, ...]:
+    return check_claims(document, facts if facts is not None else FACTS).findings
+
+
+def test_an_honest_document_passes() -> None:
+    assert findings_for(doc(skills=["Kubernetes", "Kafka"])) == ()
+
+
+# --- entry headers --------------------------------------------------------------
 
 
 @pytest.mark.parametrize(
     ("change", "expected"),
     [
-        # The invented employer shares a word with the real one, so a
-        # token-overlap or substring rule would let it through.
-        ({"heading": "Northwind Capital"}, "employer"),
-        ({"heading": "Analytics"}, "employer"),
-        ({"subheading": "Senior Data Engineer"}, "title"),
-        ({"location": "New York, NY"}, "location"),
-        ({"start": "Jun 2023"}, "start date"),
-        ({"end": "Present"}, "end date"),
-        ({"start": "Summer 2024"}, "start date"),
+        # The invented employer shares a word with the real one.
+        ({"heading": "Northwind Capital"}, "employer 'Northwind Capital'"),
+        # An entity of the fact, but the client, not the employer.
+        ({"heading": "Goldman Sachs"}, "employer 'Goldman Sachs'"),
+        # A title stated in the fact's text, but a manager's.
+        ({"subheading": "Chief Technology Officer"}, "title 'Chief Technology Officer'"),
+        ({"subheading": "Senior Data Engineer"}, "title 'Senior Data Engineer'"),
+        ({"location": "New York, NY"}, "location 'New York, NY'"),
+        ({"start": "Jun 2023"}, "start date 'Jun 2023'"),
+        ({"end": "Present"}, "end date 'Present'"),
+        ({"start": "Summer 2024"}, "start date 'Summer 2024'"),
         ({"sources": []}, "cites no fact"),
         ({"sources": ["nope"]}, "unknown fact"),
     ],
 )
 def test_a_fabricated_header_field_fails(change: dict[str, object], expected: str) -> None:
-    result = check_claims(doc(entry=change), FACTS)
-    assert result.verdict == "fail"
-    assert any(expected in f for f in result.findings), result.findings
+    found = findings_for(doc(entry=change))
+    assert any(expected in f for f in found), found
 
 
-def test_a_shortened_title_is_not_inflation() -> None:
-    assert check_claims(doc(entry={"subheading": "Engineer"}), FACTS).verdict == "pass"
+def test_dropping_a_qualifier_from_a_title_is_inflation() -> None:
+    """Mutation: compare titles by containment -- this test fails."""
+    intern = {
+        "heading": "Harbor Lab",
+        "subheading": "Data Engineering",
+        "location": None,
+        "start": "Jun 2023",
+        "end": "Aug 2023",
+        "sources": ["intern"],
+        "bullets": [],
+    }
+    assert any("title 'Data Engineering'" in f for f in findings_for(doc(entry=intern)))
+
+
+def test_every_header_field_must_come_from_the_same_fact() -> None:
+    """Citing a degree alongside a job must not lend the job the degree's start.
+    Mutation: check each date against any cited fact -- this test fails."""
+    spliced = {"start": "Sep 2019", "sources": ["role", "degree"]}
+    assert any("start date 'Sep 2019'" in f for f in findings_for(doc(entry=spliced)))
+
+
+def test_an_employer_named_only_by_a_detail_fact_is_not_an_employer() -> None:
+    partner = fact(
+        "partner",
+        "Partnered with Acme Quant Capital",
+        kind=FactKind.EXPERIENCE_DETAIL,
+        organization="Acme Quant Capital",
+    )
+    found = findings_for(
+        doc(entry={"heading": "Acme Quant Capital", "sources": ["partner"], "bullets": []}),
+        {**FACTS, "partner": partner},
+    )
+    assert any("employer 'Acme Quant Capital'" in f for f in found), found
 
 
 def test_present_is_allowed_only_for_a_role_that_has_not_ended() -> None:
@@ -98,52 +174,86 @@ def test_present_is_allowed_only_for_a_role_that_has_not_ended() -> None:
         "start": "Sep 2025",
         "end": "Present",
         "sources": ["current"],
+        "bullets": [],
     }
-    assert check_claims(doc(entry=current), FACTS).verdict == "pass"
+    assert findings_for(doc(entry=current)) == ()
 
 
 def test_a_bare_year_is_compared_to_the_fact_year() -> None:
-    assert check_claims(doc(entry={"start": "2024", "end": "2025"}), FACTS).verdict == "pass"
-    assert check_claims(doc(entry={"start": "2023"}), FACTS).verdict == "fail"
+    assert findings_for(doc(entry={"start": "2024", "end": "2025"})) == ()
+    assert findings_for(doc(entry={"start": "2023"})) != ()
 
 
 def test_an_unconfirmed_fact_cannot_back_a_header() -> None:
-    imported = ROLE.model_copy(
-        update={
-            "provenance": Provenance(source="import:resume.pdf", trust=Trust.IMPORT_UNCONFIRMED)
-        }
+    imported = ROLE.model_copy(update={"provenance": IMPORTED})
+    found = findings_for(doc(), {**FACTS, "role": imported})
+    assert any("not confirmed" in f for f in found), found
+
+
+# --- bullets belong to their entry ------------------------------------------------
+
+
+def test_a_bullet_may_not_cite_another_entrys_fact() -> None:
+    """Mutation: skip the ownership check -- this test fails."""
+    other = fact(
+        "other",
+        "Cut error rates 42%",
+        kind=FactKind.EXPERIENCE_DETAIL,
+        parent="intern",
     )
-    result = check_claims(doc(), {**FACTS, "role": imported})
-    assert result.verdict == "fail"
-    assert any("not confirmed" in f for f in result.findings), result.findings
+    borrowed = {"bullets": [Bullet(text="Cut error rates 42%", sources=["other"])]}
+    found = findings_for(doc(entry=borrowed), {**FACTS, "other": other})
+    assert any("belong to no fact of this entry ['other']" in f for f in found), found
+
+
+# --- identity and section titles --------------------------------------------------
+
+
+def test_a_credential_appended_to_the_name_fails() -> None:
+    found = findings_for(doc(identity=IDENTITY.model_copy(update={"name": "Dana Vex, PhD"})))
+    assert found == ("identity name 'Dana Vex, PhD' is not an entity of any confirmed links fact",)
+
+
+def test_a_link_that_is_prose_is_refused_at_the_model() -> None:
+    with pytest.raises(ValidationError, match="no spaces"):
+        Identity(name="Dana Vex", email="dana@example.com", links=["TS/SCI clearance"])
+
+
+def test_an_unconfirmed_link_fails() -> None:
+    extra = IDENTITY.model_copy(update={"links": ["github.com/dv", "linkedin.com/in/someone"]})
+    found = findings_for(doc(identity=extra))
+    assert found == (
+        "identity link 'linkedin.com/in/someone' is not an entity of any confirmed links fact",
+    )
+
+
+def test_an_embellished_section_title_fails() -> None:
+    found = findings_for(doc(title="Experience - Forbes 30 Under 30 Honoree"))
+    assert any("section title" in f for f in found), found
+
+
+# --- skills -----------------------------------------------------------------------
 
 
 def test_a_skill_with_no_confirmed_fact_fails() -> None:
-    result = check_claims(doc(skills=["Kubernetes", "Terraform"]), FACTS)
-    assert result.verdict == "fail"
-    assert result.findings == ["skill 'Terraform' is backed by no confirmed fact"]
+    assert findings_for(doc(skills=["Kubernetes", "Terraform"])) == (
+        "skill 'Terraform' is backed by no confirmed fact",
+    )
 
 
 def test_a_skill_matches_through_its_alias() -> None:
-    assert check_claims(doc(skills=["k8s"]), FACTS).verdict == "pass"
+    assert findings_for(doc(skills=["k8s"])) == ()
 
 
 def test_a_skill_fact_stored_as_an_alias_backs_the_canonical_name() -> None:
-    """The fact is the side written in the candidate's own words, so it is
-    the side most likely to hold an alias. Mutation: compare skill facts
-    without canonicalising them -- this test fails."""
     torch = fact("torch", "torch", kind=FactKind.SKILL)
-    assert check_claims(doc(skills=["PyTorch"]), {**FACTS, "torch": torch}).verdict == "pass"
+    assert findings_for(doc(skills=["PyTorch"]), {**FACTS, "torch": torch}) == ()
 
 
 def test_a_skill_evidenced_by_a_cited_fact_passes_without_a_skill_fact() -> None:
-    assert check_claims(doc(skills=["Kafka"]), FACTS).verdict == "pass"
+    assert findings_for(doc(skills=["Kafka"])) == ()
 
 
 def test_a_skill_fact_that_is_unconfirmed_does_not_back_a_skill() -> None:
-    imported = SKILLS.model_copy(
-        update={
-            "provenance": Provenance(source="import:resume.pdf", trust=Trust.IMPORT_UNCONFIRMED)
-        }
-    )
-    assert check_claims(doc(skills=["Kubernetes"]), {**FACTS, "skills": imported}).verdict == "fail"
+    imported = SKILLS.model_copy(update={"provenance": IMPORTED})
+    assert findings_for(doc(skills=["Kubernetes"]), {**FACTS, "skills": imported}) != ()

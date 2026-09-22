@@ -1,42 +1,45 @@
-"""Structural grounding for what bullet grounding cannot see: entry headers and skills.
+"""Structural grounding for what bullet grounding cannot see: headers, identity, skills.
 
-Bullet grounding checks a bullet's numbers, dates and recognised technical
-terms against its cited facts. It deliberately does not check ordinary
-words, because a bullet is rephrased prose. That leaves a gap exactly where
-a tailored resume is most tempting to embellish: an entry header. Measured
-against the bullet rule, a header reading "Senior Data Engineer" at
-"Acme Quant Capital" grounds cleanly against a fact that says "Data
-Engineer at Northwind Analytics", because neither "Senior" nor "Acme" is a
-token that rule inspects.
+Bullet grounding checks a bullet's own claims against its cited facts. This
+module checks everything else a resume asserts, and holds it to a stricter
+rule than prose can be held to, because none of it is prose.
 
-Headers are not prose, so they can be held to a much stricter rule than
-bullets can:
+**An entry header must be one cited fact, field for field.** Exactly one
+cited fact of kind experience, education or project must have an
+`organization` equal to the heading, a `title` equal to the subheading, a
+`location` equal to the location, and dates equal to the entry's dates.
+Every field is compared against that same fact. Checking each field against
+*any* cited fact let one entry take its employer from one fact and its dates
+from another -- an education fact's start date spliced onto a job inflated
+its tenure -- and matching against free text let "reported to the Chief
+Technology Officer" become the candidate's own title. A title must be equal,
+not contained: dropping "Intern" from "Data Engineering Intern" is
+inflation, not shortening.
 
-- the employer (`Entry.heading`) must *equal* an entity of a cited fact --
-  not merely appear in its text, where "partnered with Acme" would let a
-  swapped employer through;
-- the title and location must appear in a cited fact as a whole-word run,
-  so a title can be shortened ("Engineer") but not inflated;
-- each date must equal the cited fact's own date, "Present" is accepted
-  only for a role whose fact has no end, and a date in any form this module
-  cannot parse fails rather than being skipped.
+**A bullet cites only its own entry's facts**: the entry's `sources`, or a
+fact whose `parent` is one of them. Otherwise a percentage from one job can
+back a bullet under another.
 
-A skills list carries no sources of its own, so every listed skill must be
-backed by a confirmed fact: either a `skill` fact naming it, or an entity of
-a fact cited by one of the document's bullets. Both are compared through
-the alias table, so "k8s" and "Kubernetes" are the same skill. Bullets are
-not required to have passed grounding here; a bullet that fails grounding
-fails the document through that gate on its own.
+**The identity block** -- name, email, phone, each link -- must equal an
+entity of a confirmed `links` fact. It is otherwise free text rendered at the
+top of the page, where a credential appended to a name or a clearance listed
+as a "link" is the first thing a reader sees.
 
-Every rule fails closed. Only confirmed facts count, matching
-`Fact.selectable`.
+**Section titles** come from a fixed list (`SECTION_TITLES`). A title is
+rendered in bold capitals, and "Experience - Forbes 30 Under 30" is a claim.
+
+**Skills**: every listed skill must be backed by a confirmed fact -- a
+`skill` fact naming it, or an entity of a fact a bullet cites -- compared
+through the alias table, so "k8s" and "Kubernetes" are one skill.
+
+Every rule fails closed. Only confirmed facts count, matching `Fact.selectable`.
 """
 
 from __future__ import annotations
 
 import re
 from collections.abc import Iterable, Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Literal
 
 from core.aliases import canonicalize
@@ -45,36 +48,60 @@ from core.profile.models import Fact, FactKind
 from core.resume.models import Entry, ResumeDoc
 
 _YEAR = re.compile(r"^\d{4}$")
+_HEADER_KINDS = frozenset({FactKind.EXPERIENCE, FactKind.EDUCATION, FactKind.PROJECT})
+
+SECTION_TITLES = frozenset(
+    {
+        "experience",
+        "work experience",
+        "professional experience",
+        "research experience",
+        "relevant experience",
+        "teaching experience",
+        "leadership experience",
+        "volunteer experience",
+        "education",
+        "projects",
+        "selected projects",
+        "research",
+        "skills",
+        "technical skills",
+        "languages",
+        "tools",
+        "certifications",
+        "publications",
+        "leadership",
+        "activities",
+        "awards",
+        "honors",
+        "honors and awards",
+        "coursework",
+        "relevant coursework",
+    }
+)
 
 
 @dataclass(frozen=True)
 class ClaimsResult:
-    """The gate's verdict and one finding per unsupported claim."""
+    """One finding per unsupported claim; the verdict follows from them."""
 
-    verdict: Literal["pass", "fail"]
-    findings: list[str] = field(default_factory=list[str])
+    findings: tuple[str, ...] = ()
+
+    @property
+    def verdict(self) -> Literal["pass", "fail"]:
+        return "fail" if self.findings else "pass"
 
 
 def _norm(text: str) -> str:
     return " ".join(text.casefold().split())
 
 
-def _contains_words(value: str, text: str) -> bool:
-    """True if `value` occurs in `text` as a whole-word run, ignoring case
-    and whitespace differences. "Intern" does not occur in "internal"."""
-    pattern = r"(?<!\w)" + re.escape(_norm(value)) + r"(?!\w)"
-    return re.search(pattern, _norm(text)) is not None
-
-
 def _canon(term: str) -> str:
     return _norm(canonicalize(term))
 
 
-def _date_ok(value: str, fact: Fact, *, is_end: bool) -> bool:
-    """Whether a header date names the same month (or year) as `fact`'s."""
-    if fact.dates is None:
-        return False
-    fact_date = fact.dates.end if is_end else fact.dates.start
+def _date_ok(value: str, fact_date: str | None, *, is_end: bool) -> bool:
+    """Whether a header date names the same month (or year) as `fact_date`."""
     if _norm(value) == "present":
         return is_end and fact_date is None
     if fact_date is None:
@@ -83,6 +110,24 @@ def _date_ok(value: str, fact: Fact, *, is_end: bool) -> bool:
         return value.strip() == fact_date[:4]
     parsed = iso_month_dates(value)
     return len(parsed) == 1 and parsed[0] == fact_date[:7]
+
+
+def _mismatches(entry: Entry, fact: Fact) -> list[str]:
+    """Every header field of `entry` that `fact` does not state identically."""
+    wrong: list[str] = []
+    for name, claimed, stated in (
+        ("title", entry.subheading, fact.title),
+        ("location", entry.location, fact.location),
+    ):
+        if claimed is not None and (stated is None or _norm(claimed) != _norm(stated)):
+            wrong.append(f"{name} {claimed!r} (fact says {stated!r})")
+    start = fact.dates.start if fact.dates else None
+    end = fact.dates.end if fact.dates else None
+    if entry.start and (fact.dates is None or not _date_ok(entry.start, start, is_end=False)):
+        wrong.append(f"start date {entry.start!r} (fact says {start!r})")
+    if entry.end and (fact.dates is None or not _date_ok(entry.end, end, is_end=True)):
+        wrong.append(f"end date {entry.end!r} (fact says {end or 'no end'!r})")
+    return wrong
 
 
 def _check_entry(label: str, entry: Entry, facts: Mapping[str, Fact]) -> list[str]:
@@ -97,20 +142,54 @@ def _check_entry(label: str, entry: Entry, facts: Mapping[str, Fact]) -> list[st
         return [f"{label}: header cites fact(s) not confirmed by the candidate {unconfirmed}"]
 
     findings: list[str] = []
-    entities = {_norm(e) for f in cited for e in f.entities}
-    if _norm(entry.heading) not in entities:
-        findings.append(f"{label}: employer {entry.heading!r} is not an entity of any cited fact")
-    for name, value in (("title", entry.subheading), ("location", entry.location)):
-        if value and not any(
-            _contains_words(value, f.text) or _norm(value) in {_norm(e) for e in f.entities}
-            for f in cited
-        ):
-            findings.append(f"{label}: {name} {value!r} appears in no cited fact")
+    anchors = [
+        f
+        for f in cited
+        if f.kind in _HEADER_KINDS
+        and f.organization is not None
+        and _norm(f.organization) == _norm(entry.heading)
+    ]
+    if not anchors:
+        findings.append(
+            f"{label}: employer {entry.heading!r} is not the organization of any cited "
+            "experience, education or project fact"
+        )
+    elif all(_mismatches(entry, f) for f in anchors):
+        findings.append(
+            f"{label}: header does not match its fact: " + "; ".join(_mismatches(entry, anchors[0]))
+        )
 
-    for name, value, is_end in (("start date", entry.start, False), ("end date", entry.end, True)):
-        if value and not any(_date_ok(value, f, is_end=is_end) for f in cited):
-            findings.append(f"{label}: {name} {value!r} does not match any cited fact's dates")
+    own = set(entry.sources)
+    for n, bullet in enumerate(entry.bullets):
+        foreign = [
+            s
+            for s in bullet.sources
+            if s not in own and (s not in facts or facts[s].parent not in own)
+        ]
+        if foreign:
+            findings.append(
+                f"{label}: bullet {n} cites fact(s) that belong to no fact of this entry {foreign}"
+            )
     return findings
+
+
+def _identity_findings(doc: ResumeDoc, facts: Mapping[str, Fact]) -> list[str]:
+    stated = {
+        _norm(e)
+        for f in facts.values()
+        if f.selectable() and f.kind is FactKind.LINKS
+        for e in f.entities
+    }
+    identity = doc.identity
+    values = [("name", identity.name), ("email", identity.email)]
+    if identity.phone:
+        values.append(("phone", identity.phone))
+    values += [("link", link) for link in identity.links]
+    return [
+        f"identity {name} {value!r} is not an entity of any confirmed links fact"
+        for name, value in values
+        if _norm(value) not in stated
+    ]
 
 
 def _skill_backing(doc: ResumeDoc, facts: Mapping[str, Fact]) -> set[str]:
@@ -133,10 +212,12 @@ def _skill_backing(doc: ResumeDoc, facts: Mapping[str, Fact]) -> set[str]:
 
 
 def check_claims(doc: ResumeDoc, facts: Mapping[str, Fact]) -> ClaimsResult:
-    """Check every entry header and every listed skill against confirmed facts."""
-    findings: list[str] = []
+    """Check identity, section titles, every entry header and every listed skill."""
+    findings = _identity_findings(doc, facts)
     index = 0
     for section in doc.sections:
+        if _norm(section.title) not in SECTION_TITLES:
+            findings.append(f"section title {section.title!r} is not a recognised section name")
         for entry in section.entries:
             findings.extend(_check_entry(f"entry {index} ({entry.heading})", entry, facts))
             index += 1
@@ -145,4 +226,4 @@ def check_claims(doc: ResumeDoc, facts: Mapping[str, Fact]) -> ClaimsResult:
         for skill in section.skills:
             if _canon(skill) not in backed:
                 findings.append(f"skill {skill!r} is backed by no confirmed fact")
-    return ClaimsResult(verdict="fail" if findings else "pass", findings=findings)
+    return ClaimsResult(findings=tuple(findings))
