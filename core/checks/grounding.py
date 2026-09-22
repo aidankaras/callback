@@ -175,7 +175,7 @@ class Finding:
     detail: str
 
 
-def _iso_month_dates(text: str) -> list[str]:
+def iso_month_dates(text: str) -> list[str]:
     """Extract "Mon YYYY" style mentions as ISO month strings ("2024-06")."""
     return [f"{year}-{_MONTHS[month.lower()[:3]]:02d}" for month, year in _YEAR_MONTH.findall(text)]
 
@@ -360,7 +360,7 @@ def check_bullet(
             )
         )
 
-    for iso in _iso_month_dates(text):
+    for iso in iso_month_dates(text):
         if (start is not None and iso < start) or (end is not None and iso > end):
             findings.append(
                 Finding(index, FindingKind.UNRESOLVED_DATE, f"{iso} falls outside {start}..{end}")
