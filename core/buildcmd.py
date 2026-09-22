@@ -14,17 +14,20 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import shutil
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
 from core.gates import GateOutcome, GateReport, run_gates
-from core.paths import FILE_MODE, private_dir, write_private
+from core.paths import private_dir, write_private, write_private_bytes
 from core.profile.store import load_facts
-from core.render.typst import render
+from core.render.typst import RenderError, render
 from core.resume.io import parse_doc
 
 _JOB_ID = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
 EXIT_CODES = {"pass": 0, "warn": 1, "fail": 2}
+_ARTIFACTS = ("resume.pdf", "report.md", "report.json")
 _MAX_ACTIONS = 3
 
 
@@ -66,7 +69,7 @@ def render_report(report: GateReport) -> str:
 
 def build(doc_path: Path, job_id: str) -> BuildResult:
     """Render `doc_path`, run every gate, and write the PDF and reports to the job's draft."""
-    if not _JOB_ID.match(job_id):
+    if not _JOB_ID.fullmatch(job_id):
         raise BuildError(
             f"job id {job_id!r} must be 1-64 lowercase letters, digits or hyphens, "
             "starting with a letter or digit"
@@ -76,16 +79,32 @@ def build(doc_path: Path, job_id: str) -> BuildResult:
     facts = load_facts()
 
     out_dir = private_dir(f"outputs/{job_id}/draft")
-    pdf = out_dir / "resume.pdf"
-    render(doc, pdf)
-    pdf.chmod(FILE_MODE)
-    report = run_gates(doc, facts, pdf)
+    # A previous build's report must never sit beside a PDF it did not judge,
+    # so the draft is cleared before anything else can fail. Unlinking removes
+    # a planted symlink itself, never its target.
+    for name in _ARTIFACTS:
+        (out_dir / name).unlink(missing_ok=True)
+
+    # Render and gate inside a fresh, unpredictably named directory, then
+    # publish the exact bytes that were gated.
+    staging = Path(tempfile.mkdtemp(dir=out_dir, prefix=".build."))
+    try:
+        staged = staging / "resume.pdf"
+        try:
+            render(doc, staged)
+        except RenderError as exc:
+            raise BuildError(f"could not render {doc_path.name}: {exc}") from exc
+        report = run_gates(doc, facts, staged)
+        pdf_bytes = staged.read_bytes()
+    finally:
+        shutil.rmtree(staging, ignore_errors=True)
+    write_private_bytes(out_dir / "resume.pdf", pdf_bytes)
 
     record = {
         "verdict": report.verdict,
         "doc": str(doc_path),
         "doc_sha256": hashlib.sha256(doc_bytes).hexdigest(),
-        "pdf_sha256": hashlib.sha256(pdf.read_bytes()).hexdigest(),
+        "pdf_sha256": hashlib.sha256(pdf_bytes).hexdigest(),
         "outcomes": [
             {"gate": o.gate, "verdict": o.verdict, "findings": list(o.findings)}
             for o in report.outcomes

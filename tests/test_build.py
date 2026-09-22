@@ -135,3 +135,45 @@ def test_the_cli_exit_code_is_the_verdict(
     assert main(["build", str(bad), "--job", "bad"]) == 2
     assert main(["build", str(tmp_path / "missing.yaml"), "--job", "x"]) == 3
     assert "PASS" in capsys.readouterr().out
+
+
+@pytest.mark.slow
+def test_a_planted_symlink_at_the_pdf_path_is_replaced_not_followed(
+    tmp_path: Path, home: Path
+) -> None:
+    victim = tmp_path / "outside.txt"
+    victim.write_text("SECRET", encoding="utf-8")
+    victim.chmod(0o644)
+    draft = home / "outputs" / "sym" / "draft"
+    draft.mkdir(parents=True)
+    (draft / "resume.pdf").symlink_to(victim)
+
+    build(_write(tmp_path, _doc()), "sym")
+    assert victim.read_text(encoding="utf-8") == "SECRET"
+    assert stat.S_IMODE(victim.stat().st_mode) == 0o644
+    assert not (draft / "resume.pdf").is_symlink()
+
+
+@pytest.mark.slow
+def test_a_render_failure_leaves_no_stale_report_behind(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from core.render.typst import RenderError
+
+    source = _write(tmp_path, _doc())
+    first = build(source, "stale")
+    assert (first.out_dir / "report.md").read_text().startswith("# PASS")
+
+    def broken(*_args: object, **_kwargs: object) -> None:
+        raise RenderError("requested font is not embedded")
+
+    monkeypatch.setattr("core.buildcmd.render", broken)
+    with pytest.raises(BuildError, match="not embedded"):
+        build(source, "stale")
+    assert sorted(p.name for p in first.out_dir.iterdir()) == []
+
+
+def test_a_job_id_with_a_trailing_newline_is_refused(tmp_path: Path, home: Path) -> None:
+    with pytest.raises(BuildError, match="job id"):
+        build(_write(tmp_path, _doc()), "nl\n")
+    assert list((home / "outputs").iterdir()) == []
