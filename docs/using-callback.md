@@ -100,6 +100,35 @@ sections:
   skills: [Python]
 ```
 
+## Cover letters
+
+`callback letter <letter.yaml>` renders a letter to
+`outputs/<job>/draft/cover-letter.pdf` and checks it against your facts and
+the posting saved at `inbox/<job>.md`:
+
+```yaml
+identity: {name: Dana Vex, email: dana@example.com}
+job_id: acme-ml-intern
+company: Acme Robotics
+role: Machine Learning Intern
+greeting: Dear Hiring Team,
+paragraphs:
+- - {text: I am applying for the Machine Learning Intern role at Acme Robotics., sources: []}
+  - {text: Acme Robotics is building a perception data platform., sources: [posting]}
+- - {text: At Northwind Analytics I cut the review queue to 300 items using Python., sources: [role, queue]}
+closing: Sincerely,
+```
+
+- **A sentence in the first person** is grounded against the facts it cites,
+  exactly like a bullet, and never against the posting.
+- **Any other sentence** cites `posting` and is grounded against its text.
+- **A sentence citing nothing** may make no checkable claim.
+- **The company and role** must appear in the posting.
+- **The letter fails** if it runs past 300 words, uses commitment or
+  negotiation language (salary, availability, relocation, sponsorship), or
+  reuses a resume bullet verbatim.
+- **The PDF** is screened for hidden text.
+
 ## What the gates guarantee, and what they do not
 
 **They guarantee:**

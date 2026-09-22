@@ -117,6 +117,24 @@ ask the user, not findings to fix by inventing a number.
 
    A passing draft is still a draft. Tell the user to read it before sending.
 
+## A cover letter, when asked for one
+
+Write `$CALLBACK_HOME/outputs/<job-id>/draft/letter.yaml` (format in
+`docs/using-callback.md`) and run `callback letter <that yaml>`. Exit 0 passes,
+2 fails (fix the letter and rerun), 3 means it could not run (usually: no
+posting saved at `inbox/<job-id>.md`).
+
+- **Sentences about you** ("I", "my") cite your facts. They can never rest on
+  the posting. If the posting says "10 years of PyTorch", that is not a fact
+  about you.
+- **Sentences about the job or company** cite `posting`, and may say only
+  what the posting says. Nothing about funding, news or leadership: that
+  needs research this tool does not do yet.
+- **Keep it at 300 words or fewer**, and don't paste resume bullets. Say why
+  the experience fits.
+- **Never write about salary, availability, relocation or sponsorship.** A
+  signed letter must not concede terms, and the check fails on it.
+
 ## What the gates check (so you know what "fix the document" means)
 
 | Gate | Fails when |
