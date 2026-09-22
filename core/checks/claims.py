@@ -38,7 +38,7 @@ Every rule fails closed. Only confirmed facts count, matching `Fact.selectable`.
 from __future__ import annotations
 
 import re
-from collections.abc import Iterable, Mapping
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Literal
 
@@ -194,20 +194,18 @@ def _identity_findings(doc: ResumeDoc, facts: Mapping[str, Fact]) -> list[str]:
 
 def _skill_backing(doc: ResumeDoc, facts: Mapping[str, Fact]) -> set[str]:
     """Canonical forms of every skill a confirmed fact supports."""
-    confirmed = [f for f in facts.values() if f.selectable()]
-    backed = {_canon(f.text) for f in confirmed if f.kind is FactKind.SKILL}
-    backed |= {_canon(e) for f in confirmed if f.kind is FactKind.SKILL for e in f.entities}
-    cited: Iterable[str] = (
-        s
-        for section in doc.sections
-        for entry in section.entries
-        for bullet in entry.bullets
-        for s in bullet.sources
-    )
-    for fid in cited:
-        f = facts.get(fid)
-        if f is not None and f.selectable():
+    confirmed = {fid: f for fid, f in facts.items() if f.selectable()}
+    backed: set[str] = set()
+    for f in confirmed.values():
+        if f.kind is FactKind.SKILL:
+            backed.add(_canon(f.text))
             backed |= {_canon(e) for e in f.entities}
+    for section in doc.sections:
+        for entry in section.entries:
+            for bullet in entry.bullets:
+                for fid in bullet.sources:
+                    if fid in confirmed:
+                        backed |= {_canon(e) for e in confirmed[fid].entities}
     return backed
 
 

@@ -107,9 +107,10 @@ def _cmd_facts_list(args: argparse.Namespace) -> int:
     from core.profile.store import load_facts
 
     for fid, fact in load_facts().items():
-        if args.unconfirmed and fact.selectable():
+        confirmed = fact.selectable()
+        if args.unconfirmed and confirmed:
             continue
-        mark = "confirmed  " if fact.selectable() else "UNCONFIRMED"
+        mark = "confirmed  " if confirmed else "UNCONFIRMED"
         print(f"{mark} {fid:<24} {fact.kind:<18} {fact.text}")
     return 0
 

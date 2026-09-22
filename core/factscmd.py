@@ -104,7 +104,8 @@ _NO_TERMINAL = {errno.ENXIO, errno.ENOENT}
 
 
 def _open_terminal() -> Terminal:
-    # Closed by `confirm` in its own `finally`.
+    # Closed by `confirm` in its own `finally`. Looked up at call time, not
+    # bound as a default argument, so replacing it replaces every caller's.
     return _Tty()
 
 
@@ -136,13 +137,14 @@ def _ask(tty: Terminal) -> str:
         tty.write("Please answer y, n or q.\n")
 
 
-def confirm(ids: list[str], *, open_tty: Callable[[], Terminal] = _open_terminal) -> list[str]:
+def confirm(ids: list[str], *, open_tty: Callable[[], Terminal] | None = None) -> list[str]:
     """Ask the candidate, fact by fact, whether each is true; return the ids confirmed.
 
     With no `ids`, every unconfirmed fact is offered. Answers are `y` (true
     as written), `n` (leave unconfirmed) or `q` (stop; answers already given
     are kept). A web-sourced fact is research about someone else and can
-    never become a claim about the candidate.
+    never become a claim about the candidate. `open_tty` defaults to the
+    controlling terminal.
     """
     facts = load_facts()
     unknown = [i for i in ids if i not in facts]
@@ -157,7 +159,7 @@ def confirm(ids: list[str], *, open_tty: Callable[[], Terminal] = _open_terminal
         return []
 
     try:
-        tty = open_tty()
+        tty = (open_tty or _open_terminal)()
     except OSError as exc:
         if exc.errno not in _NO_TERMINAL:
             raise
@@ -166,7 +168,6 @@ def confirm(ids: list[str], *, open_tty: Callable[[], Terminal] = _open_terminal
             f"(could not open /dev/tty: {exc.strerror or exc})"
         ) from exc
 
-    confirmed: list[str] = []
     shown: dict[str, Fact] = {}
     try:
         for n, fact in enumerate(targets, 1):
@@ -180,17 +181,17 @@ def confirm(ids: list[str], *, open_tty: Callable[[], Terminal] = _open_terminal
                 break
             if answer == "y":
                 shown[fact.id] = fact
-                confirmed.append(fact.id)
     finally:
         tty.close()
-    if confirmed:
-        # Re-read the store rather than saving the snapshot taken before the
-        # prompts, which would silently drop anything added meanwhile. A fact
-        # that changed or vanished since it was shown is not confirmed: the
-        # candidate answered about the text they saw.
-        current = load_facts()
-        confirmed = [fid for fid in confirmed if current.get(fid) == shown[fid]]
-        for fid in confirmed:
-            current[fid] = _confirmed(current[fid])
-        save_facts(current)
+    if not shown:
+        return []
+    # Re-read the store rather than saving the snapshot taken before the
+    # prompts, which would silently drop anything added meanwhile. A fact
+    # that changed or vanished since it was shown is not confirmed: the
+    # candidate answered about the text they saw.
+    current = load_facts()
+    confirmed = [fid for fid, fact in shown.items() if current.get(fid) == fact]
+    for fid in confirmed:
+        current[fid] = _confirmed(current[fid])
+    save_facts(current)
     return confirmed

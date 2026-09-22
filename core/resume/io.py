@@ -25,20 +25,19 @@ def parse_doc(data: bytes, *, origin: Path) -> ResumeDoc:
     Taking bytes lets a caller hash exactly what it parsed: reading the file
     once to hash it and again to parse it could describe two different files.
     """
-    path = origin
     try:
         parsed: object = yaml.safe_load(data.decode("utf-8"))
     except (yaml.YAMLError, UnicodeDecodeError) as exc:
-        raise DocumentError(f"{path} is not valid YAML: {exc}") from exc
+        raise DocumentError(f"{origin} is not valid YAML: {exc}") from exc
     if not isinstance(parsed, dict):
         raise DocumentError(
-            f"{path} must contain a mapping with `identity` and `sections`, "
+            f"{origin} must contain a mapping with `identity` and `sections`, "
             f"found {type(parsed).__name__}"
         )
     try:
         return ResumeDoc.model_validate(parsed)
     except ValidationError as exc:
-        raise DocumentError(f"{path} is not a valid resume document: {exc}") from exc
+        raise DocumentError(f"{origin} is not a valid resume document: {exc}") from exc
 
 
 def dump_doc(doc: ResumeDoc) -> str:

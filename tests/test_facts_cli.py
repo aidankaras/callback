@@ -146,18 +146,21 @@ def test_facts_add_exits_nonzero_when_anything_was_refused(tmp_path: Path) -> No
 
 
 def test_facts_confirm_without_a_terminal_exits_3(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """Patched rather than left to the environment: on a developer's machine
     `/dev/tty` exists, and an unpatched test would wait for input."""
     from core.cli import main
 
     def no_tty() -> io.StringIO:
-        raise OSError(6, "No such device or address")
+        # A distinctive message: without it, this test cannot tell the patch
+        # taking effect from a machine that genuinely has no terminal.
+        raise OSError(6, "patched-no-terminal")
 
     monkeypatch.setattr("core.factscmd._open_terminal", no_tty)
     add_from_file(_facts_file(tmp_path, [_imported("a", "one")]))
     assert main(["facts", "confirm"]) == 3
+    assert "patched-no-terminal" in capsys.readouterr().err
     assert not load_facts()["a"].selectable()
 
 

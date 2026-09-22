@@ -96,10 +96,11 @@ def check_lints(
 
     if len(fills) > max_pages:
         lints.append(Lint("page_count", f"{len(fills)} pages; convention allows {max_pages}"))
-    if len(fills) > 1 and fills[-1] < ORPHAN_TAIL_FILL:
-        lints.append(Lint("orphan_tail_page", f"the last page is only {fills[-1]:.0%} full"))
-    last = len(fills) - 1
-    if len(fills) > 1 and fills[-1] < HEADING_ONLY_FILL and not any(b.page == last for b in blocks):
-        lints.append(Lint("heading_only_page", "the last page carries no bullet content"))
+    if len(fills) > 1:
+        tail_fill, last_page = fills[-1], len(fills) - 1
+        if tail_fill < ORPHAN_TAIL_FILL:
+            lints.append(Lint("orphan_tail_page", f"the last page is only {tail_fill:.0%} full"))
+        if tail_fill < HEADING_ONLY_FILL and not any(b.page == last_page for b in blocks):
+            lints.append(Lint("heading_only_page", "the last page carries no bullet content"))
 
     return sorted(lints, key=lambda lint: lint.priority)
