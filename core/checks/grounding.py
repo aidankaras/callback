@@ -226,7 +226,7 @@ def _year_within_hull(value: float, start: str | None, end: str | None) -> bool:
     return int(start[:4]) <= year <= int(end[:4])
 
 
-def _checkable_entity_tokens(text: str) -> list[str]:
+def checkable_entity_tokens(text: str) -> list[str]:
     """Every token worth checking against the cited entities — see module docstring."""
     # A trailing full stop ends the sentence, not the token: "Python." is
     # Python, and would otherwise look identifier-shaped for its "." and
@@ -512,7 +512,7 @@ def check_bullet(
         )
 
     cited_entities = {canonicalize(e) for f in sources for e in f.entities}
-    for token in _checkable_entity_tokens(text):
+    for token in checkable_entity_tokens(text):
         canonical = canonicalize(token)
         if canonical in cited_entities:
             if canonical != token:
