@@ -17,7 +17,16 @@ def test_confirmation_and_deletion_are_not_tools() -> None:
     """Only the candidate, at a terminal, can confirm a fact; no tool may.
     Mutation: register a confirm tool -- this test fails."""
     names = {t.name for t in asyncio.run(server.list_tools())}
-    assert {"build", "facts_list", "watch", "triage", "apply", "interview"} <= names
+    assert {
+        "build",
+        "facts_list",
+        "watch",
+        "triage",
+        "apply",
+        "interview",
+        "applications",
+        "funnel",
+    } <= names
     assert not any("confirm" in n or "delete" in n for n in names), names
 
 
@@ -48,3 +57,29 @@ def test_a_failure_is_a_tool_error_not_an_empty_result(
     ensure_home()
     with pytest.raises(UnexpectedToolError, match="build"):
         call("build", {"doc_path": str(tmp_path / "missing.yaml"), "job_id": "x"})
+
+
+def test_every_command_that_only_reads_is_also_a_tool(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A session can see what it recorded. Mutation: drop the applications
+    tool -- this fails."""
+    monkeypatch.setenv("CALLBACK_HOME", str(tmp_path / "cb"))
+    ensure_home()
+    assert call("applications", {}).structured_content == {"applications": []}  # type: ignore[attr-defined]
+    funnel = call("funnel", {}).structured_content  # type: ignore[attr-defined]
+    assert funnel == {
+        "sources": [
+            {
+                "source": "all",
+                "applied": 0,
+                "replied": 0,
+                "reply_rate": 0.0,
+                "positive": 0,
+                "interviews": 0,
+                "offers": 0,
+                "median_days_to_reply": None,
+            }
+        ],
+        "silent": [],
+    }

@@ -242,6 +242,53 @@ def interview(job_id: str) -> dict[str, object]:
 
 
 @server.tool()
+def applications() -> dict[str, object]:
+    """Every application recorded, with what has happened to it so far."""
+    from core.apply import load_applications
+
+    return {
+        "applications": [
+            {
+                "job_id": a.job_id,
+                "company": a.company,
+                "title": a.title,
+                "source": a.source,
+                "submitted_at": a.submitted_at.isoformat(),
+                "outcomes": [
+                    {"kind": o.kind, "occurred_at": o.occurred_at.isoformat()} for o in a.outcomes
+                ],
+            }
+            for a in load_applications()
+        ]
+    }
+
+
+@server.tool()
+def funnel() -> dict[str, object]:
+    """Reply, callback and offer rates by source, and applications long silent."""
+    from core.apply import load_applications
+    from core.funnel import funnel as build_funnel
+
+    result = build_funnel(load_applications(), now=_now())
+    return {
+        "sources": [
+            {
+                "source": r.source,
+                "applied": r.applied,
+                "replied": r.replied,
+                "reply_rate": r.reply_rate,
+                "positive": r.positive,
+                "interviews": r.interviews,
+                "offers": r.offers,
+                "median_days_to_reply": r.median_days_to_reply,
+            }
+            for r in (*result.rows, result.total)
+        ],
+        "silent": [a.job_id for a in result.stale],
+    }
+
+
+@server.tool()
 def verify(job_id: str | None = None) -> dict[str, object]:
     """Report any sealed file changed since sealing, and any break in the ledger."""
     from core.finalize import verify as verify_sealed
