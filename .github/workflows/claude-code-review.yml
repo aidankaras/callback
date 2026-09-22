@@ -31,6 +31,9 @@ jobs:
           # subscription, and a pull-request trigger fires far more often than
           # a schedule does.
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          # Printed so a run that ends in a few turns shows why; the repository
+          # is private.
+          show_full_output: true
           plugin_marketplaces: "https://github.com/anthropics/claude-code.git"
           plugins: "code-review@claude-code-plugins"
           prompt: "/code-review:code-review --comment ${{ github.repository }}/pull/${{ github.event.pull_request.number }}"
