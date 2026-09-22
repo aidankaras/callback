@@ -3,8 +3,9 @@
 The rules are enforced here rather than left to callers:
 
 - **Only documented public posting APIs**, over HTTPS: the hosts in
-  `ALLOWED_HOSTS`. Each is an employer-published distribution channel,
-  there to be read. A request to any other host is refused before a
+  `ALLOWED_HOSTS` -- three employer-published applicant-tracking APIs, and
+  Algolia's public API for Hacker News, whose monthly "Who is hiring?"
+  thread is companies posting their own openings. A request to any other host is refused before a
   connection is attempted.
 - **Never a platform that forbids automated access.** `DENIED_DOMAINS`
   names them. They cannot be added to the allowlist by accident, because a
@@ -23,7 +24,9 @@ import urllib.request
 from typing import Protocol
 from urllib.parse import urlsplit
 
-ALLOWED_HOSTS = frozenset({"boards-api.greenhouse.io", "api.lever.co", "api.ashbyhq.com"})
+ALLOWED_HOSTS = frozenset(
+    {"boards-api.greenhouse.io", "api.lever.co", "api.ashbyhq.com", "hn.algolia.com"}
+)
 DENIED_DOMAINS = frozenset(
     {"linkedin.com", "indeed.com", "joinhandshake.com", "myworkdayjobs.com", "glassdoor.com"}
 )

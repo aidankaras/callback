@@ -180,3 +180,50 @@ def test_the_fetcher_names_why_a_forbidden_platform_is_refused(url: str) -> None
 
 def test_a_line_break_element_without_a_closing_tag_still_breaks_the_line() -> None:
     assert html_to_text("one<br>two") == "one\ntwo"
+
+
+# --- Hacker News "Who is hiring" -------------------------------------------------------
+
+HN_SEARCH = {
+    "hits": [
+        {"objectID": "200", "title": "Ask HN: Who wants to be hired? (September 2026)"},
+        {"objectID": "100", "title": "Ask HN: Who is hiring? (September 2026)"},
+    ]
+}
+HN_THREAD = {
+    "id": 100,
+    "children": [
+        {
+            "id": 101,
+            "text": "Acme AI | Machine Learning Intern | Boston, MA | ONSITE | "
+            '<a href="https://acme.ai/jobs">https://acme.ai/jobs</a><p>We train models.',
+            "created_at": "2026-09-01T15:01:54.000Z",
+        },
+        {"id": 102, "text": "Just a question about the thread format?"},
+        {"id": 103, "text": None},
+    ],
+}
+
+
+def test_hn_posts_follow_the_pipe_convention_and_others_are_skipped() -> None:
+    from core.discovery.ats import parse_hn_thread
+
+    (p,) = parse_hn_thread(HN_THREAD)
+    assert (p.id, p.company, p.title, p.location) == (
+        "hn:100:101",
+        "Acme AI",
+        "Machine Learning Intern",
+        "Boston, MA",
+    )
+    assert p.url == "https://news.ycombinator.com/item?id=101"
+    assert p.apply_url == "https://acme.ai/jobs"
+    assert "We train models." in p.text
+
+
+def test_the_latest_hiring_thread_is_chosen_not_the_seekers_thread() -> None:
+    """Mutation: take the first hit -- that is "Who wants to be hired"."""
+    from core.discovery.ats import latest_hn_thread
+
+    assert latest_hn_thread(HN_SEARCH) == "100"
+    with pytest.raises(DiscoveryError, match="hiring thread"):
+        latest_hn_thread({"hits": []})

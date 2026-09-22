@@ -62,9 +62,16 @@ def _board(board: str) -> str:
     return board
 
 
+HN_SEARCH_URL = (
+    "https://hn.algolia.com/api/v1/search_by_date?tags=story,author_whoishiring&hitsPerPage=10"
+)
+
+
 def posting_url_for(ats: Ats, board: str) -> str:
     """The documented public endpoint listing every posting on `board`."""
     board = _board(board)
+    if ats == "hn":
+        return HN_SEARCH_URL
     if ats == "greenhouse":
         return f"https://boards-api.greenhouse.io/v1/boards/{board}/jobs?content=true"
     if ats == "lever":
@@ -185,4 +192,59 @@ def parse_board(ats: Ats, board: str, company: str, payload: object) -> list[Pos
                 )
     except (KeyError, ValueError, ValidationError) as exc:
         raise DiscoveryError(f"{ats} returned a posting this reader cannot read: {exc}") from exc
+    return postings
+
+
+_HN_HIRING = re.compile(r"^Ask HN: Who is hiring\?", re.IGNORECASE)
+_HREF = re.compile(r'href="(https?://[^"]+)"')
+
+
+def latest_hn_thread(search: object) -> str:
+    """The id of the newest "Who is hiring?" thread in an Algolia search result.
+
+    The same account posts "Who wants to be hired?" at the same moment, so
+    the title is checked, not just the order.
+    """
+    hits = cast("dict[str, object]", search).get("hits") if isinstance(search, dict) else None
+    for hit in cast("list[dict[str, object]]", hits or []):
+        if _HN_HIRING.match(str(hit.get("title", ""))):
+            return str(hit["objectID"])
+    raise DiscoveryError("no Hacker News hiring thread found")
+
+
+def parse_hn_thread(thread: object) -> list[Posting]:
+    """One posting per top-level comment that follows the thread's convention,
+    `Company | Role | Location | ...` on its first line. Anything else --
+    a question, a deleted comment -- is not a posting and is skipped."""
+    if not isinstance(thread, dict):
+        raise DiscoveryError("hn returned a thread in a shape this reader does not know")
+    body = cast("dict[str, object]", thread)
+    children = body.get("children")
+    if not isinstance(children, list):
+        raise DiscoveryError("hn returned a thread in a shape this reader does not know")
+    postings: list[Posting] = []
+    for child in cast("list[dict[str, object]]", children):
+        raw = child.get("text")
+        if not isinstance(raw, str):
+            continue
+        first_block = re.split(r"<p>", raw, maxsplit=1)[0]
+        fields = [f.strip() for f in html_to_text(html.unescape(first_block)).split("|")]
+        if len(fields) < 3 or not fields[0] or not fields[1]:
+            continue
+        link = _HREF.search(raw)
+        cid = str(child.get("id"))
+        postings.append(
+            Posting(
+                id=f"hn:{body.get('id')}:{cid}",
+                ats="hn",
+                board="whoishiring",
+                company=fields[0],
+                title=fields[1],
+                location=fields[2],
+                url=f"https://news.ycombinator.com/item?id={cid}",
+                apply_url=html.unescape(link.group(1)) if link else "",
+                text=html_to_text(html.unescape(raw)),
+                published_at=_when(child.get("created_at")),
+            )
+        )
     return postings

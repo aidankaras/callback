@@ -39,7 +39,7 @@ Then ask Claude to tailor your resume to a posting. The underlying commands:
 
 | Command | Does |
 |---|---|
-| `callback targets add`, `criteria`, `watch`, `postings` | find postings on employers' own Greenhouse, Lever and Ashby boards, never by scraping job sites |
+| `callback targets add`, `criteria`, `watch`, `postings` | find postings on employers' own Greenhouse, Lever and Ashby boards and in Hacker News's "Who is hiring?", never by scraping job sites |
 | `callback profile`, `eligibility`, `triage` | flag knockout requirements (sponsorship, citizenship, graduation window) quoted from the posting, and rank postings by evidence and freshness |
 | `callback import resume.pdf` | extract an existing resume's text, screening it for hidden content |
 | `callback facts add / list / confirm` | store facts (unconfirmed), list them, confirm them yourself |

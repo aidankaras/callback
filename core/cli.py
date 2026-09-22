@@ -37,7 +37,7 @@ def build_parser() -> argparse.ArgumentParser:
     targets_sub = targets.add_subparsers(dest="targets_command", required=True)
     t_add = targets_sub.add_parser("add", help="watch a company's Greenhouse, Lever or Ashby board")
     t_add.add_argument("company")
-    t_add.add_argument("--ats", required=True, choices=["greenhouse", "lever", "ashby"])
+    t_add.add_argument("--ats", required=True, choices=["greenhouse", "lever", "ashby", "hn"])
     t_add.add_argument("--board", required=True, help="the board name in the company's job URLs")
     t_add.set_defaults(handler=_cmd_targets_add)
     targets_sub.add_parser("list", help="list watched companies").set_defaults(

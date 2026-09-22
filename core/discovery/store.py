@@ -27,7 +27,13 @@ from typing import cast
 import yaml
 from pydantic import BaseModel, Field, ValidationError
 
-from core.discovery.ats import parse_board, posting_url_for, resolve_url
+from core.discovery.ats import (
+    latest_hn_thread,
+    parse_board,
+    parse_hn_thread,
+    posting_url_for,
+    resolve_url,
+)
 from core.discovery.fetch import DiscoveryError, Fetcher
 from core.discovery.models import Ats, Posting
 from core.paths import resolve_inside, write_private
@@ -157,6 +163,14 @@ def _save_postings(postings: dict[str, Found]) -> None:
     write_private(resolve_inside(POSTINGS_FILE), json.dumps(body, indent=2) + "\n")
 
 
+def _fetch_target(fetcher: Fetcher, target: Target) -> list[Posting]:
+    if target.ats == "hn":
+        thread = latest_hn_thread(fetcher.get_json(posting_url_for("hn", target.board)))
+        return parse_hn_thread(fetcher.get_json(f"https://hn.algolia.com/api/v1/items/{thread}"))
+    payload = fetcher.get_json(posting_url_for(target.ats, target.board))
+    return parse_board(target.ats, target.board, target.company, payload)
+
+
 def watch(fetcher: Fetcher, *, now: datetime) -> WatchResult:
     """Poll every target and store the matching postings not seen before.
 
@@ -168,8 +182,7 @@ def watch(fetcher: Fetcher, *, now: datetime) -> WatchResult:
     result = WatchResult()
     for target in load_targets():
         try:
-            payload = fetcher.get_json(posting_url_for(target.ats, target.board))
-            postings = parse_board(target.ats, target.board, target.company, payload)
+            postings = _fetch_target(fetcher, target)
         except DiscoveryError as exc:
             result.errors.append((target, str(exc)))
             continue

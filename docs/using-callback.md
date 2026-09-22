@@ -37,8 +37,11 @@ are `0700` and files `0600`.
 ## Finding postings
 
 callback reads postings from employers' own applicant-tracking boards
-(Greenhouse, Lever and Ashby, through their documented public APIs) rather
-than from job boards. Most LinkedIn and Indeed listings are reposts of these.
+(Greenhouse, Lever and Ashby, through their documented public APIs) and from
+Hacker News's monthly "Who is hiring?" thread, where companies post their own
+openings: `callback targets add "HN" --ats hn --board whoishiring`. It never
+reads job boards. Most LinkedIn and Indeed listings are reposts of these
+postings anyway.
 
 | Command | What it does | Exit codes |
 |---|---|---|
@@ -55,8 +58,9 @@ than from job boards. Most LinkedIn and Indeed listings are reposts of these.
 
 **Network access.** Discovery is the only part of callback that uses the
 network:
-- It reaches only those three APIs, over HTTPS, with an honest User-Agent
-  and at least a second between requests to a host.
+- It reaches only those APIs (the three applicant-tracking systems and
+  Algolia's Hacker News API), over HTTPS, with an honest User-Agent and at
+  least a second between requests to a host.
 - LinkedIn, Indeed, Handshake, Workday and Glassdoor forbid automated
   access, and callback refuses them by name.
 - For a posting found there, find the same role on the employer's own

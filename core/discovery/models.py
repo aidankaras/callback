@@ -7,7 +7,7 @@ from typing import Literal
 
 from pydantic import BaseModel
 
-Ats = Literal["greenhouse", "lever", "ashby"]
+Ats = Literal["greenhouse", "lever", "ashby", "hn"]
 
 
 class Posting(BaseModel):
