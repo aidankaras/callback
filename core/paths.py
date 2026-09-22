@@ -76,6 +76,26 @@ def resolve_inside(relative: str) -> Path:
     return candidate
 
 
+def private_dir(relative: str) -> Path:
+    """Create `relative` under the data home, and every missing directory on the
+    way to it, at mode 0700; return its resolved path.
+
+    Resolved through `resolve_inside` first, so a traversal or a symlink out
+    of the home is refused before anything is created.
+    """
+    target = resolve_inside(relative)
+    home = callback_home().resolve()
+    missing: list[Path] = []
+    current = target
+    while current != home and not current.exists():
+        missing.append(current)
+        current = current.parent
+    for directory in reversed(missing):
+        directory.mkdir(mode=DIR_MODE)
+        directory.chmod(DIR_MODE)
+    return target
+
+
 def write_private(path: Path, text: str) -> None:
     """Write `text` to `path` atomically, at mode 0600, without ever truncating it in place.
 

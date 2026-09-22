@@ -156,3 +156,34 @@ def test_delete_all_yields_each_removal_as_it_happens_not_after_the_walk(
             already_removed.append(removed)
 
     assert len(already_removed) == 1, "the first successful removal must already be visible"
+
+
+def test_private_dir_is_0700_even_under_a_umask_that_strips_owner_bits(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`mkdir(mode=0o700)` is masked by the umask, so under one that removes
+    owner write the directory would be created 0500. Mutation: drop the
+    explicit chmod -- this test fails."""
+    from core.paths import private_dir
+
+    monkeypatch.setenv("CALLBACK_HOME", str(tmp_path / "cb"))
+    ensure_home()
+    previous = os.umask(0o277)
+    try:
+        created = private_dir("outputs/job/draft")
+    finally:
+        os.umask(previous)
+    for directory in (created, created.parent):
+        assert stat.S_IMODE(directory.stat().st_mode) == 0o700, directory
+
+
+def test_private_dir_refuses_to_leave_the_home(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from core.paths import OutsideHomeError, private_dir
+
+    monkeypatch.setenv("CALLBACK_HOME", str(tmp_path / "cb"))
+    ensure_home()
+    with pytest.raises(OutsideHomeError):
+        private_dir("../escape")
+    assert not (tmp_path / "escape").exists()
