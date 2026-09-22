@@ -47,14 +47,14 @@ def denied_domain(host: str) -> str | None:
     return next((d for d in DENIED_DOMAINS if host == d or host.endswith("." + d)), None)
 
 
-def check_url(url: str) -> None:
-    """Refuse `url` unless it is HTTPS to an allowed host; name a denied platform."""
+def check_url(url: str, allowed: frozenset[str] = ALLOWED_HOSTS) -> None:
+    """Refuse `url` unless it is HTTPS to a host in `allowed`; name a denied platform."""
     parts = urlsplit(url)
     host = (parts.hostname or "").lower()
     forbidden = denied_domain(host)
     if forbidden:
         raise DiscoveryError(f"{forbidden} does not allow automated access")
-    if parts.scheme != "https" or host not in ALLOWED_HOSTS:
+    if parts.scheme != "https" or host not in allowed:
         raise DiscoveryError(f"{url!r} is not a documented public posting API")
 
 
@@ -66,6 +66,9 @@ class _CheckedRedirects(urllib.request.HTTPRedirectHandler):
     platform that forbids automated access.
     """
 
+    def __init__(self, allowed: frozenset[str] = ALLOWED_HOSTS) -> None:
+        self.allowed = allowed
+
     def redirect_request(
         self,
         req: urllib.request.Request,
@@ -75,7 +78,7 @@ class _CheckedRedirects(urllib.request.HTTPRedirectHandler):
         headers: object,
         newurl: str,
     ) -> urllib.request.Request | None:
-        check_url(newurl)
+        check_url(newurl, self.allowed)
         return super().redirect_request(req, fp, code, msg, headers, newurl)  # type: ignore[arg-type]
 
 
@@ -84,14 +87,19 @@ class Fetcher(Protocol):
 
 
 class HttpFetcher:
-    """Fetches JSON from the sanctioned hosts, one polite request at a time."""
+    """Fetches JSON from the sanctioned hosts, one polite request at a time.
 
-    def __init__(self) -> None:
+    `allowed` defaults to the posting APIs; another caller names its own
+    hosts, so adding one for it never widens what discovery can reach.
+    """
+
+    def __init__(self, allowed: frozenset[str] = ALLOWED_HOSTS) -> None:
+        self._allowed = allowed
         self._last: dict[str, float] = {}
-        self._opener = urllib.request.build_opener(_CheckedRedirects)
+        self._opener = urllib.request.build_opener(_CheckedRedirects(allowed))
 
     def get_json(self, url: str) -> object:
-        check_url(url)
+        check_url(url, self._allowed)
         host = (urlsplit(url).hostname or "").lower()
         wait = MIN_INTERVAL - (time.monotonic() - self._last.get(host, float("-inf")))
         if wait > 0:

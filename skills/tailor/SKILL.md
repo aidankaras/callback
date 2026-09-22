@@ -77,6 +77,11 @@ If `callback facts list` shows no confirmed facts:
    - Keep names, awards and claim words (promoted, founded, doubled, …) in the
      fact's `text` when they are true. A bullet may use them only if its
      fact states them.
+   - If the user has public GitHub projects, `callback facts github <user>`
+     drafts a project fact per repository into `inbox/github-<user>.yaml`.
+     Its text is the repository's description: read it with the user, add
+     what the resume needs (numbers, dates, what they built), and merge it
+     into `facts.yaml`.
 3. Run `callback facts add facts.yaml` and report any refusals.
 4. Tell the user to run this **in their own terminal**:
 

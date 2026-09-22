@@ -188,6 +188,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     conf.add_argument("ids", nargs="*", help="fact ids (default: every unconfirmed fact)")
     conf.set_defaults(handler=_cmd_facts_confirm)
+    gh = facts_sub.add_parser(
+        "github",
+        help="draft unconfirmed project facts from your public GitHub repositories, to a file",
+    )
+    gh.add_argument("user", help="your GitHub username")
+    gh.set_defaults(handler=_cmd_facts_github)
 
     return parser
 
@@ -606,6 +612,42 @@ def _cmd_export(args: argparse.Namespace) -> int:
     for field in missing:
         print(f"callback export: lost in the text export: {field}", file=sys.stderr)
     return 0 if verdict == "pass" else 2
+
+
+def _github_fetcher() -> object:
+    """The GitHub API fetcher; a single place tests replace."""
+    from core.discovery.fetch import HttpFetcher
+    from core.profile.github import GITHUB_API
+
+    return HttpFetcher(frozenset({GITHUB_API}))
+
+
+def _cmd_facts_github(args: argparse.Namespace) -> int:
+    import yaml
+
+    from core.discovery.fetch import DiscoveryError, Fetcher
+    from core.paths import ensure_home, resolve_inside, write_private
+    from core.profile.github import fetch_drafts
+
+    ensure_home()
+    try:
+        drafted = fetch_drafts(args.user, cast("Fetcher", _github_fetcher()))
+    except DiscoveryError as exc:
+        print(f"callback facts github: {exc}", file=sys.stderr)
+        return 3
+    for name, reason in drafted.skipped:
+        print(f"skipped {name}: {reason}")
+    if not drafted.facts:
+        print("callback facts github: no repository could be drafted as a fact", file=sys.stderr)
+        return 1
+    out = resolve_inside(f"inbox/github-{args.user.lower()}.yaml")
+    bodies = [f.model_dump(mode="json", exclude_none=True) for f in drafted.facts]
+    write_private(out, yaml.safe_dump(bodies, sort_keys=False, allow_unicode=True))
+    print(
+        f"{len(drafted.facts)} draft fact(s) written to {out}. Read and correct them, then "
+        f"`callback facts add {out}` and confirm each with `callback facts confirm`."
+    )
+    return 0
 
 
 def _cmd_import(args: argparse.Namespace) -> int:
