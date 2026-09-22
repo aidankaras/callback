@@ -136,7 +136,19 @@ Postings come from the employer's own board, never from a scraper.
    `job-id` is short, lowercase letters, digits and hyphens, e.g. `acme-ml-intern`.
 2. **Select, no prose yet.** From the confirmed facts, choose the entries,
    bullets and skills that answer this posting, and their order. Say what you
-   chose and what you cut, in a short list.
+   chose and what you cut, in a short list. What to select on:
+   - **A requirement the posting states, answered by a fact.** Take those
+     first; `callback triage` prints which of a stored posting's
+     technologies the user can evidence and which they cannot.
+   - **Outcomes over duties.** A fact carrying a number or a result beats one
+     describing a responsibility; put the strongest one first in its entry,
+     since a reader who stops reading stops at the top.
+   - **Recency and relevance over completeness.** An entry the posting has no
+     use for is cut, not shortened. One page is the convention the layout
+     lints enforce, and cutting an entry is how it is met.
+   - **The posting's own word for a skill the user has** ("PyTorch" where the
+     fact says PyTorch), never a skill no confirmed fact backs: the skills
+     gate fails on it, and the interviewer will ask about it.
 3. **Ask about gaps.** List each requirement with no supporting fact and ask
    the user about it (use `AskUserQuestion` for yes/no). Add true answers as
    facts; the user confirms them.
