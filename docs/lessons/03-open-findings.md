@@ -16,5 +16,4 @@ value inside a longer value, one entry's field satisfied by another's, a
 section's skills found in the section before or after it). Each is fixed and
 pinned. The approach, containment matching region by region, is prone to this
 by construction. Any new declared field or region needs a fixture in which
-its value also appears in a neighbouring region, from the start. Recorded by
-the standards audit.
+its value also appears in a neighbouring region, from the start.

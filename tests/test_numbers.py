@@ -178,3 +178,12 @@ def test_a_written_sign_is_kept_only_where_it_is_one(
     """Mutation: drop the sign branch -- the minus is lost again; let it
     follow any character -- "10-15" reads as 10 and -15."""
     assert [(n.raw, n.value) for n in parse_numbers(text)] == expected
+
+
+@pytest.mark.parametrize("word", ["percent", "percentage", "pct"])
+def test_a_spelled_out_percent_is_a_percentage(word: str) -> None:
+    """Mutation: read only the "%" glyph -- "15 percent" becomes a count and
+    can be grounded by a fact that counted 15 of something."""
+    (n,) = parse_numbers(f"Cut costs 15 {word}")
+    assert (n.value, n.is_percent) == (15.0, True)
+    assert n.raw == f"15 {word}"

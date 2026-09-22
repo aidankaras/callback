@@ -216,3 +216,25 @@ def test_the_default_home_and_its_ordinary_spellings_are_guarded(
 def test_mentioning_a_protected_name_is_not_writing_it(home: Path, command: str) -> None:
     result = run_guard(_bash(command.format(home=home)), home, cwd=home)
     assert result.returncode == 0, (command, result.stderr)
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "rm {home}/facts.*",
+        "rm -rf {home}/outputs/*/final",
+        "cp /tmp/x.pdf {home}/*.yaml",
+        # The glob inside a quoted argument is a path too.
+        "python3 -c \"import glob; [open(p,'w') for p in glob.glob('{home}/facts.*')]\"",
+    ],
+)
+def test_a_wildcard_inside_the_data_home_is_refused(home: Path, command: str) -> None:
+    """A glob cannot be resolved to one file here, and expanding it would see
+    only what exists at this moment. Mutation: leave `*` out of the candidate
+    pattern -- `facts.*` is read as `facts.` and slips past."""
+    assert denied(run_guard(_bash(command.format(home=home)), home)), command
+
+
+def test_a_wildcard_outside_the_data_home_is_allowed(home: Path, tmp_path: Path) -> None:
+    result = run_guard(_bash(f"rm {tmp_path}/scratch/*.pdf"), home)
+    assert result.returncode == 0, result.stderr

@@ -837,3 +837,50 @@ def test_a_written_minus_on_a_derived_percentage_is_still_verified() -> None:
     verdict, findings = check_bullet("Changed review volume by -40%", [f])
     assert findings == []
     assert verdict is Verdict.DERIVED_VERIFIED
+
+
+# --- what the number, name and date rules must not reject ------------------------------
+
+
+def test_a_magnitude_word_is_not_a_second_claim() -> None:
+    """parse_numbers folds "1.2 million" into one value whose span covers the
+    word. Mutation: scan the word again -- "million" reads as an unbacked
+    1,000,000 and a truthful bullet fails."""
+    f = fact("a", numbers={"r": Quantity(value=1_200_000)})
+    assert check_bullet("Processed 1.2 million records nightly", [f])[1] == []
+    # Premise: the word alone, with no number folding it, is still checked.
+    assert check_bullet("Processed millions of records", [f])[1] != []
+
+
+def test_a_preposition_must_be_a_word_not_the_end_of_one() -> None:
+    """ "within" is not "in": a year-shaped count after it is not a date.
+    Mutation: drop the left boundary -- "within 2000 stores" passes."""
+    f = fact("a", dates=Dates(start="1999-01", end="2001-12"))
+    assert check_bullet("Deployed within 2000 stores", [f])[1] != []
+    # Premise: the same number after a real preposition is a date.
+    assert check_bullet("Deployed in 2000 across the estate", [f])[1] == []
+
+
+def test_a_name_after_an_opening_bracket_is_still_checked() -> None:
+    """An opening bracket or quote does not start a sentence, so the capital
+    still means a name. Mutation: treat "(" as a sentence break -- Google is
+    never checked."""
+    f = fact("a", text="Led the partnership work")
+    found = check_bullet("Spearheaded the (Google) partnership", [f])[1]
+    assert any("Google" in x.detail for x in found), found
+
+
+def test_a_possessive_names_what_the_fact_states() -> None:
+    """The bullet tokenizer stops at the apostrophe while the fact keeps it.
+    Mutation: forbid an apostrophe after the match -- "Moody's" is rejected
+    though the fact says it."""
+    f = fact("a", text="Migrated Moody's ratings feed", entities=["Moody's"])
+    assert check_bullet("Migrated Moody's ratings feed", [f])[1] == []
+
+
+def test_a_year_precision_date_covers_its_whole_year() -> None:
+    """Mutation: compare the month against the bare year -- every month of
+    the hull's last year falls outside it."""
+    f = fact("a", dates=Dates(start="2018", end="2024", precision="year"))
+    assert check_bullet("Shipped it in Mar 2024", [f])[1] == []
+    assert check_bullet("Shipped it in Mar 2025", [f])[1] != []

@@ -67,8 +67,15 @@ COURTESY = (
 CLOSINGS = frozenset(
     {"sincerely,", "best regards,", "kind regards,", "regards,", "thank you,", "with thanks,"}
 )
-_GREETING = re.compile(r"(?:Dear|Hello|To) [A-Z][A-Za-z .'&-]{0,60},")
-_INTERNAL_BREAK = re.compile(r"[.!?;:]\s+\S")
+# At most four capitalised words after the salutation: the greeting is
+# rendered verbatim and no sentence rule reads it, so anything long enough to
+# carry a claim ("Dear Stanford alumni network and friends at Acme,") is
+# refused rather than printed unchecked.
+_GREETING = re.compile(r"(?:Dear|Hello|To) [A-Z][A-Za-z.'&-]*(?: [A-Z][A-Za-z.'&-]*){0,3},")
+# A terminator followed by whitespace, or glued straight to a capital: a
+# missing space does not make two sentences one, and the grounding tokenizer
+# reads "precision.Stanford" as a single word, so the name would go unchecked.
+_INTERNAL_BREAK = re.compile(r"[.!?;:](?:\s+\S|[A-Z])")
 # Apostrophes a letter may use: the ASCII one and the typographic U+2019.
 _APOSTROPHE = "['\u2019]"
 _FIRST_PERSON = re.compile(

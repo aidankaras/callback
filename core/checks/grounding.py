@@ -120,7 +120,9 @@ _YEAR_MIN, _YEAR_MAX = 1900.0, 2100.0
 # is therefore only ever recognised as part of an explicit range already
 # anchored by a year on the other side (`_RANGE_BEFORE`/`_RANGE_AFTER`), never
 # as a standalone preposition (contrast `_PREP_BEFORE`, which excludes it).
-_PREP_BEFORE = re.compile(r"(?:from|since|until|through|thru|in|during)\s+$", re.IGNORECASE)
+_PREP_BEFORE = re.compile(
+    r"(?<![A-Za-z])(?:from|since|until|through|thru|in|during)\s+$", re.IGNORECASE
+)
 _MONTH_BEFORE = re.compile(
     r"(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+$", re.IGNORECASE
 )
@@ -377,7 +379,10 @@ _MONTH_AND_DAY_NAMES = frozenset(
         "sunday",
     ]
 )
-_SENTENCE_BREAK = '.;:!?("\u2013\u2014-\u2022'
+# Characters after which a capitalised word may be the first of a sentence, so
+# its capital says nothing about it being a name. An opening bracket or quote
+# is not one of them: "the (Google) partnership" names Google mid-sentence.
+_SENTENCE_BREAK = ".;:!?\u2013\u2014-\u2022"
 
 
 def _support_corpus(sources: Sequence[Fact]) -> str:
@@ -391,7 +396,13 @@ def _support_corpus(sources: Sequence[Fact]) -> str:
 
 
 def _has_words(phrase: str, corpus: str) -> bool:
-    pattern = r"(?<![\w'])" + re.escape(" ".join(phrase.casefold().split())) + r"(?![\w'])"
+    # The bullet's tokenizer stops at an apostrophe ("Moody's" -> "Moody")
+    # while the corpus keeps it, so a lookahead forbidding an apostrophe would
+    # reject a name the cited fact states verbatim. A possessive "'s" is
+    # therefore allowed to follow the match.
+    pattern = (
+        r"(?<![\w'])" + re.escape(" ".join(phrase.casefold().split())) + r"(?:['\u2019]s)?(?![\w'])"
+    )
     return re.search(pattern, corpus) is not None
 
 
@@ -591,7 +602,13 @@ def check_bullet(
                 )
             )
     all_values = {q.value for q in quantities}
-    for word in _NUMBER_WORD.findall(text):
+    # "1.2 million" is one number, not a number and the word one million:
+    # `parse_numbers` folds the word into the value, and its span covers it.
+    folded = [n.span for n in parse_numbers(text)]
+    for match in _NUMBER_WORD.finditer(text):
+        if any(start <= match.start() and match.end() <= end for start, end in folded):
+            continue
+        word = match.group(0)
         value = _NUMBER_WORDS[word.casefold()]
         if not _has_words(word, corpus) and not any(values_match(value, v) for v in all_values):
             findings.append(
@@ -602,10 +619,15 @@ def check_bullet(
                 )
             )
 
+    # A year-precision bound covers the whole year: "2024" as an upper bound
+    # is 2024-12, not 2024-01, and a plain string comparison makes every month
+    # of that year fall outside it.
+    low = f"{start}-01" if start is not None and len(start) == 4 else start
+    high = f"{end}-12" if end is not None and len(end) == 4 else end
     for iso in iso_month_dates(text):
-        if (start is not None and iso < start) or (end is not None and iso > end):
+        if (low is not None and iso < low) or (high is not None and iso > high):
             findings.append(
-                Finding(index, FindingKind.UNRESOLVED_DATE, f"{iso} falls outside {start}..{end}")
+                Finding(index, FindingKind.UNRESOLVED_DATE, f"{iso} falls outside {low}..{high}")
             )
 
     if findings:

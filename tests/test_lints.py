@@ -111,3 +111,19 @@ def test_fix_order_is_total_and_starts_with_line_count() -> None:
         "orphan_tail_page",
         "heading_only_page",
     }
+
+
+def test_a_bullet_that_wraps_onto_the_last_page_is_content_on_it() -> None:
+    """`BulletBlock.page` is where the bullet starts, so a bullet wrapping
+    across the boundary leaves the page it spills onto looking empty.
+    Mutation: read the block's page instead of its lines' -- this fails."""
+    from core.checks.lints import carries_bullet
+    from core.render.geometry import BulletBlock, Line, Word
+
+    def line(page: int, text: str) -> Line:
+        return Line(page=page, top=100.0, words=[Word(text=text, x0=0.0, x1=10.0, top=100.0)])
+
+    wrapped = BulletBlock(page=0, lines=[line(0, "Cut the review queue"), line(1, "to 300 items")])
+    assert wrapped.page == 0  # premise: the block reports the page it started on
+    assert carries_bullet([wrapped], 1)
+    assert not carries_bullet([BulletBlock(page=0, lines=[line(0, "all on one page")])], 1)

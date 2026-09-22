@@ -19,10 +19,11 @@ satisfy it are to invent content or shrink the type below a legible size.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
-from core.render.geometry import bullet_blocks, extract_lines, page_fill
+from core.render.geometry import BulletBlock, bullet_blocks, extract_lines, page_fill
 from core.resume.models import ResumeDoc
 
 FIX_ORDER: tuple[str, ...] = (
@@ -47,6 +48,17 @@ class Lint:
     @property
     def priority(self) -> int:
         return FIX_ORDER.index(self.rule)
+
+
+def carries_bullet(blocks: Sequence[BulletBlock], page: int) -> bool:
+    """Whether any bullet puts text on `page`.
+
+    A block's own `page` is where its marker line starts, not where it ends,
+    so a bullet that wraps across the boundary would leave the page it spills
+    onto looking empty of content. Each line carries its own page, and those
+    are what that page actually holds.
+    """
+    return any(line.page == page for block in blocks for line in block.lines)
 
 
 def check_lints(
@@ -100,7 +112,7 @@ def check_lints(
         tail_fill, last_page = fills[-1], len(fills) - 1
         if tail_fill < ORPHAN_TAIL_FILL:
             lints.append(Lint("orphan_tail_page", f"the last page is only {tail_fill:.0%} full"))
-        if tail_fill < HEADING_ONLY_FILL and not any(b.page == last_page for b in blocks):
+        if tail_fill < HEADING_ONLY_FILL and not carries_bullet(blocks, last_page):
             lints.append(Lint("heading_only_page", "the last page carries no bullet content"))
 
     return sorted(lints, key=lambda lint: lint.priority)

@@ -93,6 +93,7 @@ CURRENCY: dict[str, str] = {"$": "USD", "£": "GBP", "€": "EUR"}
 # A sign counts only where one can stand -- the start, after whitespace or an
 # opening bracket -- and only touching its digits, so a range ("10-15"), a date
 # ("2023-2024") and a spaced dash ("Python - 5 years") are not negatives.
+_PERCENT_WORDS = frozenset({"percent", "percentage", "pct"})
 _TOKEN = re.compile(
     r"(?:(?<![^\s(\[])(?P<sign>[-\u2212])(?=[$£€]?\d)|(?<![A-Za-z0-9.]))"
     r"(?P<currency>[$£€])?[ ]?"
@@ -150,14 +151,24 @@ def parse_numbers(text: str) -> list[ParsedNumber]:
             # Otherwise the letters are not a magnitude: leave them in the
             # source text and do not extend the match past the digits.
 
+        # "15 percent" is a percentage as surely as "15%"; the word lands in
+        # the letters group, which is otherwise left in the source text.
+        spelled_percent = (
+            alpha is not None and not consumed_alpha and alpha.lower() in _PERCENT_WORDS
+        )
+        if spelled_percent:
+            end = match.end("alpha")
+            consumed_alpha = True
         percent = match.group("percent")
         # `is_percent` must track the same condition that extends `end`, not
         # merely whether the percent group matched: a match can capture a
         # trailing "%" that was never folded into this number (e.g. an
         # unconsumed unit run directly followed by "%"), and the flag would
         # then describe a character `raw`/`span` don't include.
-        consumed_percent = percent is not None and (alpha is None or consumed_alpha)
-        if consumed_percent:
+        consumed_percent = spelled_percent or (
+            percent is not None and (alpha is None or consumed_alpha)
+        )
+        if consumed_percent and percent is not None:
             end = match.end("percent")
 
         currency = match.group("currency")

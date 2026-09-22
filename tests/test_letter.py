@@ -356,3 +356,34 @@ def test_a_percentage_in_the_posting_cannot_ground_a_count() -> None:
     # And the same claim as a percentage is grounded by it.
     same = Sentence(kind="employer", text="The team serves 40% in Python.", sources=["posting"])
     assert check_letter(letter([same]), FACTS, posting).findings == ()
+
+
+def test_a_sentence_glued_to_the_one_before_it_is_still_two() -> None:
+    """A missing space does not make two sentences one, and the grounding
+    tokenizer reads "precision.Stanford" as a single word, so the invented
+    name would go unchecked. Mutation: require whitespace after the stop."""
+    glued = Sentence(
+        kind="candidate",
+        text=(
+            "At Northwind Analytics I trained a model with 91% precision.Stanford then admitted me."
+        ),
+        sources=["nw", "nw-model"],
+    )
+    found = check_letter(letter([glued]), FACTS, POSTING).findings
+    assert any("more than one sentence" in f for f in found), found
+
+
+@pytest.mark.parametrize(
+    ("greeting", "allowed"),
+    [
+        ("Dear Hiring Team,", True),
+        ("Dear Sam Rivera,", True),
+        ("Dear Hiring Team at the world's best robotics lab,", False),
+        ("Dear Stanford alumni network and friends at Acme,", False),
+    ],
+)
+def test_a_greeting_is_a_salutation_not_a_clause(greeting: str, allowed: bool) -> None:
+    """The greeting is rendered verbatim and no sentence rule reads it.
+    Mutation: allow 60 characters of free text -- both clauses pass."""
+    found = check_letter(letter(greeting=greeting), FACTS, POSTING).findings
+    assert (found == ()) is allowed, found

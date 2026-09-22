@@ -274,7 +274,7 @@ class _Declared:
     `_matches`'s ownership rule, `True` uses `_find_skill`'s delimited-item
     rule instead. It defaults to `False` rather than joining `scope` as a
     third thing every call site must choose, because only one caller in
-    `_declared_fields` ever needs it -- unlike `scope`, there is no fifth
+    `declared_fields` ever needs it -- unlike `scope`, there is no fifth
     kind of value that could silently default into the wrong choice here,
     since every other field in this module is still `False` and always
     will be.
@@ -288,7 +288,7 @@ class _Declared:
     is_skill: bool = False
 
 
-def _declared_fields(doc: ResumeDoc) -> list[_Declared]:
+def declared_fields(doc: ResumeDoc) -> list[_Declared]:
     out: list[_Declared] = [
         _Declared("name", doc.identity.name, critical=True, scope=_Scope.HEADER),
         _Declared("email", doc.identity.email, critical=True, scope=_Scope.HEADER),
@@ -341,8 +341,14 @@ def _declared_fields(doc: ResumeDoc) -> list[_Declared]:
                         region_index=index,
                     )
                 )
-            if entry.start:
-                span = f"{entry.start} - {entry.end}" if entry.end else entry.start
+            # The renderer prints `start - end`, or whichever one it has, so
+            # an entry with only an end date still shows a date to verify.
+            if entry.start or entry.end:
+                span = (
+                    f"{entry.start} - {entry.end}"
+                    if entry.start and entry.end
+                    else (entry.start or entry.end or "")
+                )
                 out.append(
                     _Declared(
                         f"dates[{index}]",
@@ -370,7 +376,7 @@ def _entries(doc: ResumeDoc) -> list[Entry]:
     """Every entry, in declared order, across all sections.
 
     This flattened order is what `region_index` counts against for
-    `_Scope.ENTRY`-scoped fields in `_declared_fields`, and what the order
+    `_Scope.ENTRY`-scoped fields in `declared_fields`, and what the order
     check and `_entry_spans` both walk. `_section_regions` walks the same
     flattened `anchors` list in slices, one per section, rather than
     re-deriving entry order itself.
@@ -742,7 +748,7 @@ def check_roundtrip(doc: ResumeDoc, pdf_path: Path) -> RoundTripResult:
     flat = _flatten(naive_segments(pdf_path))
     findings: list[str] = []
 
-    declared = _declared_fields(doc)
+    declared = declared_fields(doc)
     declared_values = [d.value for d in declared]
     entries = _entries(doc)
 

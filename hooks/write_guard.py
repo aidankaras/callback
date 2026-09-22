@@ -97,12 +97,24 @@ def _expand(raw: str) -> str:
     return raw
 
 
+_GLOB = re.compile(r"[*?\[]")
+
+
 def protected(path: Path) -> str | None:
     """Why `path` may not be written, or `None` if it may.
 
     A directory counts as protected when anything protected lies inside it:
     deleting or moving `outputs/<job>` rewrites the `final/` beneath it.
     """
+    if _GLOB.search(path.name):
+        # A wildcard is not resolvable to one file here, and expanding it
+        # would only see the files that exist at this moment. Inside the data
+        # home it may name any of them, `rm ~/.callback/facts.*` included.
+        directory = path.parent.resolve()
+        home = data_home()
+        if directory == home or home in directory.parents:
+            return "a wildcard inside the data home may name a protected file"
+        return None
     target = path.resolve()
     if target in GUARD_FILES:
         return "the write guard is not writable by a tool"
@@ -207,7 +219,7 @@ def check_bash(command: str, cwd: Path) -> None:
             checked.append(word)
         for word in checked:
             # A word may carry a path inside quotes or code, e.g. open('<path>','w').
-            candidates = {word, *re.findall(r"[\w~$./@+{}-]+", word)}
+            candidates = {word, *re.findall(r"[\w~$./@+{}*?-]+", word)}
             for candidate in candidates:
                 for base in local:
                     reason = protected(base / _expand(candidate))

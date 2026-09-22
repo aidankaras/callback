@@ -1064,3 +1064,22 @@ def test_a_skill_whose_section_title_is_not_found_is_unrecovered(tmp_path: Path)
     result = check_roundtrip(declared, out)
     assert result.skills_unrecovered == ["Python"]
     assert result.verdict == "fail"
+
+
+def test_an_entry_with_only_an_end_date_declares_it() -> None:
+    """The renderer prints whichever date it has, so a date that reaches the
+    page must be verified. Mutation: declare dates only when `start` is set --
+    the rendered "Aug 2025" is never checked for recovery."""
+    from core.checks.roundtrip import declared_fields
+
+    doc = ResumeDoc(
+        identity=Identity(name="Dana Vex", email="d@example.com"),
+        sections=[
+            Section(
+                title="Experience",
+                entries=[Entry(heading="Northwind Analytics", end="Aug 2025", bullets=[])],
+            )
+        ],
+    )
+    dates = [d for d in declared_fields(doc) if d.field.startswith("dates[")]
+    assert [d.value for d in dates] == ["Aug 2025"]
