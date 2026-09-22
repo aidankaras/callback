@@ -1,7 +1,7 @@
 [project]
 name = "callback"
 version = "0.1.0"
-description = "Verified resume and cover-letter generation with deterministic quality gates"
+description = "Resume tailoring with deterministic checks: grounded claims, verified ATS parseability, no hidden text"
 requires-python = ">=3.12,<3.13"
 dependencies = [
     "pydantic>=2.9",
