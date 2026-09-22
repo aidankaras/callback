@@ -90,8 +90,11 @@ CURRENCY: dict[str, str] = {"$": "USD", "£": "GBP", "€": "EUR"}
 # that gap: every position inside a digit run also has a digit or `.`
 # immediately before it, so every retry inside the run is blocked too,
 # and the whole run is rejected rather than sliding to a shorter match.
+# A sign counts only where one can stand -- the start, after whitespace or an
+# opening bracket -- and only touching its digits, so a range ("10-15"), a date
+# ("2023-2024") and a spaced dash ("Python - 5 years") are not negatives.
 _TOKEN = re.compile(
-    r"(?<![A-Za-z0-9.])"
+    r"(?:(?<![^\s(\[])(?P<sign>[-\u2212])(?=[$£€]?\d)|(?<![A-Za-z0-9.]))"
     r"(?P<currency>[$£€])?[ ]?"
     r"(?P<digits>\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?)"
     r"(?P<gap>\s*)"
@@ -159,6 +162,9 @@ def parse_numbers(text: str) -> list[ParsedNumber]:
 
         currency = match.group("currency")
         start = match.start("currency") if currency is not None else match.start("digits")
+        if match.group("sign") is not None:
+            value = -value
+            start = match.start("sign")
         out.append(
             ParsedNumber(
                 raw=text[start:end],

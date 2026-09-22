@@ -486,8 +486,12 @@ def check_bullet(
     for number in parse_numbers(text):
         # A quantity recorded as a percent never backs a plain count, so
         # "42 direct reports" cannot rest on a fact that says 42%.
-        literal_values = percent_values if number.is_percent else count_values
-        if any(values_match(number.value, source) for source in literal_values):
+        # A percentage's direction is carried by its verb ("cut churn by 15%"),
+        # so it is compared by magnitude; a count's sign is part of its value.
+        if number.is_percent:
+            if any(values_match(abs(number.value), abs(v)) for v in percent_values):
+                continue
+        elif any(values_match(number.value, source) for source in count_values):
             continue
         # A percentage is compared against the *magnitude* of a derived
         # value: the sign of a `pct_change` derivation only reflects the

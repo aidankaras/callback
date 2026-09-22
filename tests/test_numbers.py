@@ -1,3 +1,5 @@
+import pytest
+
 from core.checks.numbers import parse_numbers, values_match
 
 
@@ -155,3 +157,24 @@ def test_the_tolerance_is_half_a_percent_either_side() -> None:
     assert values_match(claimed=99.6, source=100.0)
     assert not values_match(claimed=100.6, source=100.0)
     assert not values_match(claimed=99.4, source=100.0)
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("Cut costs by -15%", [("-15%", -15.0)]),
+        ("lost -$12k", [("-$12k", -12000.0)]),
+        ("(\N{MINUS SIGN}3 items)", [("\N{MINUS SIGN}3", -3.0)]),
+        # Not signs: a range, a date range, a hyphenated word, a spaced dash.
+        ("10-15 items", [("10", 10.0), ("15", 15.0)]),
+        ("2023-2024", [("2023", 2023.0), ("2024", 2024.0)]),
+        ("mid-2024", [("2024", 2024.0)]),
+        ("Python - 5 years", [("5", 5.0)]),
+    ],
+)
+def test_a_written_sign_is_kept_only_where_it_is_one(
+    text: str, expected: list[tuple[str, float]]
+) -> None:
+    """Mutation: drop the sign branch -- the minus is lost again; let it
+    follow any character -- "10-15" reads as 10 and -15."""
+    assert [(n.raw, n.value) for n in parse_numbers(text)] == expected

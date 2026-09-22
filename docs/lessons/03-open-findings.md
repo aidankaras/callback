@@ -8,14 +8,6 @@ These are recorded here rather than in a working file because reasoning that
 outlives its evidence is an anecdote — and because the most valuable thing about
 each is the *reproduction*, which is the part a summary loses.
 
-## Minor — a written minus sign is dropped
-
-`core/checks/numbers.py`. `parse_numbers("Cut costs by -15%")` yields
-`('15%', 15.0, True)`; the magnitude survives and the sign does not. Low impact,
-since percentage comparison is deliberately by absolute value, but the token
-itself is silently changed.
-
-
 ## Watch — the round-trip gate's regional matching is the recurring defect class
 
 `core/checks/roundtrip.py` has taken seven `fix:` commits, all the same shape:

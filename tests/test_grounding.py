@@ -786,3 +786,31 @@ def test_a_year_is_grounded_by_an_ongoing_role(
     fail; take the closed fact's end for the hull -- the mixed cases fail."""
     _, found = check_bullet(text, cited)
     assert (found == []) is grounded, found
+
+
+def _counted(value: float, unit: str | None) -> Fact:
+    return Fact(
+        id="q",
+        kind=FactKind.EXPERIENCE_DETAIL,
+        text="Changed the churn rate",
+        numbers={"n": Quantity(value=value, unit=unit)},
+        provenance=Provenance(source="x", trust=Trust.USER_CONFIRMED),
+    )
+
+
+@pytest.mark.parametrize(
+    ("text", "fact", "grounded"),
+    [
+        ("Changed the churn rate by -15%", _counted(15, "%"), True),
+        ("Changed the churn rate by 15%", _counted(-15, "%"), True),
+        ("Changed the churn rate by -3 points", _counted(-3, None), True),
+        ("Changed the churn rate by -3 points", _counted(3, None), False),
+    ],
+)
+def test_a_percent_matches_by_magnitude_and_a_count_by_sign(
+    text: str, fact: Fact, grounded: bool
+) -> None:
+    """Mutations: compare percents signed -- the first two fail; compare counts
+    by magnitude -- the last passes."""
+    _, found = check_bullet(text, [fact])
+    assert (found == []) is grounded, found
