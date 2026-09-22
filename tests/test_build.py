@@ -36,6 +36,16 @@ FACTS = {
         entities=["Python"],
         provenance=CONFIRMED,
     ),
+    **{
+        fid: Fact(
+            id=fid,
+            kind=FactKind.EXPERIENCE_DETAIL,
+            parent="role",
+            text=text,
+            provenance=CONFIRMED,
+        )
+        for fid, text in (("loader", "Shipped the loader"), ("runbook", "Wrote the runbook"))
+    },
     "contact": Fact(
         id="contact",
         kind=FactKind.LINKS,
@@ -60,7 +70,11 @@ def _doc(bullet: str = "Cut the review queue to 300 items using Python") -> Resu
                         start="Jun 2024",
                         end="Aug 2025",
                         sources=["role"],
-                        bullets=[Bullet(text=bullet, sources=["queue"])],
+                        bullets=[
+                            Bullet(text=bullet, sources=["queue"]),
+                            Bullet(text="Shipped the loader", sources=["loader"]),
+                            Bullet(text="Wrote the runbook", sources=["runbook"]),
+                        ],
                     )
                 ],
             ),
@@ -111,6 +125,7 @@ def test_the_report_names_the_exact_pdf_and_document_it_judged(tmp_path: Path) -
         "roundtrip",
         "hidden",
         "skills",
+        "lints",
     ]
 
 

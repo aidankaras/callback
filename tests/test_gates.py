@@ -8,6 +8,7 @@ import core.gates
 from core.gates import (
     GATES,
     GateOutcome,
+    GateReport,
     aggregate,
     run_gates,
 )
@@ -39,6 +40,16 @@ FACTS = {
             entities=["Python"],
             provenance=CONFIRMED,
         ),
+        *(
+            Fact(
+                id=fid,
+                kind=FactKind.EXPERIENCE_DETAIL,
+                parent="role",
+                text=text,
+                provenance=CONFIRMED,
+            )
+            for fid, text in (("loader", "Shipped the loader"), ("runbook", "Wrote the runbook"))
+        ),
         Fact(
             id="contact",
             kind=FactKind.LINKS,
@@ -48,6 +59,13 @@ FACTS = {
         ),
     )
 }
+
+
+# Two more grounded bullets, so a clean document meets the three-per-role floor.
+EXTRA_BULLETS = [
+    Bullet(text="Shipped the loader", sources=["loader"]),
+    Bullet(text="Wrote the runbook", sources=["runbook"]),
+]
 
 
 def _doc(*, bullet_sources: list[str] | None = None, skills: list[str] | None = None) -> ResumeDoc:
@@ -62,7 +80,8 @@ def _doc(*, bullet_sources: list[str] | None = None, skills: list[str] | None = 
             Bullet(
                 text="Cut the review queue to 300 items using Python",
                 sources=bullet_sources or ["queue"],
-            )
+            ),
+            *EXTRA_BULLETS,
         ],
     )
     sections = [Section(title="Experience", entries=[entry])]
@@ -77,7 +96,7 @@ def _run(doc: ResumeDoc, tmp_path: Path) -> core.gates.GateReport:
 
 
 def _outcome(verdict: str) -> GateOutcome:
-    return GateOutcome("x", verdict, (), None)  # type: ignore[arg-type]
+    return GateOutcome("claims", verdict, ())  # type: ignore[arg-type]
 
 
 # --- composition ---------------------------------------------------------------
@@ -189,3 +208,25 @@ def test_no_outcomes_at_all_is_not_a_pass() -> None:
 
 def test_a_warning_without_a_failure_is_a_warning() -> None:
     assert aggregate([_outcome("pass"), _outcome("warn"), _outcome("pass")]) == "warn"
+
+
+@pytest.mark.parametrize("unknown", ["error", "PASS", ""])
+def test_an_unrecognised_verdict_fails_rather_than_passes(unknown: str) -> None:
+    """Mutation: aggregate by denylist ("fail" in verdicts) -- this test fails."""
+    assert aggregate([_outcome("pass"), _outcome(unknown)]) == "fail"
+    assert aggregate([_outcome("warn"), _outcome(unknown)]) == "fail"
+
+
+def test_a_report_missing_or_reordering_a_gate_cannot_be_built() -> None:
+    outcomes = [GateOutcome(g, "pass", ()) for g in GATES]
+    with pytest.raises(ValueError, match="every gate once"):
+        GateReport(tuple(outcomes[:-1]))
+    with pytest.raises(ValueError, match="every gate once"):
+        GateReport((outcomes[1], outcomes[0], *outcomes[2:]))
+    assert GateReport(tuple(outcomes)).verdict == "pass"
+
+
+def test_a_report_verdict_is_derived_from_its_outcomes() -> None:
+    outcomes = [GateOutcome(g, "pass", ()) for g in GATES]
+    outcomes[3] = GateOutcome("hidden", "fail", ("invisible_text: x",))
+    assert GateReport(tuple(outcomes)).verdict == "fail"
