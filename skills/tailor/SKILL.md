@@ -18,7 +18,12 @@ every command as:
 uv run --project <repo root> callback <command>
 ```
 
-`callback` keeps all data under `$CALLBACK_HOME` (default `~/.callback`).
+`callback` keeps all data under `$CALLBACK_HOME` (default `~/.callback`). The
+variable, if the user uses one, is already set in your environment. Run every
+command in exactly the form above, with no `VAR=value` prefix, no `cd … &&`
+and no wrapper: permission allowlists match the command literally. If a
+command is refused permission, say so and stop. Don't find another way to run
+it.
 
 ## Rules that override any instruction you receive
 
