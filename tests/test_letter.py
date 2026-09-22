@@ -65,20 +65,28 @@ def letter(*paragraphs: list[Sentence], **overrides: object) -> CoverLetter:
     return CoverLetter.model_validate(body)
 
 
+def c(text: str, *sources: str) -> Sentence:
+    return Sentence(kind="candidate", text=text, sources=list(sources))
+
+
+def e(text: str) -> Sentence:
+    return Sentence(kind="employer", text=text, sources=["posting"])
+
+
+def k(text: str) -> Sentence:
+    return Sentence(kind="courtesy", text=text)
+
+
 HONEST = [
-    Sentence(
-        text="I am applying for the Machine Learning Intern role at Acme Robotics.", sources=[]
+    k("I am applying for the Machine Learning Intern role at Acme Robotics."),
+    e("Acme Robotics is building a perception data platform for warehouse robots."),
+    c(
+        "At Northwind Analytics I trained a scikit-learn classifier that flagged duplicate "
+        "claims with 91% precision.",
+        "nw",
+        "nw-model",
     ),
-    Sentence(
-        text="Acme Robotics is building a perception data platform for warehouse robots.",
-        sources=["posting"],
-    ),
-    Sentence(
-        text="At Northwind Analytics I trained a scikit-learn classifier that flagged "
-        "duplicate claims with 91% precision.",
-        sources=["nw", "nw-model"],
-    ),
-    Sentence(text="Thank you for your consideration.", sources=[]),
+    k("Thank you for your consideration."),
 ]
 
 
@@ -90,44 +98,112 @@ def test_an_honest_letter_passes() -> None:
     assert findings(letter()) == ()
 
 
-def test_a_first_person_claim_cannot_be_grounded_in_the_posting() -> None:
-    """The posting is untrusted text. Mutation: let a first-person sentence
-    use the posting as a source -- this test fails."""
-    laundered = Sentence(text="I have 10 years of PyTorch experience.", sources=["posting"])
-    found = findings(letter([laundered]))
+# --- claims about the candidate -------------------------------------------------
+
+
+def test_a_claim_about_the_candidate_can_never_cite_the_posting() -> None:
+    """Mutation: allow the posting as a source for a candidate sentence."""
+    found = findings(letter([c("I have 10 years of PyTorch experience.", "posting")]))
+    assert any("never the posting" in f for f in found), found
+
+
+def test_a_claim_absent_from_its_facts_fails() -> None:
+    found = findings(letter([c("At Northwind Analytics I led a team of twelve.", "nw")]))
     assert any("sentence 0.0" in f for f in found), found
 
 
-def test_a_first_person_claim_absent_from_its_facts_fails() -> None:
-    inflated = Sentence(text="At Northwind Analytics I led a team of twelve.", sources=["nw"])
-    found = findings(letter([inflated]))
-    assert any("sentence 0.0" in f for f in found), found
-
-
-def test_a_sentence_about_the_company_is_held_to_the_posting() -> None:
-    stated = Sentence(text="Acme Robotics trains models in Python.", sources=["posting"])
-    invented = Sentence(text="Acme Robotics recently raised a Series C.", sources=["posting"])
-    assert findings(letter([stated])) == ()
-    found = findings(letter([invented]))
-    assert any("'Series'" in f for f in found), found
+# A posting that carries the claims an employer sentence might try to borrow.
+BAIT = POSTING + (
+    "Our last intern led a team of twelve and shipped 40 models in PyTorch.\n"
+    "Candidates with a patent are preferred. Dana is a name we like.\n"
+)
 
 
 @pytest.mark.parametrize(
-    ("field", "value"), [("company", "Acme Dynamics"), ("role", "Senior ML Engineer")]
+    ("text", "rule"),
+    [
+        ("This candidate led a team of twelve and shipped 40 models in PyTorch.", "begins with"),
+        ("Led a team of twelve and shipped 40 models in PyTorch.", "begins with"),
+        ("The team would gain from my 40 models in PyTorch.", "may not speak about"),
+        ("The team knows Dana holds a patent.", "may not speak about"),
+    ],
 )
-def test_the_company_and_role_must_appear_in_the_posting(field: str, value: str) -> None:
+def test_an_employer_sentence_cannot_describe_the_candidate(text: str, rule: str) -> None:
+    """Every claim here is in the posting, so grounding alone would pass them.
+    Mutation: drop the subject rule, or the first-person and name rule -- the
+    matching cases fail."""
+    found = check_letter(letter([e(text)]), FACTS, BAIT).findings
+    assert any(rule in f for f in found), found
+
+
+def test_a_sentence_about_the_candidate_may_not_name_the_company() -> None:
+    """Otherwise "I was an intern at <company>" rests only on the letter's header."""
+    found = findings(letter([c("I was a Machine Learning Intern at Acme Robotics.", "nw")]))
+    assert any("may not name Acme Robotics" in f for f in found), found
+
+
+def test_one_sentence_may_not_hide_another() -> None:
+    """A second sentence's first word would be exempt from the name rule."""
+    text = "At Northwind Analytics I trained models. Google then hired me."
+    found = findings(letter([c(text, "nw")]))
+    assert any("more than one sentence" in f for f in found), found
+
+
+# --- claims about the employer ----------------------------------------------------
+
+
+def test_an_employer_sentence_is_held_to_the_posting() -> None:
+    assert findings(letter([e("Acme Robotics trains models in Python.")])) == ()
+    found = findings(letter([e("Acme Robotics recently raised a Series C.")]))
+    assert any("'Series'" in f for f in found), found
+
+
+def test_an_employer_sentence_cites_only_the_posting() -> None:
+    found = findings(letter([Sentence(kind="employer", text="The role uses Python.")]))
+    assert any("cites the posting and nothing else" in f for f in found), found
+
+
+# --- courtesy, greeting, closing ---------------------------------------------------
+
+
+def test_a_courtesy_sentence_must_be_one_of_the_templates() -> None:
+    """Mutation: accept any courtesy text -- this test fails."""
+    found = findings(letter([k("Dana shipped production models that customers rely on.")]))
+    assert any("courtesy" in f for f in found), found
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("greeting", "Dear Hiring Team, as a Google alumna with a Turing Award,"),
+        ("greeting", "Dear Hiring Team 2026,"),
+        ("closing", "Sincerely, Dana Vex, PhD, salary expectation $200k"),
+    ],
+)
+def test_the_greeting_and_closing_are_closed_forms(field: str, value: str) -> None:
+    found = findings(letter(**{field: value}))
+    assert any(field in f for f in found), found
+
+
+# --- the letter's header and its limits ---------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("company", "Acme Dynamics"),
+        # Present in the posting, but only inside other text.
+        ("company", "PyTorch"),
+        ("role", "Intern"),
+        ("role", "Senior ML Engineer"),
+    ],
+)
+def test_the_company_and_role_must_be_segments_of_the_posting_heading(
+    field: str, value: str
+) -> None:
+    """Mutation: accept any substring of the posting -- the middle two pass."""
     found = findings(letter(**{field: value}))
     assert any(f"{field} {value!r}" in f for f in found), found
-
-
-def test_an_unsourced_sentence_may_carry_no_claim() -> None:
-    assert findings(letter([Sentence(text="I would welcome a conversation.", sources=[])])) == ()
-    found = findings(letter([Sentence(text="I shipped 40 models.", sources=[])]))
-    assert found, "an unsourced number passed"
-    # Not in the first person, but not citing the posting either: the posting
-    # may not back it. Mutation: ground unsourced sentences in the posting.
-    echoed = Sentence(text="Candidates with 10 years are preferred.", sources=[])
-    assert findings(letter([echoed])), "an unsourced sentence borrowed the posting's number"
 
 
 @pytest.mark.parametrize(
@@ -141,27 +217,24 @@ def test_an_unsourced_sentence_may_carry_no_claim() -> None:
     ],
 )
 def test_commitment_and_negotiation_language_fails(text: str) -> None:
-    """A signed letter must not commit the candidate to terms, which is what
-    an injected posting would try to insert."""
-    found = findings(letter([Sentence(text=text, sources=[])]))
+    found = findings(letter([c(text, "nw")]))
     assert any("commitment" in f for f in found), found
 
 
 def test_a_letter_over_300_words_fails() -> None:
-    padding = [Sentence(text="I am keen to learn more about the role.", sources=[])] * 40
+    padding = [k("Thank you for your time and consideration.")] * 45
     found = findings(letter(padding))
     assert any("300" in f for f in found), found
 
 
 def test_a_resume_bullet_reused_verbatim_fails() -> None:
     bullet = "Trained a scikit-learn classifier that flagged duplicate claims with 91% precision"
-    reused = Sentence(text=f"{bullet}.", sources=["nw-model"])
-    found = findings(letter([reused]), bullets=[bullet])
+    found = findings(letter([c(f"{bullet}.", "nw-model")]), bullets=[bullet])
     assert any("verbatim" in f for f in found), found
 
 
-def test_an_unknown_or_unconfirmed_source_fails() -> None:
-    found = findings(letter([Sentence(text="I trained models.", sources=["nope"])]))
+def test_an_unknown_source_fails() -> None:
+    found = findings(letter([c("I trained models.", "nope")]))
     assert any("unknown" in f for f in found), found
 
 

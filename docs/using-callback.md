@@ -104,7 +104,8 @@ sections:
 
 `callback letter <letter.yaml>` renders a letter to
 `outputs/<job>/draft/cover-letter.pdf` and checks it against your facts and
-the posting saved at `inbox/<job>.md`:
+the posting saved at `inbox/<job>.md`. The posting's first line must read
+`# <role> - <company>`.
 
 ```yaml
 identity: {name: Dana Vex, email: dana@example.com}
@@ -113,21 +114,34 @@ company: Acme Robotics
 role: Machine Learning Intern
 greeting: Dear Hiring Team,
 paragraphs:
-- - {text: I am applying for the Machine Learning Intern role at Acme Robotics., sources: []}
-  - {text: Acme Robotics is building a perception data platform., sources: [posting]}
-- - {text: At Northwind Analytics I cut the review queue to 300 items using Python., sources: [role, queue]}
+- - {kind: courtesy, text: I am applying for the Machine Learning Intern role at Acme Robotics.}
+  - {kind: employer, text: Acme Robotics is building a perception data platform., sources: [posting]}
+- - {kind: candidate, text: At Northwind Analytics I cut the review queue to 300 items using Python., sources: [role, queue]}
+  - {kind: courtesy, text: Thank you for your consideration.}
 closing: Sincerely,
 ```
 
-- **A sentence in the first person** is grounded against the facts it cites,
-  exactly like a bullet, and never against the posting.
-- **Any other sentence** cites `posting` and is grounded against its text.
-- **A sentence citing nothing** may make no checkable claim.
-- **The company and role** must appear in the posting.
-- **The letter fails** if it runs past 300 words, uses commitment or
-  negotiation language (salary, availability, relocation, sponsorship), or
-  reuses a resume bullet verbatim.
-- **The PDF** is screened for hidden text.
+Every sentence declares what it is about:
+
+- **`candidate`**: a claim about you. It cites your facts, never the
+  posting, and is checked exactly like a resume bullet. It may not name the
+  company.
+- **`employer`**: about the job. It cites `posting` and nothing else,
+  begins with the company's name or "The role", "The position", "The
+  internship" or "The team", never speaks about you, and may say only what
+  the posting says.
+- **`courtesy`**: one of a short fixed list of sentences ("Thank you for your
+  consideration.", "I am applying for the {role} role at {company}.").
+
+Also checked:
+- Each sentence must be a single sentence.
+- The greeting must be a salutation, and the closing one of a fixed set
+  ("Sincerely,", "Best regards,", …).
+- The company and role must each be a segment of the posting's first line.
+- The letter fails if it runs past 300 words, uses commitment or negotiation
+  language (salary, availability, relocation, sponsorship), or reuses a resume
+  bullet verbatim.
+- The PDF is screened for hidden text.
 
 ## What the gates guarantee, and what they do not
 

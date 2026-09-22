@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Literal
+
 from pydantic import BaseModel, Field, field_validator
 
 from core.profile.models import Identity
@@ -10,14 +12,20 @@ from core.resume.models import carries_content
 POSTING = "posting"
 
 
-class Sentence(BaseModel):
-    """One sentence and its sources: candidate fact ids, or `"posting"`.
+SentenceKind = Literal["candidate", "employer", "courtesy"]
 
-    A sentence may cite nothing, but then it may make no checkable claim.
+
+class Sentence(BaseModel):
+    """One sentence, what it is about, and what it cites.
+
+    `kind` is declared, not inferred: deciding who a sentence is about from
+    its wording is exactly what an unusual phrasing defeats. Each kind is
+    then held to its own rule -- see `core.letter.checks`.
     """
 
     model_config = {"extra": "forbid"}
 
+    kind: SentenceKind
     text: str
     sources: list[str] = Field(default_factory=list)
 
