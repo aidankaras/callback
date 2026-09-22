@@ -300,6 +300,44 @@ def rank(
     return sorted(ranked, key=lambda r: r.score, reverse=True)
 
 
+@dataclass(frozen=True)
+class Fit:
+    """What one posting asks for, against what the candidate can evidence."""
+
+    eligibility: Eligibility
+    evidenced: tuple[tuple[str, tuple[str, ...]], ...]
+    missing: tuple[str, ...]
+
+    @property
+    def coverage(self) -> float:
+        asked = len(self.evidenced) + len(self.missing)
+        return len(self.evidenced) / asked if asked else 0.0
+
+
+def fit(text: str, profile: Profile, facts: Mapping[str, Fact]) -> Fit:
+    """Judge one posting's text: its knockouts, and which technologies it names
+    that confirmed facts back.
+
+    Each evidenced technology carries the ids of the facts that state it, which
+    are the facts a bullet about it may cite. A technology the alias table does
+    not know is not counted either way: the same rule the ranking uses, so a
+    posting's prose cannot inflate or dilute its own coverage.
+    """
+    backing: dict[str, list[str]] = {}
+    for fid, entry in sorted(facts.items()):
+        if not entry.selectable():
+            continue
+        for entity in entry.entities:
+            backing.setdefault(canonicalize(entity), []).append(fid)
+    asked = _technologies(text)
+    evidenced = tuple((tech, tuple(backing[tech])) for tech in sorted(asked & backing.keys()))
+    return Fit(
+        eligibility=check_eligibility(text, profile),
+        evidenced=evidenced,
+        missing=tuple(sorted(asked - backing.keys())),
+    )
+
+
 def gaps(
     postings: Sequence[Found], profile: Profile, facts: Mapping[str, Fact]
 ) -> list[tuple[str, int]]:

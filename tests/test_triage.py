@@ -244,3 +244,52 @@ def test_a_graduation_window_is_read_in_the_direction_it_is_written(
     profile = Profile(work_authorization="US citizen", graduation=graduation)
     found = [f for f in check_eligibility(text, profile).findings if f.rule == "graduation"]
     assert bool(found) is flagged, found
+
+
+# --- one posting, judged against the facts ----------------------------------------------
+
+
+def test_fit_names_the_facts_that_back_each_technology() -> None:
+    """The point of the report is knowing what to cite. Mutation: return the
+    technologies without their fact ids -- this fails."""
+    from core.triage import fit
+
+    facts = {
+        "nw": Fact(
+            id="nw",
+            kind=FactKind.EXPERIENCE_DETAIL,
+            text="Trained a classifier in Python with PyTorch",
+            entities=["Python", "PyTorch"],
+            provenance=Provenance(source="x", trust=Trust.USER_CONFIRMED),
+        ),
+        "old": Fact(
+            id="old",
+            kind=FactKind.SKILL,
+            text="Wrote SQL for the reporting stack",
+            entities=["SQL"],
+            provenance=Provenance(source="x", trust=Trust.IMPORT_UNCONFIRMED),
+        ),
+        "db": Fact(
+            id="db",
+            kind=FactKind.SKILL,
+            text="Used Python for data loading",
+            entities=["Python"],
+            provenance=Provenance(source="x", trust=Trust.USER_CONFIRMED),
+        ),
+    }
+    posting = "We use Python, PyTorch and SQL. Kubernetes experience helps."
+    result = fit(posting, Profile(work_authorization="US citizen"), facts)
+    assert result.evidenced == (("PyTorch", ("nw",)), ("Python", ("db", "nw")))
+    # SQL is named by an unconfirmed fact only, so it is missing, not evidenced.
+    assert result.missing == ("Kubernetes", "SQL")
+    assert result.coverage == 0.5
+
+
+def test_fit_carries_the_postings_knockouts() -> None:
+    from core.triage import fit
+
+    posting = "We cannot sponsor visas. You will write Python."
+    profile = Profile(work_authorization="F-1 student, will need sponsorship")
+    result = fit(posting, profile, {})
+    assert result.eligibility.verdict == "knockout"
+    assert [f.rule for f in result.eligibility.findings] == ["sponsorship"]

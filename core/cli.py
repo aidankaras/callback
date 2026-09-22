@@ -94,6 +94,14 @@ def build_parser() -> argparse.ArgumentParser:
     elig.add_argument("job", help="job id of a posting saved in inbox/")
     elig.set_defaults(handler=_cmd_eligibility)
 
+    fit_cmd = sub.add_parser(
+        "fit",
+        help="a saved posting's knockouts, and which technologies it names that your "
+        "confirmed facts back",
+    )
+    fit_cmd.add_argument("job", help="job id of a posting saved in inbox/")
+    fit_cmd.set_defaults(handler=_cmd_fit)
+
     answers = sub.add_parser(
         "answers", help="check free-text application-form answers and write them paste-ready"
     )
@@ -423,6 +431,26 @@ def _cmd_eligibility(args: argparse.Namespace) -> int:
     print(eligibility.verdict.upper())
     _print_eligibility(eligibility)
     return {"eligible": 0, "stretch": 0, "unknown": 1, "knockout": 2}[eligibility.verdict]
+
+
+def _cmd_fit(args: argparse.Namespace) -> int:
+    from core.paths import resolve_inside
+    from core.profile.store import StoreError, load_facts
+    from core.triage import fit, load_profile
+
+    try:
+        text = resolve_inside(f"inbox/{args.job}.md").read_text(encoding="utf-8")
+        result = fit(text, load_profile(), load_facts())
+    except (OSError, ValueError, StoreError) as exc:
+        print(f"callback fit: {exc}", file=sys.stderr)
+        return 3
+    print(f"{result.eligibility.verdict.upper()}  {result.coverage:.0%} of what it names")
+    _print_eligibility(result.eligibility)
+    for tech, fids in result.evidenced:
+        print(f"  have     {tech}  ({', '.join(fids)})")
+    for tech in result.missing:
+        print(f"  missing  {tech}")
+    return {"eligible": 0, "stretch": 0, "unknown": 1, "knockout": 2}[result.eligibility.verdict]
 
 
 def _cmd_answers(args: argparse.Namespace) -> int:

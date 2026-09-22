@@ -99,3 +99,40 @@ def test_cli_delete_all_removes_everything_under_home(
     }
     printed = set(out.stdout.splitlines())
     assert printed == expected_removed
+
+
+def test_fit_reports_coverage_and_exits_on_the_verdict(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Mutation: exit 0 regardless of the verdict -- a knockout reads as fine."""
+    from core.cli import main
+    from core.paths import ensure_home
+    from core.profile.models import Fact, FactKind, Provenance, Trust
+    from core.profile.store import save_facts
+    from core.triage import Profile, save_profile
+
+    monkeypatch.setenv("CALLBACK_HOME", str(tmp_path / "cb"))
+    home = ensure_home()
+    save_profile(Profile(work_authorization="F-1 student, will need sponsorship"))
+    save_facts(
+        {
+            "py": Fact(
+                id="py",
+                kind=FactKind.SKILL,
+                text="Wrote Python for the loader",
+                entities=["Python"],
+                provenance=Provenance(source="x", trust=Trust.USER_CONFIRMED),
+            )
+        }
+    )
+    (home / "inbox" / "acme.md").write_text(
+        "# ML Intern - Acme\n\nWe use Python and Kubernetes. We cannot sponsor visas.\n",
+        encoding="utf-8",
+    )
+    assert main(["fit", "acme"]) == 2
+    out = capsys.readouterr().out
+    # Three technologies are named: Python, Kubernetes, and "ML" in the title,
+    # which the alias table knows as Machine Learning.
+    assert "KNOCKOUT" in out and "33% of what it names" in out
+    assert "have     Python  (py)" in out
+    assert "missing  Kubernetes" in out and "missing  Machine Learning" in out

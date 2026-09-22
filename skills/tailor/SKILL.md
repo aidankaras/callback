@@ -127,8 +127,11 @@ Postings come from the employer's own board, never from a scraper.
   text into `inbox/<job-id>.md`, first line `# <role> - <company>`.
 - **Starting a job.** `callback postings take <posting-id> --job <job-id>`
   saves the employer's own text as the job's posting. Then run
-  `callback eligibility <job-id>`. On a knockout, stop and tell the user
-  why, quoting the posting. On a question, ask it.
+  `callback fit <job-id>`, which reports the same knockouts as
+  `callback eligibility` and, for each technology the posting names, which
+  confirmed facts back it. On a knockout, stop and tell the user why,
+  quoting the posting. On a question, ask it. Its evidenced list is where
+  selection starts; its missing list is what step 3 asks about.
 
 ## Each posting
 

@@ -57,6 +57,7 @@ postings anyway.
 | `callback postings resolve <url> --company "<company>"` | The canonical posting behind a Greenhouse, Lever or Ashby URL, or an employer careers page's `schema.org/JobPosting` data | 0, 3 |
 | `callback postings take <id> --job <job-id>` | Saves the posting's own text to `inbox/<job-id>.md` | 0, 3 |
 | `callback profile --work-authorization … --graduation … --degree …` | What eligibility is judged against | 0, 3 |
+| `callback fit <job-id>` | The same knockouts, plus every technology the posting names that the alias table knows: which ones confirmed facts back (with the fact ids to cite) and which are missing | 0 eligible or stretch, 1 a question, 2 knockout, 3 |
 | `callback eligibility <job-id>` | Knockout requirements in a saved posting, each quoted | 0 eligible or stretch, 1 a question, 2 knockout, 3 |
 | `callback triage [--days N]` | Stored postings ranked: knockouts last, then by evidenced technologies and freshness | 0, 3 |
 | `callback gaps [--days N]` | Technologies the eligible stored postings name that no confirmed fact backs, most frequent first | 0, 3 |
@@ -290,7 +291,7 @@ rewritten from scratch fails even when every entry chains correctly, and
 
 The plugin registers `callback-mcp` (see `.mcp.json`), which serves the same
 checks as tools: `build`, `letter`, `answers`, `outreach`, `facts_add`,
-`facts_list`, `watch`, `triage`, `postings_take`, `postings_resolve`,
+`facts_list`, `watch`, `triage`, `fit`, `postings_take`, `postings_resolve`,
 `applications`, `funnel`,
 `eligibility`, `apply`, `interview` and `verify`. Each wraps the function the
 command line calls, so a result is identical whichever way it is reached, and
