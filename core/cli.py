@@ -32,6 +32,32 @@ def build_parser() -> argparse.ArgumentParser:
     build.add_argument("--job", required=True, help="job id: lowercase letters, digits, hyphens")
     build.set_defaults(handler=_cmd_build)
 
+    app = sub.add_parser(
+        "apply",
+        help="build the application packet for a gated draft and record it (never submits)",
+    )
+    app.add_argument("job", help="job id of a built draft")
+    app.add_argument("--company", required=True)
+    app.add_argument("--title", required=True)
+    app.add_argument("--location", default="")
+    app.add_argument("--url", default="")
+    app.add_argument("--source", required=True, help="greenhouse, lever, linkedin, handshake, ...")
+    app.add_argument(
+        "--accept-warnings", action="store_true", help="apply although the gates warned"
+    )
+    app.set_defaults(handler=_cmd_apply)
+
+    outcome = sub.add_parser("outcome", help="record what happened to an application")
+    outcome.add_argument("job")
+    outcome.add_argument(
+        "kind",
+        choices=["viewed", "callback", "interview", "offer", "rejected", "ghosted", "withdrew"],
+    )
+    outcome.set_defaults(handler=_cmd_outcome)
+
+    applications = sub.add_parser("applications", help="list recorded applications")
+    applications.set_defaults(handler=_cmd_applications)
+
     letter = sub.add_parser(
         "letter", help="render a cover letter and check it against your facts and the posting"
     )
@@ -66,6 +92,67 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 _SAFE_STEM = re.compile(r"[^a-z0-9-]+")
+
+
+def _cmd_apply(args: argparse.Namespace) -> int:
+    from datetime import UTC, datetime
+
+    from pydantic import ValidationError
+
+    from core.apply import ApplyError, Target, apply
+
+    try:
+        target = Target(
+            job_id=args.job,
+            company=args.company,
+            title=args.title,
+            location=args.location,
+            url=args.url,
+            source=args.source,
+        )
+        packet = apply(target, now=datetime.now(tz=UTC), accept_warnings=args.accept_warnings)
+    except (ApplyError, ValidationError, OSError) as exc:
+        print(f"callback apply: {exc}", file=sys.stderr)
+        return 3
+    print(f"packet: {packet}")
+    for item in sorted(packet.iterdir()):
+        print(f"  {item.name}")
+    where = f" at {target.url}" if target.url else ""
+    print(f"callback does not submit applications: submit this packet yourself{where}.")
+    return 0
+
+
+def _cmd_outcome(args: argparse.Namespace) -> int:
+    from datetime import UTC, datetime
+
+    from core.apply import ApplyError, record_outcome
+
+    try:
+        record_outcome(args.job, args.kind, now=datetime.now(tz=UTC))
+    except ApplyError as exc:
+        print(f"callback outcome: {exc}", file=sys.stderr)
+        return 3
+    return 0
+
+
+def _cmd_applications(_args: argparse.Namespace) -> int:
+    from collections import Counter
+
+    from core.apply import ApplyError, load_applications
+
+    try:
+        applications = load_applications()
+    except ApplyError as exc:
+        print(f"callback applications: {exc}", file=sys.stderr)
+        return 3
+    for a in applications:
+        latest = a.outcomes[-1].kind if a.outcomes else "no response yet"
+        when = f"{a.submitted_at:%Y-%m-%d}"
+        print(f"{when}  {a.job_id:<24} {a.company} / {a.title}  [{a.source}]  {latest}")
+    by_source = Counter(a.source for a in applications)
+    summary = ", ".join(f"{n} {source}" for source, n in by_source.most_common())
+    print(f"{len(applications)} application(s){': ' + summary if summary else ''}")
+    return 0
 
 
 def _cmd_letter(args: argparse.Namespace) -> int:
