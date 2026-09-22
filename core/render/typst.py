@@ -150,7 +150,18 @@ def render(doc: ResumeDoc, out_pdf: Path, *, font_family: str = DEFAULT_FONT) ->
     place; this check exists to catch a substitution *despite* that, not to
     verify provenance on its own.
     """
-    source = build_source(doc, font_family=font_family)
+    return compile_source(
+        build_source(doc, font_family=font_family), out_pdf, font_family=font_family
+    )
+
+
+def compile_source(source: str, out_pdf: Path, *, font_family: str = DEFAULT_FONT) -> RenderResult:
+    """Compile a Typst `source` that imports a template from `templates/` to `out_pdf`.
+
+    Every document this project renders goes through here, so each gets the
+    same guarantees: vendored fonts only, any compiler warning fatal, and the
+    embedded font family checked after writing.
+    """
     # A `Compiler` instance, not the free `typst.compile_with_warnings`
     # function, because the free function's stub binds `root` to the same
     # type variable as `input`: passing `input` as bytes (the source text)
