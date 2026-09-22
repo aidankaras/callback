@@ -202,6 +202,7 @@ from typing import Any, cast
 
 import pdfplumber
 from pypdf import PdfReader
+from pypdf.generic import ContentStream
 
 # Measured against this project's own template (see `test_hidden.py`): real
 # body text renders at 9pt, 10pt, 11pt and 16pt, so 6.0 leaves 3pt of
@@ -356,6 +357,7 @@ class HiddenKind(StrEnum):
     FILL_UNKNOWN = "fill_unknown"
     NO_TEXT_LAYER = "no_text_layer"
     NO_PAGES = "no_pages"
+    UNPAINTED_TEXT = "unpainted_text"
 
 
 @dataclass(frozen=True)
@@ -635,6 +637,55 @@ def _unicode_channel(page: Any, page_number: int) -> list[HiddenFinding]:
     return findings
 
 
+# Text rendering modes that paint no ink: 3 is "invisible", 7 adds the glyph
+# outlines to the clipping path and nothing else.
+_UNPAINTED_MODES = {3, 7}
+_SHOW_TEXT = {b"Tj", b"TJ", b"'", b'"'}
+
+
+def _unpainted_text(pdf_path: Path) -> list[HiddenFinding]:
+    """Flag a page that shows text while the rendering mode paints no ink.
+
+    Such text draws nothing and extracts in full, so every colour and size
+    check above passes it: its fill is ordinary black. The mode is not in
+    `pdfplumber`'s per-character data, so this reads each page's content
+    stream directly, tracking the mode across `q`/`Q` (which save and
+    restore it) and flagging only text actually shown while it is 3 or 7.
+
+    Mode 3 is also how an OCR'd scan stores its text layer over the page
+    image, so on an imported resume this finding often means "this text
+    came from OCR", not "this text was hidden" -- it is reported either way,
+    because nothing here can tell the two apart.
+
+    Blind spot: content drawn from a form XObject is not scanned.
+    """
+    findings: list[HiddenFinding] = []
+    reader = PdfReader(str(pdf_path))
+    for page_number, page in enumerate(reader.pages):
+        contents = page.get_contents()
+        if contents is None:
+            continue
+        mode = 0
+        saved: list[int] = []
+        for operands, operator in ContentStream(contents, reader).operations:
+            if operator == b"q":
+                saved.append(mode)
+            elif operator == b"Q":
+                mode = saved.pop() if saved else 0
+            elif operator == b"Tr" and operands:
+                mode = int(operands[0])
+            elif operator in _SHOW_TEXT and mode in _UNPAINTED_MODES:
+                findings.append(
+                    HiddenFinding(
+                        HiddenKind.UNPAINTED_TEXT,
+                        f"page {page_number}: text is drawn in rendering mode {mode}, which "
+                        "paints no ink -- either hidden text or an OCR text layer",
+                    )
+                )
+                break
+    return findings
+
+
 def _metadata_leak(pdf_path: Path) -> list[HiddenFinding]:
     reader = PdfReader(str(pdf_path))
     metadata = reader.metadata
@@ -714,5 +765,6 @@ def check_hidden(pdf_path: Path) -> tuple[str, list[HiddenFinding]]:
             findings.extend(_tiny_text(page, page_number))
             findings.extend(_offpage_text(page, page_number))
             findings.extend(_unicode_channel(page, page_number))
+    findings.extend(_unpainted_text(pdf_path))
     findings.extend(_metadata_leak(pdf_path))
     return ("fail" if findings else "pass"), findings

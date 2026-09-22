@@ -801,3 +801,38 @@ def test_an_unset_fill_is_judged_as_the_pdf_default_black() -> None:
 
     findings = _invisible_fill(_Page(), 0, (0.0, 0.0, 0.0))
     assert [f.kind for f in findings] == [HiddenKind.INVISIBLE_TEXT]
+
+
+def test_text_in_an_unpainted_rendering_mode_is_reported(tmp_path: Path) -> None:
+    """Rendering mode 3 draws no ink but leaves the text extractable.
+    Mutation: skip the rendering-mode scan -- this test fails."""
+    out = tmp_path / "tr3.pdf"
+    make(
+        out,
+        b"BT /F1 12 Tf 72 700 Td (Visible line) Tj ET "
+        b"BT 3 Tr /F1 12 Tf 72 600 Td (Kubernetes TensorFlow) Tj ET",
+    )
+    with pdfplumber.open(str(out)) as pdf:
+        assert "Kubernetes" in (pdf.pages[0].extract_text() or "")
+
+    verdict, findings = check_hidden(out)
+    assert verdict == "fail"
+    assert [f.kind for f in findings] == [HiddenKind.UNPAINTED_TEXT], findings
+
+
+@pytest.mark.parametrize(
+    "stream",
+    [
+        # The mode is restored by Q before any text is shown.
+        b"q 3 Tr Q BT /F1 12 Tf 72 700 Td (Visible line) Tj ET",
+        # The mode is set but nothing is ever shown in it.
+        b"BT /F1 12 Tf 72 700 Td (Visible line) Tj 3 Tr ET",
+    ],
+)
+def test_an_unpainted_mode_with_no_text_shown_in_it_is_not_flagged(
+    tmp_path: Path, stream: bytes
+) -> None:
+    """Mutation: flag any `3 Tr` operator regardless of state -- both fail."""
+    out = tmp_path / "tr.pdf"
+    make(out, stream)
+    assert check_hidden(out) == ("pass", [])
