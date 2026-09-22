@@ -31,7 +31,12 @@ def _built(home: Path, job: str, *, verdict: str = "pass", letter: str | None = 
         "sections:\n- title: Skills\n  skills: [Python]\n",
         encoding="utf-8",
     )
-    record = {"verdict": verdict, "pdf_sha256": hashlib.sha256(pdf).hexdigest()}
+    doc = (draft / "resume.yaml").read_bytes()
+    record = {
+        "verdict": verdict,
+        "pdf_sha256": hashlib.sha256(pdf).hexdigest(),
+        "doc_sha256": hashlib.sha256(doc).hexdigest(),
+    }
     (draft / "report.json").write_text(json.dumps(record), encoding="utf-8")
     if letter is not None:
         letter_pdf = b"%PDF-1.7 letter"
@@ -128,11 +133,20 @@ def test_more_than_ten_applications_in_a_day_is_refused(home: Path) -> None:
     for n in range(11):
         _built(home, f"job-{n}")
     for n in range(10):
-        apply(_target(f"job-{n}", company=f"Company {n}"), now=NOW + timedelta(minutes=n))
+        apply(
+            _target(f"job-{n}", company=f"Company {n}", url=f"https://x.test/{n}"),
+            now=NOW + timedelta(minutes=n),
+        )
     with pytest.raises(ApplyError, match="10 applications"):
-        apply(_target("job-10", company="Company 10"), now=NOW + timedelta(hours=2))
+        apply(
+            _target("job-10", company="Company 10", url="https://x.test/10"),
+            now=NOW + timedelta(hours=2),
+        )
     # A day later the window has moved.
-    apply(_target("job-10", company="Company 10"), now=NOW + timedelta(days=1, minutes=1))
+    apply(
+        _target("job-10", company="Company 10", url="https://x.test/10"),
+        now=NOW + timedelta(days=1, minutes=1),
+    )
 
 
 def test_an_outcome_is_recorded_against_its_application(home: Path) -> None:
@@ -181,5 +195,83 @@ def test_a_cover_letter_changed_since_it_was_checked_is_refused(home: Path) -> N
 def test_an_unreadable_gate_record_is_refused(home: Path, body: str) -> None:
     _built(home, "acme-ml")
     (home / "outputs" / "acme-ml" / "draft" / "report.json").write_text(body, encoding="utf-8")
+    with pytest.raises(ApplyError, match="gate record"):
+        apply(_target(), now=NOW)
+
+
+def test_a_resume_document_edited_since_it_was_gated_is_refused(home: Path) -> None:
+    """The packet's plain text and form fields come from resume.yaml, so it
+    must be the document that was gated. Mutation: skip the check -- fails."""
+    _built(home, "acme-ml")
+    doc = home / "outputs" / "acme-ml" / "draft" / "resume.yaml"
+    doc.write_text(doc.read_text().replace("dana@example.com", "other@evil.test"))
+    with pytest.raises(ApplyError, match=r"resume\.yaml has changed"):
+        apply(_target(), now=NOW)
+
+
+@pytest.mark.parametrize(
+    "variant",
+    [
+        # Each carries its own URL, so only the name rule under test can match it.
+        {"company": "Acme Robotics, Inc.", "url": "https://x.test/a"},
+        {"company": "Acme Robotics.", "url": "https://x.test/b"},
+        {"location": "", "url": "https://x.test/c"},
+        {"title": "Machine Learning Intern (Summer 2027)", "url": "https://x.test/d"},
+        {"company": "Different Name", "url": "https://boards.greenhouse.io/acme/jobs/1"},
+    ],
+)
+def test_a_near_duplicate_posting_is_refused_within_90_days(
+    home: Path, variant: dict[str, str]
+) -> None:
+    _built(home, "acme-ml")
+    _built(home, "acme-ml-2")
+    apply(_target(), now=NOW)
+    with pytest.raises(ApplyError, match="90 days"):
+        apply(_target("acme-ml-2", **variant), now=NOW + timedelta(days=1))
+
+
+def test_a_failed_record_save_leaves_no_packet_behind(
+    home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A packet with no record is one the volume rules never hear about."""
+    import core.apply
+
+    _built(home, "acme-ml")
+
+    def full(_applications: object) -> None:
+        raise OSError("disk full")
+
+    monkeypatch.setattr(core.apply, "_save", full)
+    with pytest.raises(OSError, match="disk full"):
+        apply(_target(), now=NOW)
+    job = home / "outputs" / "acme-ml"
+    assert sorted(p.name for p in job.iterdir()) == ["draft"]
+
+
+def test_a_stale_packet_is_replaced_whole(home: Path) -> None:
+    _built(home, "acme-ml")
+    stale = home / "outputs" / "acme-ml" / "packet" / "old" / "leftover.pdf"
+    stale.parent.mkdir(parents=True)
+    stale.write_bytes(b"old")
+    packet = apply(_target(), now=NOW)
+    assert "old" not in {p.name for p in packet.iterdir()}
+
+
+@pytest.mark.parametrize("body", ["{}", "~", "0", "false", "''", "{a: 1}"])
+def test_an_application_record_that_is_not_a_list_is_refused(home: Path, body: str) -> None:
+    (home / "applications.yaml").write_text(body, encoding="utf-8")
+    with pytest.raises(ApplyError, match="not a readable application record"):
+        load_applications()
+
+
+@pytest.mark.parametrize(
+    "record",
+    [{"verdict": "pass"}, {"verdict": ["pass"], "pdf_sha256": "x", "doc_sha256": "y"}],
+)
+def test_a_gate_record_missing_or_mistyping_a_field_is_named(
+    home: Path, record: dict[str, object]
+) -> None:
+    _built(home, "acme-ml")
+    (home / "outputs" / "acme-ml" / "draft" / "report.json").write_text(json.dumps(record))
     with pytest.raises(ApplyError, match="gate record"):
         apply(_target(), now=NOW)
