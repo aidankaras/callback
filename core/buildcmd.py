@@ -104,6 +104,10 @@ def build(doc_path: Path, job_id: str) -> BuildResult:
     finally:
         shutil.rmtree(staging, ignore_errors=True)
     write_private_bytes(out_dir / "resume.pdf", pdf_bytes)
+    # The draft holds the document the gates judged, whatever path it was built
+    # from: `apply` and `interview` read it from here and check it against the
+    # hash below, so a draft built from a file elsewhere is still complete.
+    write_private_bytes(out_dir / "resume.yaml", doc_bytes)
 
     record = {
         "verdict": report.verdict,
