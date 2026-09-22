@@ -53,6 +53,12 @@ jobs:
       - name: Prepare the report directory
         run: mkdir -p reports
 
+      # Property 4 asks whether each check can fail, which is answered by
+      # running the suite, not by reading it: the audit may call `uv run`.
+      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4  # v10.1.0
+      - name: Install the project
+        run: uv sync --locked
+
       - name: Run the audit
         uses: anthropics/claude-code-action@cfc3eb22bfed5c26ef66e3223c982af27e4524de  # v1
         env:
@@ -77,8 +83,8 @@ jobs:
           # the audit reads nothing a contributor cannot already see.
           show_full_output: true
           claude_args: |
-            --max-turns 100
-            --allowedTools "Read,Grep,Glob,Bash(git log:*),Bash(git show:*),Bash(git diff:*),Bash(find:*),Bash(cat:*),Bash(ls:*),Bash(wc:*),Bash(head:*),Bash(tail:*),Bash(sed -n:*),Bash(grep:*),Write"
+            --max-turns 160
+            --allowedTools "Read,Grep,Glob,Bash(git log:*),Bash(git show:*),Bash(git diff:*),Bash(find:*),Bash(cat:*),Bash(ls:*),Bash(wc:*),Bash(head:*),Bash(tail:*),Bash(sed -n:*),Bash(grep:*),Bash(uv run pytest:*),Bash(uv run python:*),Bash(uv run pyright:*),Bash(uv run ruff:*),Write"
             --disallowedTools "Agent,Task"
           prompt: |
             You are auditing this repository, `callback`, against the properties
@@ -144,7 +150,17 @@ jobs:
             background tasks, and do not end your turn to wait for anything.
             Write the report with the Write tool before your final message --
             an audit that ends without writing reports/standards-audit.md is
-            lost, however complete its reading was.
+            lost, however complete its reading was. The run has a fixed turn
+            budget and ends without warning when it is spent, so write the
+            report early and rewrite it as you go: after every two properties,
+            Write the whole report so far, with the properties not yet examined
+            marked "not yet examined". A run cut short then still leaves every
+            finding it reached.
+
+            To run code, use `uv run pytest ...` or `uv run python -c "..."`
+            (the project is installed). Plain `python3`, shell variables and
+            commands joined with `&&` or `;` are refused by the permission
+            rules; run one command per call.
 
             Write your findings to reports/standards-audit.md, organized by these
             eight properties. For each one, either cite the specific file, line
