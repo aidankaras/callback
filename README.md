@@ -46,6 +46,8 @@ Then ask Claude to tailor your resume to a posting. The underlying commands:
 | `callback build resume.yaml --job <id>` | render the PDF and run every gate; exit 0 pass, 1 warn, 2 fail |
 | `callback letter letter.yaml` | render and check a cover letter |
 | `callback export resume.yaml` | the resume as plain text, for forms that want it pasted |
+| `callback answers answers.yaml` | check free-text application-form answers against their limits, ready to paste |
+| `callback outreach note.yaml` | a grounded note to a recruiter, engineer or alum, within its channel's limit |
 | `callback apply <id> …` | build the application packet and record it; **callback never submits** |
 | `callback outcome <id> <kind>`, `callback applications` | track what happened |
 

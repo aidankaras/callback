@@ -177,6 +177,20 @@ bullets; say why the experience fits. Never write about salary,
 availability, relocation or sponsorship: a signed letter must not concede
 terms, and the check fails on it.
 
+## Form answers and outreach
+
+- **Form answers.** When the application form asks free-text questions,
+  write `outputs/<job-id>/draft/answers.yaml` (format in
+  `docs/using-callback.md`). Include each question's character or word
+  limit, and run `uv run --project <repo root> callback answers <that yaml>`.
+  The sentences follow the cover-letter kinds. `apply` puts passing answers
+  in the packet.
+- **Outreach.** Offer to draft a short note to a recruiter, an engineer on
+  the team or a BU alum: `callback outreach <yaml>` with `channel`
+  (`linkedin-note`, 300 characters; `linkedin-message`; `email`, 150 words)
+  and the recipient's name. The name goes in the generated greeting only.
+  Never invent a connection ("we met at…") that isn't a confirmed fact.
+
 ## Preparing the application
 
 Only once the user has read the draft and wants to apply, run:

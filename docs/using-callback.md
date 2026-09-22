@@ -183,6 +183,37 @@ Also checked:
   or reuses a resume bullet verbatim.
 - The PDF is screened for hidden text.
 
+## Form answers and outreach
+
+`callback answers <answers.yaml>` checks free-text application-form answers
+and writes them, ready to paste, to `outputs/<job>/draft/answers.md`:
+
+```yaml
+job_id: acme-ml-intern
+company: Acme Robotics
+role: Machine Learning Intern
+candidate_name: Dana Vex
+answers:
+- question: Why are you interested in Acme Robotics?
+  max_chars: 400
+  sentences:
+  - {kind: employer, text: Acme Robotics is building a perception data platform., sources: [posting]}
+  - {kind: candidate, text: At Northwind Analytics I brought the review queue down to 300 items with Python., sources: [role, queue]}
+```
+
+Each sentence follows the cover-letter kinds. Each answer must fit its
+`max_chars` or `max_words`, counted on the exact text to be pasted. `apply`
+adds `answers.md` to the packet only when its check passed and the file is
+unchanged. Exit codes: 0 pass, 2 fail, 3 could not run.
+
+`callback outreach <note.yaml>` checks a short note to someone at the
+company. Its fields are the same as a form answer's, plus `recipient` (a
+name) and `channel`: `linkedin-note` (300 characters), `linkedin-message`
+(1,900 characters, 200 words) or `email` (150 words). The greeting and
+sign-off are generated. The recipient appears only in the greeting, and the
+whole message is measured against the channel's limit. It prints the note,
+and exits 0 pass, 2 fail, 3 could not run.
+
 ## What the gates guarantee, and what they do not
 
 **They guarantee:**
