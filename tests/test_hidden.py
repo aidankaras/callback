@@ -10,6 +10,7 @@ from core.checks.hidden import (
     MIN_CONTRAST_RATIO,
     MIN_FONT_SIZE,
     HiddenKind,
+    _invisible_fill,  # pyright: ignore[reportPrivateUsage]
     check_hidden,
     contrast_ratio,
     is_default_ignorable,
@@ -49,6 +50,7 @@ from tests.fixtures.make_hidden import (
     ZERO_WIDTH_SPACE,
     build,
 )
+from tests.fixtures.make_raw_pdf import make
 
 
 @pytest.mark.slow
@@ -745,3 +747,57 @@ def test_a_zero_area_page_has_no_known_background() -> None:
     """Mutation: fall back to white when the page has no area -- this test
     fails. Typst never emits such a page; an imported PDF can."""
     assert page_background(_DegeneratePage()) is None
+
+
+def test_a_pdf_with_no_pages_is_reported(tmp_path: Path) -> None:
+    out = tmp_path / "empty.pdf"
+    make(out, b"", npages=0)
+    with pdfplumber.open(str(out)) as pdf:
+        assert pdf.pages == []
+
+    verdict, findings = check_hidden(out)
+    assert verdict == "fail"
+    assert [f.kind for f in findings] == [HiddenKind.NO_PAGES], findings
+
+
+def test_a_page_whose_only_text_is_whitespace_has_no_text_layer(tmp_path: Path) -> None:
+    out = tmp_path / "spaces.pdf"
+    make(out, b"BT /F1 12 Tf 72 700 Td (     ) Tj ET")
+    with pdfplumber.open(str(out)) as pdf:
+        chars = pdf.pages[0].chars
+        assert chars and all(not str(c["text"]).strip() for c in chars)
+
+    verdict, findings = check_hidden(out)
+    assert verdict == "fail"
+    assert [f.kind for f in findings] == [HiddenKind.NO_TEXT_LAYER], findings
+
+
+def test_an_unreadable_fill_does_not_hide_invisible_text_after_it(tmp_path: Path) -> None:
+    """Mutation: return on the first `fill_unknown` glyph again -- this test
+    fails, because the white payload later on the page is never reached."""
+    out = tmp_path / "both.pdf"
+    make(
+        out,
+        b"/Pattern cs /P0 scn BT /F1 12 Tf 72 720 Td (Dana Vex) Tj ET "
+        b"1 g BT /F1 12 Tf 72 700 Td (Python Kubernetes) Tj ET",
+    )
+    with pdfplumber.open(str(out)) as pdf:
+        fills = {str(c["text"]): c["non_stroking_color"] for c in pdf.pages[0].chars}
+        assert to_rgb(fills["D"]) is None and to_rgb(fills["P"]) == (1.0, 1.0, 1.0)
+
+    _, findings = check_hidden(out)
+    assert sorted(f.kind for f in findings) == sorted(
+        [HiddenKind.FILL_UNKNOWN, HiddenKind.INVISIBLE_TEXT]
+    ), findings
+
+
+def test_an_unset_fill_is_judged_as_the_pdf_default_black() -> None:
+    """PDF's initial fill colour is black. Mutation: skip a `None` fill
+    again -- this test fails, since black-on-black then counts as visible."""
+
+    class _Page:
+        def __init__(self) -> None:
+            self.chars = [{"text": "K", "non_stroking_color": None, "stroking_color": None}]
+
+    findings = _invisible_fill(_Page(), 0, (0.0, 0.0, 0.0))
+    assert [f.kind for f in findings] == [HiddenKind.INVISIBLE_TEXT]

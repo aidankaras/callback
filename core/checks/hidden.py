@@ -355,6 +355,7 @@ class HiddenKind(StrEnum):
     BACKGROUND_UNKNOWN = "background_unknown"
     FILL_UNKNOWN = "fill_unknown"
     NO_TEXT_LAYER = "no_text_layer"
+    NO_PAGES = "no_pages"
 
 
 @dataclass(frozen=True)
@@ -544,16 +545,24 @@ def _invisible_fill(
     has no readable explicit stroke either, is reported as `fill_unknown`
     rather than judged. No contrast can be computed for it, and treating
     "could not compute" as "visible" is exactly how a white-to-white
-    gradient carried extractable keywords through this check unseen. A
-    fill that was never set at all (`None`) is still skipped: that is the
-    ordinary case for a PDF relying on the default black fill.
+    gradient carried extractable keywords through this check unseen. The
+    scan continues past such a glyph, so an unreadable heading cannot mask
+    genuinely invisible text later on the same page; at most one finding of
+    each kind is returned per page.
+
+    A fill reported as `None` is judged as black, PDF's initial fill
+    colour. pdfminer reports an unset fill as `(0,)` rather than `None` in
+    every case measured here, so this is a fallback, not the common path --
+    but skipping it would read black-on-black as visible.
     """
+    unknown: HiddenFinding | None = None
     for char in page.chars:
         text = str(char.get("text", ""))
         if not text.strip():
             continue
         contrasts: list[float] = []
-        fill = to_rgb(char.get("non_stroking_color"))
+        raw_fill = char.get("non_stroking_color")
+        fill = (0.0, 0.0, 0.0) if raw_fill is None else to_rgb(raw_fill)
         if fill is not None:
             contrasts.append(contrast_ratio(fill, background))
         raw_stroke = char.get("stroking_color")
@@ -561,23 +570,22 @@ def _invisible_fill(
             stroke = to_rgb(raw_stroke)
             if stroke is not None:
                 contrasts.append(contrast_ratio(stroke, background))
-        raw_fill = char.get("non_stroking_color")
-        if not contrasts and raw_fill is not None:
+        if not contrasts:
+            unknown = unknown or HiddenFinding(
+                HiddenKind.FILL_UNKNOWN,
+                f"page {page_number}: {text!r} has a fill this check cannot read "
+                f"({raw_fill!r}); its visibility could not be judged",
+            )
+            continue
+        if max(contrasts) < MIN_CONTRAST_RATIO:
             return [
-                HiddenFinding(
-                    HiddenKind.FILL_UNKNOWN,
-                    f"page {page_number}: {text!r} has a fill this check cannot read "
-                    f"({raw_fill!r}); its visibility could not be judged",
-                )
-            ]
-        if contrasts and max(contrasts) < MIN_CONTRAST_RATIO:
-            return [
+                *([unknown] if unknown else []),
                 HiddenFinding(
                     HiddenKind.INVISIBLE_TEXT,
                     f"page {page_number}: {text!r} does not contrast against its background",
-                )
+                ),
             ]
-    return []
+    return [unknown] if unknown else []
 
 
 def _tiny_text(page: Any, page_number: int) -> list[HiddenFinding]:
@@ -677,8 +685,12 @@ def check_hidden(pdf_path: Path) -> tuple[str, list[HiddenFinding]]:
     """
     findings: list[HiddenFinding] = []
     with pdfplumber.open(str(pdf_path)) as pdf:
+        if not pdf.pages:
+            findings.append(
+                HiddenFinding(HiddenKind.NO_PAGES, "document has no pages; nothing was screened")
+            )
         for page_number, page in enumerate(pdf.pages):
-            if not page.chars:
+            if not any(str(c.get("text", "")).strip() for c in page.chars):
                 # Every per-character check below iterates nothing on such a
                 # page, so without this it would pass exactly like a legible one.
                 findings.append(
