@@ -9,6 +9,13 @@ on:
     types: [opened, synchronize, ready_for_review, reopened]
   workflow_dispatch:
 
+# One review per pull request at a time: a new push cancels the review of the
+# commit it replaces. Each push to a large pull request otherwise started
+# another full review, several running at once on superseded code.
+concurrency:
+  group: code-review-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
