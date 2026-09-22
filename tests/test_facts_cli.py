@@ -1,0 +1,177 @@
+from __future__ import annotations
+
+import io
+from pathlib import Path
+
+import pytest
+import yaml
+
+from core.factscmd import ConfirmError, add_from_file, confirm
+from core.paths import ensure_home
+from core.profile.models import Trust
+from core.profile.store import load_facts
+
+
+@pytest.fixture(autouse=True)
+def home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    monkeypatch.setenv("CALLBACK_HOME", str(tmp_path / "cb"))
+    return ensure_home()
+
+
+def _facts_file(tmp_path: Path, facts: list[dict[str, object]]) -> Path:
+    path = tmp_path / "facts.yaml"
+    path.write_text(yaml.safe_dump(facts), encoding="utf-8")
+    return path
+
+
+def _imported(fid: str, text: str) -> dict[str, object]:
+    return {
+        "id": fid,
+        "kind": "experience_detail",
+        "text": text,
+        "provenance": {"source": "import:resume.pdf", "trust": "import_unconfirmed"},
+    }
+
+
+def test_adding_facts_records_every_rejection_and_keeps_the_rest(tmp_path: Path) -> None:
+    bad_trust = _imported("bad", "x") | {
+        "provenance": {"source": "import:resume.pdf", "trust": "user_confirmed"}
+    }
+    added, rejected = add_from_file(
+        _facts_file(tmp_path, [_imported("a", "Built the pipeline"), bad_trust, {"id": "c"}])
+    )
+    assert added == ["a"]
+    assert [fid for fid, _ in rejected] == ["bad", "c"]
+    assert "import_unconfirmed" in rejected[0][1]
+    assert set(load_facts()) == {"a"}
+
+
+def test_adding_a_duplicate_id_is_rejected_not_overwritten(tmp_path: Path) -> None:
+    add_from_file(_facts_file(tmp_path, [_imported("a", "first")]))
+    added, rejected = add_from_file(_facts_file(tmp_path, [_imported("a", "second")]))
+    assert (added, [fid for fid, _ in rejected]) == ([], ["a"])
+    assert load_facts()["a"].text == "first"
+
+
+def test_confirmation_without_a_terminal_changes_nothing(tmp_path: Path, home: Path) -> None:
+    add_from_file(_facts_file(tmp_path, [_imported("a", "Built the pipeline")]))
+    store = home / "facts.yaml"
+    before = store.read_bytes()
+
+    def no_tty() -> io.StringIO:
+        raise OSError(6, "No such device or address")
+
+    with pytest.raises(ConfirmError, match="typed by the candidate"):
+        confirm([], open_tty=no_tty)
+    assert store.read_bytes() == before
+
+
+def test_confirmation_flips_exactly_the_facts_answered_yes(tmp_path: Path) -> None:
+    add_from_file(
+        _facts_file(
+            tmp_path, [_imported("a", "one"), _imported("b", "two"), _imported("c", "three")]
+        )
+    )
+    answers = io.StringIO("y\nn\ny\n")
+    shown = io.StringIO()
+
+    class _Tty(io.TextIOBase):
+        def readline(self, size: int = -1, /) -> str:
+            return answers.readline()
+
+        def write(self, s: str, /) -> int:
+            return shown.write(s)
+
+    confirmed = confirm([], open_tty=_Tty)
+    facts = load_facts()
+    assert confirmed == ["a", "c"]
+    assert [fid for fid, f in sorted(facts.items()) if f.selectable()] == ["a", "c"]
+    assert facts["a"].provenance.source == "user:confirmed:import:resume.pdf"
+    assert facts["b"].provenance.trust is Trust.IMPORT_UNCONFIRMED
+    assert "three" in shown.getvalue()
+
+
+def test_quitting_confirmation_keeps_the_answers_already_given(tmp_path: Path) -> None:
+    add_from_file(
+        _facts_file(
+            tmp_path, [_imported("a", "one"), _imported("b", "two"), _imported("c", "three")]
+        )
+    )
+    # A "y" after the "q": if quitting only skipped one fact, "c" would be confirmed.
+    answers = io.StringIO("y\nq\ny\n")
+
+    class _Tty(io.TextIOBase):
+        def readline(self, size: int = -1, /) -> str:
+            return answers.readline()
+
+        def write(self, s: str, /) -> int:
+            return len(s)
+
+    assert confirm([], open_tty=_Tty) == ["a"]
+    facts = load_facts()
+    assert [fid for fid, f in sorted(facts.items()) if f.selectable()] == ["a"]
+
+
+def test_a_web_sourced_fact_can_never_be_confirmed(tmp_path: Path) -> None:
+    web = _imported("w", "Company raised a Series B") | {
+        "provenance": {"source": "web:example.com", "trust": "web"}
+    }
+    add_from_file(_facts_file(tmp_path, [web]))
+
+    class _Tty(io.TextIOBase):
+        def readline(self, size: int = -1, /) -> str:
+            return "y\n"
+
+        def write(self, s: str, /) -> int:
+            return len(s)
+
+    with pytest.raises(ConfirmError, match="web"):
+        confirm(["w"], open_tty=_Tty)
+    assert not load_facts()["w"].selectable()
+
+
+# --- the command line ------------------------------------------------------------
+
+
+def test_facts_add_exits_nonzero_when_anything_was_refused(tmp_path: Path) -> None:
+    from core.cli import main
+
+    good = _facts_file(tmp_path, [_imported("a", "one")])
+    assert main(["facts", "add", str(good)]) == 0
+    assert main(["facts", "add", str(good)]) == 1
+
+
+def test_facts_confirm_without_a_terminal_exits_3(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Patched rather than left to the environment: on a developer's machine
+    `/dev/tty` exists, and an unpatched test would wait for input."""
+    from core.cli import main
+
+    def no_tty() -> io.StringIO:
+        raise OSError(6, "No such device or address")
+
+    monkeypatch.setattr("core.factscmd._open_terminal", no_tty)
+    add_from_file(_facts_file(tmp_path, [_imported("a", "one")]))
+    assert main(["facts", "confirm"]) == 3
+    assert not load_facts()["a"].selectable()
+
+
+@pytest.mark.slow
+def test_import_writes_private_text_and_exits_4_on_hidden_content(
+    tmp_path: Path, home: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    import stat
+
+    from core.cli import main
+    from core.render.typst import FONT_DIR
+    from tests.fixtures.make_hidden import WHITE, build
+
+    pdf = tmp_path / "Old Resume.pdf"
+    build(WHITE, pdf, FONT_DIR)
+    assert main(["import", str(pdf)]) == 4
+    out = capsys.readouterr().out
+    assert out.startswith("HIDDEN CONTENT FOUND")
+    text = home / "inbox" / "old-resume.txt"
+    assert stat.S_IMODE(text.stat().st_mode) == 0o600
+    assert "kubernetes" in text.read_text()
