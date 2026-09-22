@@ -12,6 +12,7 @@ from __future__ import annotations
 import argparse
 import re
 from pathlib import Path
+from typing import cast
 
 from core.cli import build_parser
 
@@ -23,7 +24,8 @@ ROOT = Path(__file__).resolve().parent.parent
 def _subcommands(parser: argparse.ArgumentParser) -> dict[str, argparse.ArgumentParser]:
     for action in parser._actions:  # type: ignore[reportPrivateUsage]
         if isinstance(action, argparse._SubParsersAction):  # type: ignore[reportPrivateUsage]
-            return dict(action.choices)
+            subparsers = cast("argparse._SubParsersAction[argparse.ArgumentParser]", action)  # type: ignore[reportPrivateUsage]
+            return dict(subparsers.choices)
     return {}
 
 
