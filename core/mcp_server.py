@@ -264,6 +264,28 @@ def interview(job_id: str) -> dict[str, object]:
 
 
 @server.tool()
+def agenda() -> dict[str, object]:
+    """What to do next, most time-sensitive first; judges nothing new, acts on nothing."""
+    from core.agenda import agenda as build_agenda
+    from core.apply import load_applications
+    from core.discovery.store import load_postings
+    from core.profile.store import load_facts
+    from core.triage import load_profile
+
+    result = build_agenda(
+        list(load_postings().values()),
+        load_applications(),
+        load_profile(),
+        load_facts(),
+        now=_now(),
+    )
+    return {
+        "items": [{"kind": i.kind, "what": i.what, "command": i.command} for i in result.items],
+        "applications_left_today": result.headroom,
+    }
+
+
+@server.tool()
 def applications() -> dict[str, object]:
     """Every application recorded, with what has happened to it so far."""
     from core.apply import load_applications
