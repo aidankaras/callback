@@ -125,18 +125,57 @@ def _grounding(label: str, text: str, corpus: list[Fact]) -> list[str]:
     return [f"sentence {label}: {f.kind}: {f.detail}" for f in found]
 
 
-def _check_sentence(
-    label: str,
-    sentence: Sentence,
-    letter: CoverLetter,
+@dataclass(frozen=True)
+class SentenceContext:
+    """What every sentence in one application document is checked against."""
+
+    company: str
+    role: str
+    candidate_name: str
+    facts: Mapping[str, Fact]
+    posting: Fact
+    resume_bullets: Sequence[str] = ()
+
+
+def context_for(
+    company: str,
+    role: str,
+    candidate_name: str,
     facts: Mapping[str, Fact],
-    posting_fact: Fact,
-) -> list[str]:
+    posting: str,
+    resume_bullets: Sequence[str] = (),
+) -> SentenceContext:
+    reused = [b for b in resume_bullets if len(_norm(b).split()) >= _MIN_REUSED_WORDS]
+    return SentenceContext(company, role, candidate_name, facts, _posting_fact(posting), reused)
+
+
+def heading_findings(company: str, role: str, posting: str) -> list[str]:
+    """Whether the company and role are segments of the posting's first line."""
+    segments = _heading_segments(posting)
+    return [
+        f"{name} {value!r} is not a segment of the posting's first line; "
+        "start the saved posting with '# <role> - <company>'"
+        for name, value in (("company", company), ("role", role))
+        if _norm(value) not in segments
+    ]
+
+
+def check_sentence(label: str, sentence: Sentence, ctx: SentenceContext) -> list[str]:
+    """Every rule `sentence` breaks, for its declared kind -- see the module docstring."""
+    findings = _kind_findings(label, sentence, ctx)
+    if _COMMITMENT.search(sentence.text):
+        findings.append(f"sentence {label}: commitment or negotiation language: {sentence.text!r}")
+    if any(_norm(b) in _norm(sentence.text) for b in ctx.resume_bullets):
+        findings.append(f"sentence {label}: reuses a resume bullet verbatim")
+    return findings
+
+
+def _kind_findings(label: str, sentence: Sentence, ctx: SentenceContext) -> list[str]:
     text = sentence.text
     if _INTERNAL_BREAK.search(text.rstrip()):
         return [f"sentence {label}: holds more than one sentence; split it"]
     if sentence.kind == "courtesy":
-        allowed = {_norm(t.format(role=letter.role, company=letter.company)) for t in COURTESY}
+        allowed = {_norm(t.format(role=ctx.role, company=ctx.company)) for t in COURTESY}
         if sentence.sources or _norm(text) not in allowed:
             return [f"sentence {label}: is not one of the courtesy sentences, so it must cite"]
         return []
@@ -144,25 +183,25 @@ def _check_sentence(
         if sentence.sources != [POSTING]:
             return [f"sentence {label}: an employer sentence cites the posting and nothing else"]
         subject = _norm(text)
-        subjects = (_norm(letter.company), *EMPLOYER_SUBJECTS)
+        subjects = (_norm(ctx.company), *EMPLOYER_SUBJECTS)
         if not any(subject.startswith(s) for s in subjects):
             return [
                 f"sentence {label}: an employer sentence begins with the company's name or "
                 "the role, position, internship or team"
             ]
-        name_parts = {w for w in _norm(letter.identity.name).split() if len(w) > 1}
+        name_parts = {w for w in _norm(ctx.candidate_name).split() if len(w) > 1}
         if _FIRST_PERSON.search(text) or name_parts & set(subject.split()):
             return [f"sentence {label}: an employer sentence may not speak about the candidate"]
-        return _grounding(label, text, [posting_fact])
+        return _grounding(label, text, [ctx.posting])
     # candidate
     if not sentence.sources or POSTING in sentence.sources:
         return [f"sentence {label}: a sentence about you cites your facts, never the posting"]
-    unknown = [s for s in sentence.sources if s not in facts]
+    unknown = [s for s in sentence.sources if s not in ctx.facts]
     if unknown:
         return [f"sentence {label}: cites unknown fact(s) {unknown}"]
-    if _norm(letter.company) in _norm(text):
-        return [f"sentence {label}: a sentence about you may not name {letter.company}"]
-    return _grounding(label, text, [facts[s] for s in sentence.sources])
+    if _norm(ctx.company) in _norm(text):
+        return [f"sentence {label}: a sentence about you may not name {ctx.company}"]
+    return _grounding(label, text, [ctx.facts[s] for s in sentence.sources])
 
 
 def check_letter(
@@ -173,14 +212,7 @@ def check_letter(
     resume_bullets: Sequence[str] = (),
 ) -> LetterResult:
     """Every way `letter` fails, given the candidate's facts and the posting text."""
-    findings: list[str] = []
-    segments = _heading_segments(posting)
-    for name, value in (("company", letter.company), ("role", letter.role)):
-        if _norm(value) not in segments:
-            findings.append(
-                f"{name} {value!r} is not a segment of the posting's first line; "
-                "start the saved posting with '# <role> - <company>'"
-            )
+    findings = heading_findings(letter.company, letter.role, posting)
     if not _GREETING.fullmatch(letter.greeting.strip()):
         findings.append(
             f"greeting {letter.greeting!r} must be a salutation such as 'Dear Hiring Team,'"
@@ -190,18 +222,13 @@ def check_letter(
     if letter.closing.strip().casefold() not in CLOSINGS:
         findings.append(f"closing {letter.closing!r} must be one of {sorted(CLOSINGS)}")
 
-    posting_fact = _posting_fact(posting)
-    reused = [b for b in resume_bullets if len(_norm(b).split()) >= _MIN_REUSED_WORDS]
+    ctx = context_for(
+        letter.company, letter.role, letter.identity.name, facts, posting, resume_bullets
+    )
     words = len(letter.greeting.split()) + len(letter.closing.split())
     for label, sentence in letter.sentences:
         words += len(sentence.text.split())
-        findings.extend(_check_sentence(label, sentence, letter, facts, posting_fact))
-        if _COMMITMENT.search(sentence.text):
-            findings.append(
-                f"sentence {label}: commitment or negotiation language: {sentence.text!r}"
-            )
-        if any(_norm(b) in _norm(sentence.text) for b in reused):
-            findings.append(f"sentence {label}: reuses a resume bullet verbatim")
+        findings.extend(check_sentence(label, sentence, ctx))
     if words > MAX_WORDS:
         findings.append(f"the letter is {words} words; at most {MAX_WORDS}")
     return LetterResult(findings=tuple(findings))
