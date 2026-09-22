@@ -25,6 +25,7 @@ below for you, except `facts confirm`, which only you can run.
 | `callback facts list [--unconfirmed]` | Lists stored facts | 0 |
 | `callback facts confirm [ids...]` | Asks you, fact by fact, whether each is true | 0, 3 if not run from a terminal |
 | `callback build <resume.yaml> --job <id>` | Renders the PDF and runs every gate, writing to `outputs/<id>/draft/` | 0 pass, 1 warn, 2 fail, 3 could not build |
+| `callback export <resume.yaml>` | Prints the resume as plain text for forms that want it pasted, and checks every critical field survived | 0, 2 if a field was lost |
 
 Everything lives under `$CALLBACK_HOME` (default `~/.callback`). Directories there
 are `0700` and files `0600`.
@@ -124,11 +125,24 @@ sections:
 - Whether a posting's requirements are covered. That is advice the skill gives,
   never a gate.
 
+**The write guard.** Loaded as a plugin, callback installs a `PreToolUse` hook
+(`hooks/write_guard.py`) that refuses an assistant's attempt to:
+- write the fact store;
+- write anything under `final/` or `released/`;
+- write the guard itself;
+- run `callback facts confirm`.
+
+For Bash it resolves the paths a command names, including after a `cd`. It
+guards against accidental writes; it is not a sandbox. A command that builds
+its path at run time is not caught.
+
+**Layout lints** (a bullet over two lines, fewer than 3 or more than 6
+bullets for a role, a second page, a near-empty last page) can only warn.
+They never fail a document.
+
 **Not built yet:**
 - Sealing a finished document into `final/`.
 - The hash-chained ledger.
-- Layout lints.
 - The MCP server.
-- A write guard that stops an assistant from editing the fact store directly.
 
 `build` only ever writes a draft.

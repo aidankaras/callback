@@ -38,8 +38,9 @@ uv run --project <repo root> callback <command>
    `provenance: {source: "import:<file>" | "assistant:<topic>", trust: import_unconfirmed}`
    and add them with `callback facts add`. `callback facts confirm` must be
    typed by the user in their own terminal. It reads `/dev/tty`, which your
-   shell doesn't have, so don't try, and never edit `~/.callback/facts.yaml`
-   directly.
+   shell doesn't have, so don't try. Never edit `~/.callback/facts.yaml`
+   directly: the plugin's write guard refuses it, and a refusal is not an
+   obstacle to work around.
 5. **Never change a gate, a fact, `core/`, or the template to make a build
    pass.** If a gate is wrong, say so and stop.
 6. **Legitimate optimization only:** select true facts, order them for a
