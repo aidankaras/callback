@@ -47,8 +47,12 @@ by design rather than merely unimplemented.
 ## Not built yet
 
 - **Watching boards other than Greenhouse, Lever and Ashby.** A careers page can be resolved one
-  URL at a time from its `schema.org/JobPosting` data, but not watched for new postings. Workday
-  forbids automated access; aggregator APIs are not read.
+  URL at a time from its `schema.org/JobPosting` data, but not watched for new postings: listing
+  pages rarely carry that data, which search engines read from each posting's own page. Workday
+  forbids automated access. Checked 2026-09-22 and not read: SmartRecruiters' and Recruitee's
+  posting APIs, whose `robots.txt` disallows every agent (SmartRecruiters allows only LinkedIn's
+  crawler), and Workable's job-widget endpoint, which did not return JSON to a plain client.
+  Aggregator APIs are not read.
 - **Research about an employer.** A cover letter may say about the company only what the posting
   says.
 
