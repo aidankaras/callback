@@ -21,8 +21,9 @@ something you can re-run, not something the model reports about itself. There is
 | The PDF is machine-readable | the rendered PDF is re-extracted with a deliberately naive parser, and every critical field must be recovered in order |
 | Nothing hidden | no invisible, tiny, off-page or unpainted text, no suspicious Unicode, no unexpected metadata; anything the screen cannot judge fails rather than passes |
 | Cover letters stay honest | each sentence declares what it is about: claims about the candidate rest on their facts and never on the posting, names, numbers and claim words about the employer only on the posting; commitment language (salary, availability, relocation, sponsorship) fails |
-| Postings come from the source | discovery reads employers' documented public posting APIs over HTTPS, politely, and refuses LinkedIn, Indeed, Handshake, Workday and Glassdoor by name |
+| Postings come from the source | discovery reads employers' documented public posting APIs over HTTPS, politely, and refuses LinkedIn, Indeed, Handshake, Workday and Glassdoor by name; an employer's own careers page is read only from the `schema.org/JobPosting` data it publishes, honouring `robots.txt` |
 | Applications stay reasonable | at most 10 in 24 hours, no re-apply to the same posting within 90 days, and a packet is only built from a draft that passed, or whose warnings the candidate accepted |
+| What was sent stays provable | a sealed document is copied read-only with a signed manifest of its hashes, and every seal and application is appended to a hash-chained, keyed ledger, so a file changed afterwards, or a ledger rewritten, is detected |
 
 It does **not** check ordinary wording: "led the migration" and "helped with the migration" are
 indistinguishable to it. And it cannot know whether a fact the candidate confirmed is true. See
@@ -35,7 +36,9 @@ uv sync
 claude --plugin-dir .      # loads the `tailor` skill and the write guard
 ```
 
-Then ask Claude to tailor your resume to a posting. The underlying commands:
+Then ask Claude to tailor your resume to a posting. The plugin also serves these checks over MCP,
+so a session can call them directly; confirming a fact and erasing the data home are deliberately
+not tools. The underlying commands:
 
 | Command | Does |
 |---|---|
@@ -49,7 +52,10 @@ Then ask Claude to tailor your resume to a posting. The underlying commands:
 | `callback answers answers.yaml` | check free-text application-form answers against their limits, ready to paste |
 | `callback outreach note.yaml` | a grounded note to a recruiter, engineer or alum, within its channel's limit |
 | `callback apply <id> …` | build the application packet and record it; **callback never submits** |
-| `callback outcome <id> <kind>`, `callback applications` | track what happened |
+| `callback outcome <id> <kind>`, `callback applications`, `callback funnel` | track what happened, and the reply, callback and offer rates by where you applied |
+| `callback facts github <user>` | draft unconfirmed project facts from your own public repositories |
+| `callback finalize <id>` / `callback verify` | seal what you sent and prove later that nothing changed |
+| `callback interview <id>` | an interview pack built from exactly the documents that were sent |
 
 `docs/using-callback.md` has the fact format, the document format and every rule.
 
