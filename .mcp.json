@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "callback": {
+      "command": "uv",
+      "args": ["run", "--locked", "--project", "${CLAUDE_PLUGIN_ROOT}", "callback-mcp"]
+    }
+  }
+}

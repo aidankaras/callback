@@ -1,0 +1,113 @@
+name: CI
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955  # v4.3.0
+      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4  # v10.1.0
+        with:
+          version: "0.9.2"
+      - run: uv sync --locked
+      - run: uv run ruff check .
+      - run: uv run ruff format --check .
+      - run: uv run pyright
+      - run: uv run pytest -v
+      - run: uv run --with pip-audit pip-audit
+  minimal-install:
+    # The `check` job installs the dev dependency group, so a module that only a
+    # dev dependency supplies imports cleanly there and fails for anyone who
+    # installs this package. That configuration does not otherwise exist in the
+    # pipeline, which is why a declared-imports assertion inside the test suite
+    # would not catch it -- the suite runs in the fully provisioned environment.
+    # This job builds the configuration a consumer actually gets.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955  # v4.3.0
+      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4  # v10.1.0
+        with:
+          version: "0.9.2"
+      - name: Install with declared dependencies only
+        run: uv venv && uv pip install .
+      - name: Prove the environment lacks the dev group
+        # Without this the job is the vacuous version of itself: if the
+        # environment turned out to carry the dev dependencies after all, every
+        # import below would succeed for the wrong reason and the job would pass
+        # while testing nothing.
+        run: |
+          set -euo pipefail
+          for module in pytest hypothesis; do
+            if uv run --no-project python -c "import $module" 2>/dev/null; then
+              echo "::error::$module is present, so this is not a minimal install"
+              exit 1
+            fi
+          done
+          echo "dev group absent, as required"
+      - name: Import every shipped module and run the entry point
+        run: |
+          set -euo pipefail
+          uv run --no-project python - <<'EOF'
+          import importlib, pkgutil
+          import core
+
+          failures: list[tuple[str, str]] = []
+          names = [m.name for m in pkgutil.walk_packages(core.__path__, prefix="core.")]
+          for name in names:
+              try:
+                  importlib.import_module(name)
+              except Exception as exc:
+                  failures.append((name, f"{type(exc).__name__}: {exc}"))
+          print(f"imported {len(names)} modules")
+          if failures:
+              for name, detail in failures:
+                  print(f"FAILED {name}: {detail}")
+              raise SystemExit(1)
+          EOF
+          uv run --no-project callback --help
+
+  secrets:
+    runs-on: ubuntu-latest
+    steps:
+      # fetch-depth: 0 pulls full history, and the step below runs gitleaks
+      # directly rather than through gitleaks/gitleaks-action, because that
+      # action scans only the pushed range (`<before>^..<after>`) and that
+      # range fails in two different ways.
+      #
+      # Observed here: on a branch's first push `<before>` resolves to a commit
+      # whose `^` does not exist, and the scan aborts --
+      #   ERR [git] fatal: ambiguous argument '60129f9^..a351070':
+      #       unknown revision or path not in the working tree
+      #   WRN scanned ~0 bytes (0)
+      #   WRN no leaks found in partial scan
+      # exiting non-zero regardless of content.
+      #
+      # The more dangerous mode is when the range *does* resolve: the scan then
+      # succeeds having read only the commits in that one push, reports clean,
+      # and exits 0. A secret committed before this job existed, or on any push
+      # whose range excluded it, stays green forever. That failure never
+      # announces itself, which is why the range is abandoned rather than
+      # repaired.
+      #
+      # This step's own green has been checked rather than assumed: the first
+      # run after the change reported `35 commits scanned` and `~235224 bytes`,
+      # which was the whole branch at that point.
+      - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955  # v4.3.0
+        with:
+          fetch-depth: 0
+      - name: Install gitleaks
+        env:
+          GITLEAKS_VERSION: "8.30.1"
+          GITLEAKS_SHA256: "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb"
+        run: |
+          set -euo pipefail
+          curl -sSLO "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          echo "${GITLEAKS_SHA256}  gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" | sha256sum -c -
+          tar xzf "gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" gitleaks
+      - name: Scan full history for secrets
+        # `detect` (not `dir`) because the point of this job is catching a
+        # secret that was committed and later removed -- a tree scan of the
+        # checked-out worktree would never see it. No `--log-opts` override:
+        # gitleaks' default already walks every commit reachable from HEAD.
+        run: ./gitleaks detect --source . -v

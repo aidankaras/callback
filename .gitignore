@@ -1,1 +1,12 @@
 .superpowers/
+__pycache__/
+.venv/
+*.db
+*.db-wal
+*.db-shm
+*.pdf
+*.txt.out
+inbox/
+outputs/
+.callback/
+.pytest_cache/

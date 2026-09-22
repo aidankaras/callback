@@ -1,0 +1,346 @@
+"""Hand an application to the candidate, and keep the record of it.
+
+callback never submits an application. Every major platform either requires
+the employer's own credentials to post one or forbids automation outright, so
+the supported path is a *packet*: the gated resume, the gated cover letter,
+the resume as plain text for forms that want it pasted, and a field map for
+the form's contact questions. The candidate submits it themselves.
+
+`apply` refuses to build a packet from a draft that did not pass its gates, or
+whose PDF has changed since it was gated. It also enforces three volume rules,
+in code rather than advice: no second application for the same job, none to
+the same employer, title and location within 90 days, and at most 10 in any
+24 hours. Each application is recorded with the SHA-256 of exactly what was
+sent, and outcomes (an interview, a rejection) are recorded against it.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import re
+import shutil
+import tempfile
+from datetime import datetime, timedelta
+from pathlib import Path
+from typing import Literal, cast
+
+import yaml
+from pydantic import BaseModel, Field, ValidationError, field_validator
+
+from core.export.text import to_text
+from core.finalize import record_event
+from core.paths import private_dir, resolve_inside, write_private, write_private_bytes
+from core.resume.io import DocumentError, parse_doc
+
+APPLICATIONS_FILE = "applications.yaml"
+MAX_PER_DAY = 10
+REAPPLY_WINDOW = timedelta(days=90)
+
+Source = Literal[
+    "greenhouse",
+    "lever",
+    "ashby",
+    "workday",
+    "linkedin",
+    "handshake",
+    "indeed",
+    "company-site",
+    "email",
+    "referral",
+    "other",
+]
+OutcomeKind = Literal["viewed", "callback", "interview", "offer", "rejected", "ghosted", "withdrew"]
+
+
+class ApplyError(RuntimeError):
+    """An application that cannot go ahead; nothing was written."""
+
+
+def _aware(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        raise ValueError("timestamps must carry a timezone")
+    return value
+
+
+_LEGAL_SUFFIXES = {"inc", "llc", "ltd", "corp", "corporation", "co", "plc", "gmbh"}
+
+
+def _norm_name(value: str) -> str:
+    without_parens = re.sub(r"\([^)]*\)", " ", value.casefold())
+    words = re.sub(r"[^\w]+", " ", without_parens).split()
+    while words and words[-1] in _LEGAL_SUFFIXES:
+        words.pop()
+    return " ".join(words)
+
+
+def _norm_url(url: str) -> str:
+    return url.strip().casefold().rstrip("/").removeprefix("https://").removeprefix("http://")
+
+
+class Target(BaseModel):
+    """The posting being applied to, as the candidate describes it."""
+
+    model_config = {"extra": "forbid"}
+
+    job_id: str = Field(pattern=r"^[a-z0-9][a-z0-9-]{0,63}$")
+    company: str = Field(min_length=1)
+    title: str = Field(min_length=1)
+    location: str = ""
+    url: str = ""
+    source: Source
+
+    def same_posting(self, other: Target) -> bool:
+        """Whether `other` is, as far as can be told, the same requisition.
+
+        The same non-empty URL is decisive. Otherwise company and title are
+        compared after dropping punctuation, a trailing legal suffix ("Inc.")
+        and a parenthetical ("(Summer 2027)"), and a blank location matches
+        any: a variant spelling must not reopen a posting already applied to.
+        """
+        if self.url and other.url and _norm_url(self.url) == _norm_url(other.url):
+            return True
+        same_location = (
+            not self.location
+            or not other.location
+            or _norm_name(self.location) == _norm_name(other.location)
+        )
+        return (
+            _norm_name(self.company) == _norm_name(other.company)
+            and _norm_name(self.title) == _norm_name(other.title)
+            and same_location
+        )
+
+
+class Outcome(BaseModel):
+    model_config = {"extra": "forbid"}
+
+    kind: OutcomeKind
+    occurred_at: datetime
+
+    _aware = field_validator("occurred_at")(_aware)
+
+
+class Application(Target):
+    """One application: the target, when, and the hashes of what was sent."""
+
+    submitted_at: datetime
+    resume_sha256: str
+    letter_sha256: str | None = None
+    answers_sha256: str | None = None
+    resume_txt_sha256: str | None = None
+    outcomes: list[Outcome] = Field(default_factory=list[Outcome])
+
+    _aware = field_validator("submitted_at")(_aware)
+
+
+def load_applications() -> list[Application]:
+    """Every recorded application. A missing or empty file is none; anything
+    else that is not a list is refused, not read as "no applications" -- the
+    volume rules would otherwise be lifted by a corrupted record."""
+    path = resolve_inside(APPLICATIONS_FILE)
+    if not path.exists():
+        return []
+    try:
+        text = path.read_text(encoding="utf-8")
+        parsed: object = yaml.safe_load(text)
+        if parsed is None and not text.strip():
+            return []
+        if not isinstance(parsed, list):
+            raise ValueError(f"expected a list, found {type(parsed).__name__}")
+        # The boundary where this starts trusting the file's shape;
+        # `model_validate` is what checks each entry.
+        return [Application.model_validate(item) for item in cast("list[object]", parsed)]
+    except (OSError, yaml.YAMLError, ValueError, ValidationError) as exc:
+        raise ApplyError(f"{path} is not a readable application record: {exc}") from exc
+
+
+def _save(applications: list[Application]) -> None:
+    body = yaml.safe_dump([a.model_dump(mode="json") for a in applications], sort_keys=False)
+    write_private(resolve_inside(APPLICATIONS_FILE), body)
+
+
+def _sha256(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _read_record(path: Path, what: str, fields: tuple[str, ...]) -> dict[str, str]:
+    """A gate report's JSON record, with each of `fields` present as a string.
+
+    A missing, unreadable or mistyped record is refused by name, rather than
+    surfacing as a raw exception or being misread as a changed PDF.
+    """
+    try:
+        parsed: object = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ApplyError(f"cannot read the {what}'s gate record {path.name}: {exc}") from exc
+    if not isinstance(parsed, dict):
+        raise ApplyError(f"the {what}'s gate record {path.name} is not a JSON object")
+    record = cast("dict[str, object]", parsed)
+    bad = [f for f in fields if not isinstance(record.get(f), str)]
+    if bad:
+        raise ApplyError(f"the {what}'s gate record {path.name} lacks a text value for {bad}")
+    return {f: cast("str", record[f]) for f in fields}
+
+
+def _check_draft(draft: Path, *, accept_warnings: bool) -> tuple[Path, Path | None]:
+    """The resume and letter PDFs to send, once their reports say they may be."""
+    report_path = draft / "report.json"
+    resume = draft / "resume.pdf"
+    if not report_path.is_file() or not resume.is_file():
+        raise ApplyError(f"no built resume in {draft}: run `callback build` first")
+    report = _read_record(report_path, "resume", ("verdict", "pdf_sha256", "doc_sha256"))
+    verdict = report["verdict"]
+    if verdict == "warn" and not accept_warnings:
+        raise ApplyError("the resume's gates returned warn; read report.md, then accept warnings")
+    if verdict not in {"pass", "warn"}:
+        raise ApplyError(f"the resume did not pass its gates (verdict {verdict!r})")
+    if _sha256(resume) != report["pdf_sha256"]:
+        raise ApplyError("resume.pdf has changed since it was gated: run `callback build` again")
+    document = draft / "resume.yaml"
+    if not document.is_file() or _sha256(document) != report["doc_sha256"]:
+        # The packet's plain text and form fields come from this file.
+        raise ApplyError("resume.yaml has changed since it was gated: run `callback build` again")
+
+    letter = draft / "cover-letter.pdf"
+    if not letter.is_file():
+        return resume, None
+    letter_record = _read_record(
+        draft / "letter-report.json", "cover letter", ("verdict", "pdf_sha256")
+    )
+    if letter_record["verdict"] != "pass":
+        raise ApplyError("the cover letter did not pass its checks: run `callback letter` again")
+    if _sha256(letter) != letter_record["pdf_sha256"]:
+        raise ApplyError(
+            "cover-letter.pdf has changed since it was checked: run `callback letter` again"
+        )
+    return resume, letter
+
+
+def _check_answers(draft: Path) -> str | None:
+    """The form answers to include, if there are any, once their record says they may be."""
+    path = draft / "answers.md"
+    if not path.is_file():
+        return None
+    record = _read_record(draft / "answers-report.json", "form answers", ("verdict", "sha256"))
+    if record["verdict"] != "pass":
+        raise ApplyError("the form answers did not pass their checks: run `callback answers` again")
+    text = path.read_text(encoding="utf-8")
+    if hashlib.sha256(text.encode("utf-8")).hexdigest() != record["sha256"]:
+        raise ApplyError(
+            "answers.md has changed since it was checked: run `callback answers` again"
+        )
+    return text
+
+
+def _check_volume(target: Target, existing: list[Application], now: datetime) -> None:
+    for prior in existing:
+        if prior.job_id == target.job_id:
+            raise ApplyError(
+                f"already applied to {target.job_id!r} on {prior.submitted_at:%Y-%m-%d}"
+            )
+        if prior.same_posting(target) and now - prior.submitted_at < REAPPLY_WINDOW:
+            raise ApplyError(
+                f"applied to {prior.company} / {prior.title} on {prior.submitted_at:%Y-%m-%d} "
+                f"as {prior.job_id!r}; the same posting may not be re-applied to within 90 days"
+            )
+    recent = [a for a in existing if now - a.submitted_at < timedelta(days=1)]
+    if len(recent) >= MAX_PER_DAY:
+        raise ApplyError(
+            f"{len(recent)} applications in the last 24 hours; the limit is {MAX_PER_DAY}"
+        )
+
+
+def apply(
+    target: Target, *, now: datetime, accept_warnings: bool = False, refresh: bool = False
+) -> Path:
+    """Build the application packet for `target` and record the application.
+
+    With `refresh`, rebuild the packet for a job already recorded -- after the
+    draft was improved, say -- under the same gate and hash checks. The
+    record keeps its original date and is not counted again; only its hashes
+    change, to name what the new packet holds.
+
+    Returns the packet directory. Raises `ApplyError`, having written
+    nothing, when the draft is not ready or a volume rule refuses it.
+    """
+    _aware(now)
+    draft = resolve_inside(f"outputs/{target.job_id}/draft")
+    resume, letter = _check_draft(draft, accept_warnings=accept_warnings)
+    answers = _check_answers(draft)
+    existing = load_applications()
+    prior = next((a for a in existing if a.job_id == target.job_id), None)
+    if refresh:
+        if prior is None:
+            raise ApplyError(f"no application recorded for {target.job_id!r} to refresh")
+        existing = [a for a in existing if a.job_id != target.job_id]
+    else:
+        _check_volume(target, existing, now)
+    try:
+        doc = parse_doc((draft / "resume.yaml").read_bytes(), origin=draft / "resume.yaml")
+    except (DocumentError, OSError) as exc:
+        raise ApplyError(f"cannot read the job's resume document: {exc}") from exc
+
+    # Built in a staging directory and moved into place only once the record
+    # is saved: a packet with no record is one the volume rules never hear of.
+    job_dir = private_dir(f"outputs/{target.job_id}")
+    staging = Path(tempfile.mkdtemp(dir=job_dir, prefix=".packet."))
+    try:
+        write_private_bytes(staging / "resume.pdf", resume.read_bytes())
+        if letter is not None:
+            write_private_bytes(staging / "cover-letter.pdf", letter.read_bytes())
+        if answers is not None:
+            write_private(staging / "answers.md", answers)
+        write_private(staging / "resume.txt", to_text(doc))
+        identity = doc.identity
+        fields = {
+            "name": identity.name,
+            "email": identity.email,
+            "phone": identity.phone,
+            "links": identity.links,
+        }
+        write_private(staging / "fields.json", json.dumps(fields, indent=2) + "\n")
+        hashes: dict[str, str | None] = {
+            "resume_sha256": _sha256(resume),
+            "letter_sha256": _sha256(letter) if letter is not None else None,
+            "answers_sha256": _sha256(staging / "answers.md") if answers is not None else None,
+            "resume_txt_sha256": _sha256(staging / "resume.txt"),
+        }
+        if refresh and prior is not None:
+            record = prior.model_copy(update=hashes)
+        else:
+            record = Application.model_validate(
+                {**target.model_dump(), "submitted_at": now, **hashes}
+            )
+        # The ledger first: an entry for an application whose record then failed
+        # to save is visible, where a saved record with no entry would not be.
+        try:
+            record_event(
+                {
+                    "event": "refresh" if refresh else "apply",
+                    "job_id": target.job_id,
+                    "at": now.isoformat(),
+                    **hashes,
+                }
+            )
+        except (OSError, ValueError, KeyError) as exc:
+            raise ApplyError(f"cannot record the application in the ledger: {exc}") from exc
+        _save([*existing, record])
+    except BaseException:
+        shutil.rmtree(staging, ignore_errors=True)
+        raise
+    packet = job_dir / "packet"
+    shutil.rmtree(packet, ignore_errors=True)
+    staging.rename(packet)
+    return packet
+
+
+def record_outcome(job_id: str, kind: OutcomeKind, *, now: datetime) -> None:
+    """Record what happened to the application for `job_id`."""
+    applications = load_applications()
+    for application in applications:
+        if application.job_id == job_id:
+            application.outcomes.append(Outcome(kind=kind, occurred_at=now))
+            _save(applications)
+            return
+    raise ApplyError(f"no application recorded for {job_id!r}")
