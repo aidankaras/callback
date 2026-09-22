@@ -32,9 +32,11 @@ from tests.fixtures.make_hidden import (
     METADATA_LEAK,
     NAVY_BACKGROUND_WHITE_TEXT,
     NAVY_ON_NAVY,
+    NO_TEXT_LAYER,
     OFFPAGE,
     OFFPAGE_VERTICAL,
     OUTLINE_HEADING,
+    PATTERN_FILL,
     RIGHT_TO_LEFT_OVERRIDE,
     SOFT_HYPHEN,
     SOFT_HYPHEN_CHAR,
@@ -691,3 +693,55 @@ def test_clean_render_passes(tmp_path: Path) -> None:
 
     verdict, findings = check_hidden(out)
     assert verdict == "pass", findings
+
+
+@pytest.mark.slow
+def test_pattern_filled_text_is_reported_rather_than_read_as_visible(tmp_path: Path) -> None:
+    """Mutation: restore the old guard in `_invisible_fill`, which only
+    judged a glyph when at least one contrast could be computed -- this
+    test fails, because an unreadable fill then counts as visible."""
+    out = tmp_path / "pattern.pdf"
+    build(PATTERN_FILL, out, FONT_DIR)
+
+    with pdfplumber.open(str(out)) as pdf:
+        page = pdf.pages[0]
+        payload = [c for c in page.chars if c["text"] == "K"]
+        assert payload, "fixture did not render the payload"
+        assert to_rgb(payload[0]["non_stroking_color"]) is None
+        assert "Kubernetes" in (page.extract_text() or "")
+        assert page_background(page) == (1.0, 1.0, 1.0)
+
+    verdict, findings = check_hidden(out)
+    assert verdict == "fail"
+    assert [f.kind for f in findings] == [HiddenKind.FILL_UNKNOWN], findings
+
+
+@pytest.mark.slow
+def test_a_page_with_no_text_layer_is_reported(tmp_path: Path) -> None:
+    """Mutation: drop the empty-page branch in `check_hidden` -- this test
+    fails, because every per-character check iterates nothing and the page
+    passes exactly like a legible one."""
+    out = tmp_path / "textless.pdf"
+    build(NO_TEXT_LAYER, out, FONT_DIR)
+
+    with pdfplumber.open(str(out)) as pdf:
+        page = pdf.pages[0]
+        assert page.chars == []
+        assert page.rects, "fixture did not render any ink"
+
+    verdict, findings = check_hidden(out)
+    assert verdict == "fail"
+    assert [f.kind for f in findings] == [HiddenKind.NO_TEXT_LAYER], findings
+
+
+class _DegeneratePage:
+    def __init__(self) -> None:
+        self.width = 612.0
+        self.height = 0.0
+        self.rects: list[dict[str, object]] = []
+
+
+def test_a_zero_area_page_has_no_known_background() -> None:
+    """Mutation: fall back to white when the page has no area -- this test
+    fails. Typst never emits such a page; an imported PDF can."""
+    assert page_background(_DegeneratePage()) is None

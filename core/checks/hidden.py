@@ -353,6 +353,8 @@ class HiddenKind(StrEnum):
     UNICODE_CHANNEL = "unicode_channel"
     BIDI_OVERRIDE = "bidi_override"
     BACKGROUND_UNKNOWN = "background_unknown"
+    FILL_UNKNOWN = "fill_unknown"
+    NO_TEXT_LAYER = "no_text_layer"
 
 
 @dataclass(frozen=True)
@@ -476,22 +478,26 @@ def page_background(page: Any) -> tuple[float, float, float] | None:
     read that kind of fill.
     """
     area = float(page.width) * float(page.height)
+    if area <= 0:
+        # No area means no rect can cover "most of the page", which would
+        # otherwise fall through to the implicit-white default below -- a
+        # guess about a page nothing here could measure.
+        return None
     background: tuple[float, float, float] | None = None
     found_unreadable = False
-    if area > 0:
-        for rect in page.rects:
-            if not rect.get("fill"):
-                continue
-            covered = float(rect.get("width", 0)) * float(rect.get("height", 0))
-            if covered / area < 0.9:
-                continue
-            colour = to_rgb(rect.get("non_stroking_color"))
-            if colour is not None:
-                background = colour
-                found_unreadable = False
-            else:
-                background = None
-                found_unreadable = True
+    for rect in page.rects:
+        if not rect.get("fill"):
+            continue
+        covered = float(rect.get("width", 0)) * float(rect.get("height", 0))
+        if covered / area < 0.9:
+            continue
+        colour = to_rgb(rect.get("non_stroking_color"))
+        if colour is not None:
+            background = colour
+            found_unreadable = False
+        else:
+            background = None
+            found_unreadable = True
     if found_unreadable:
         return None
     return background if background is not None else (1.0, 1.0, 1.0)
@@ -532,6 +538,15 @@ def _invisible_fill(
     actually is. See the module docstring's "Documented, not implemented"
     section for the measured evidence and why the alternative (trusting an
     explicit stroke outright) was rejected instead of adopted.
+
+    A glyph whose fill was *set* to something `to_rgb` cannot read -- a
+    gradient or tiling pattern, which arrives as a pattern name -- and that
+    has no readable explicit stroke either, is reported as `fill_unknown`
+    rather than judged. No contrast can be computed for it, and treating
+    "could not compute" as "visible" is exactly how a white-to-white
+    gradient carried extractable keywords through this check unseen. A
+    fill that was never set at all (`None`) is still skipped: that is the
+    ordinary case for a PDF relying on the default black fill.
     """
     for char in page.chars:
         text = str(char.get("text", ""))
@@ -546,6 +561,15 @@ def _invisible_fill(
             stroke = to_rgb(raw_stroke)
             if stroke is not None:
                 contrasts.append(contrast_ratio(stroke, background))
+        raw_fill = char.get("non_stroking_color")
+        if not contrasts and raw_fill is not None:
+            return [
+                HiddenFinding(
+                    HiddenKind.FILL_UNKNOWN,
+                    f"page {page_number}: {text!r} has a fill this check cannot read "
+                    f"({raw_fill!r}); its visibility could not be judged",
+                )
+            ]
         if contrasts and max(contrasts) < MIN_CONTRAST_RATIO:
             return [
                 HiddenFinding(
@@ -654,6 +678,16 @@ def check_hidden(pdf_path: Path) -> tuple[str, list[HiddenFinding]]:
     findings: list[HiddenFinding] = []
     with pdfplumber.open(str(pdf_path)) as pdf:
         for page_number, page in enumerate(pdf.pages):
+            if not page.chars:
+                # Every per-character check below iterates nothing on such a
+                # page, so without this it would pass exactly like a legible one.
+                findings.append(
+                    HiddenFinding(
+                        HiddenKind.NO_TEXT_LAYER,
+                        f"page {page_number}: no text layer; nothing on this page "
+                        "could be screened or read by a parser",
+                    )
+                )
             background = page_background(page)
             if background is None:
                 findings.append(

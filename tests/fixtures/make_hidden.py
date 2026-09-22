@@ -273,6 +273,24 @@ Visible line of the document.
 """
 
 
+# Text filled with a gradient that is white at both ends: invisible on a
+# white page, fully extractable, and its fill arrives from pdfplumber as a
+# pattern name rather than a colour any contrast check can read.
+PATTERN_FILL = """
+#set page(paper: "us-letter", margin: 0.5in)
+#set text(font: "Libertinus Serif", size: 10pt)
+Visible line of the document.
+#text(fill: gradient.linear(white, white))[Python AWS Kubernetes React TensorFlow]
+"""
+
+# A page that carries ink but no text layer at all -- what a scanned or
+# flattened resume looks like to every per-character check.
+NO_TEXT_LAYER = """
+#set page(paper: "us-letter", margin: 0.5in)
+#rect(width: 6cm, height: 2cm, fill: black)
+"""
+
+
 def build(source: str, out_pdf: Path, font_dir: Path) -> None:
     """Compile `source` to `out_pdf`, raising if the compiler warned.
 
