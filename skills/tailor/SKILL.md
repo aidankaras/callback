@@ -239,6 +239,10 @@ uv run --project <repo root> callback apply <job-id> --company "<company>" --tit
   `callback facts add`, then ask the user to confirm them in their own
   terminal. A repository's topic list is not evidence that the user wrote
   the code.
+- **Which channel is working.** `callback funnel` shows reply and
+  callback rates by where the user applied, and lists applications silent
+  for three weeks. Suggest recording those as `ghosted` only with the
+  user's agreement.
 - **What to learn next.** `callback gaps` ranks the technologies eligible
   postings ask for that no confirmed fact backs. Offer it when the user
   asks what to work on.

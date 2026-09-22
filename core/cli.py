@@ -175,6 +175,12 @@ def build_parser() -> argparse.ArgumentParser:
     imp.add_argument("file", type=Path)
     imp.set_defaults(handler=_cmd_import)
 
+    fun = sub.add_parser(
+        "funnel",
+        help="reply, callback and offer rates by where you applied, and stale applications",
+    )
+    fun.set_defaults(handler=_cmd_funnel)
+
     facts = sub.add_parser("facts", help="add, list and confirm the facts a resume may use")
     facts_sub = facts.add_subparsers(dest="facts_command", required=True)
     add = facts_sub.add_parser("add", help="add facts from a YAML list (they start unconfirmed)")
@@ -557,6 +563,24 @@ def _cmd_outcome(args: argparse.Namespace) -> int:
     except ApplyError as exc:
         print(f"callback outcome: {exc}", file=sys.stderr)
         return 3
+    return 0
+
+
+def _cmd_funnel(_args: argparse.Namespace) -> int:
+    from datetime import UTC, datetime
+
+    from core.apply import ApplyError, load_applications
+    from core.funnel import funnel, render
+
+    try:
+        applications = load_applications()
+    except ApplyError as exc:
+        print(f"callback funnel: {exc}", file=sys.stderr)
+        return 3
+    if not applications:
+        print("no applications recorded yet")
+        return 0
+    print(render(funnel(applications, now=datetime.now(tz=UTC))))
     return 0
 
 
