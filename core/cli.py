@@ -98,6 +98,12 @@ def build_parser() -> argparse.ArgumentParser:
     answers.add_argument("doc", type=Path, help="answers (YAML)")
     answers.set_defaults(handler=_cmd_answers)
 
+    outreach = sub.add_parser(
+        "outreach", help="check a short note to someone at the company, and print it"
+    )
+    outreach.add_argument("doc", type=Path, help="outreach note (YAML)")
+    outreach.set_defaults(handler=_cmd_outreach)
+
     app = sub.add_parser(
         "apply",
         help="build the application packet for a gated draft and record it (never submits)",
@@ -383,6 +389,28 @@ def _cmd_answers(args: argparse.Namespace) -> int:
     print(f"{result.verdict.upper()}  {out_dir / 'answers.md'}")
     for finding in result.findings:
         print(f"  {finding}")
+    return 0 if result.verdict == "pass" else 2
+
+
+def _cmd_outreach(args: argparse.Namespace) -> int:
+    import yaml
+    from pydantic import ValidationError
+
+    from core.outreach import Outreach, check_outreach, render_outreach
+    from core.paths import resolve_inside
+    from core.profile.store import StoreError, load_facts
+
+    try:
+        doc = Outreach.model_validate(yaml.safe_load(args.doc.read_text(encoding="utf-8")))
+        posting = resolve_inside(f"inbox/{doc.job_id}.md").read_text(encoding="utf-8")
+        result = check_outreach(doc, load_facts(), posting)
+    except (OSError, yaml.YAMLError, ValidationError, StoreError) as exc:
+        print(f"callback outreach: {exc}", file=sys.stderr)
+        return 3
+    print(render_outreach(doc))
+    print(f"\n{result.verdict.upper()}", file=sys.stderr)
+    for finding in result.findings:
+        print(f"  {finding}", file=sys.stderr)
     return 0 if result.verdict == "pass" else 2
 
 
