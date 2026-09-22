@@ -74,6 +74,15 @@ _CLEARANCE = re.compile(
     re.IGNORECASE,
 )
 _GRADUATION = re.compile(r"\bgraduat\w*\b|\bclass of 20\d\d\b", re.IGNORECASE)
+# A year is the graduation's own only when it is named as one.
+_GRAD_YEAR = re.compile(
+    r"\bclass of\s+(20\d\d)\b"
+    r"|\bgraduat\w+\s+(?:in|by|before|after|during|no later than)?\s*(20\d\d)\b",
+    re.IGNORECASE,
+)
+_BETWEEN = re.compile(r"\bbetween\b", re.IGNORECASE)
+_LATEST = re.compile(r"\b(?:by|before|no later than|prior to|on or before)\b", re.IGNORECASE)
+_EARLIEST = re.compile(r"\b(?:after|on or after|from|starting|since)\b", re.IGNORECASE)
 _YEAR = re.compile(r"\b(20\d\d)\b")
 _GRAD_DEGREE = re.compile(r"\b(?:ph\.?d|master'?s|m\.?s\.?(?=/|\s+or)|graduate degree)\b", re.I)
 _YEARS = re.compile(r"\b(\d{1,2})\+?\s*(?:or more\s+)?years?\b[^.!?]{0,40}\bexperience\b", re.I)
@@ -131,15 +140,37 @@ def _is_citizen(auth: str) -> bool:
     return re.search(r"\b(?:us|u\.s\.|united states)\s+citizen\b", auth, re.I) is not None
 
 
-def _grad_bounds(sentence: str) -> tuple[str, str] | None:
-    """The earliest and latest graduation month a sentence allows, as YYYY-MM."""
+def _grad_bounds(sentence: str) -> tuple[str | None, str | None] | None:
+    r"""The graduation window a sentence allows, as `(earliest, latest)` months,
+    either of which is None when that side is open.
+
+    Direction decides the shape. "graduating by June 2027" and "must graduate
+    no later than December 2026" bound only the late side: a candidate who
+    finishes sooner qualifies, and reading those as a closed window at the
+    stated month knocked them out. "after May 2026" bounds only the early
+    side. Two dates, or none of these words, is a closed window.
+
+    A bare year counts only where it belongs to the graduation itself --
+    "class of 2027", "graduating in 2027" -- because any `20\d\d` in a
+    sentence that merely mentions graduates is not a requirement: "we have
+    hired new graduates every year since 2015" bounded everyone out of a role.
+    """
     months = iso_month_dates(sentence)
     if months:
-        return min(months), max(months)
-    years = _YEAR.findall(sentence)
-    if years:
-        return f"{min(years)}-01", f"{max(years)}-12"
-    return None
+        low, high = min(months), max(months)
+    else:
+        found = _GRAD_YEAR.search(sentence)
+        if not found:
+            return None
+        year = found.group(1) or found.group(2)
+        low, high = f"{year}-01", f"{year}-12"
+    if len(months) > 1 or _BETWEEN.search(sentence):
+        return low, high
+    if _LATEST.search(sentence):
+        return None, high
+    if _EARLIEST.search(sentence):
+        return low, None
+    return low, high
 
 
 def _candidate_grad(graduation: str) -> str | None:
@@ -213,12 +244,15 @@ def check_eligibility(text: str, profile: Profile) -> Eligibility:
             mine = _candidate_grad(profile.graduation) if profile.graduation else None
             if mine is None:
                 add("graduation", "unknown", sentence, "when do you expect to graduate?")
-            elif not bounds[0] <= mine <= bounds[1]:
+            elif (bounds[0] is not None and mine < bounds[0]) or (
+                bounds[1] is not None and mine > bounds[1]
+            ):
+                window = f"{bounds[0] or 'any'}..{bounds[1] or 'any'}"
                 add(
                     "graduation",
                     "knockout",
                     sentence,
-                    f"graduation {bounds[0]}..{bounds[1]}; profile: {profile.graduation}",
+                    f"graduation {window}; profile: {profile.graduation}",
                 )
         if _GRAD_DEGREE.search(sentence) and (
             profile.degree is None or _DEGREE_RANK[profile.degree] < _DEGREE_RANK["master"]

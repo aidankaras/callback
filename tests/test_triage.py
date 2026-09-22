@@ -214,3 +214,33 @@ def test_a_posting_without_sentence_breaks_is_read_in_windows() -> None:
         "open to students graduating between December 2026 and June 2027 founded in 2031 at scale"
     )
     assert kinds(window, needs) == [("graduation", "knockout")]
+
+
+@pytest.mark.parametrize(
+    ("text", "graduation", "flagged"),
+    [
+        # "by" and "no later than" bound only the late side: finishing sooner qualifies.
+        ("Open to students graduating by June 2027.", "May 2026", False),
+        ("Open to students graduating by June 2027.", "May 2028", True),
+        ("Candidates must graduate no later than December 2026.", "May 2026", False),
+        # "after" bounds only the early side.
+        ("For students graduating after May 2027.", "May 2028", False),
+        ("For students graduating after May 2027.", "May 2026", True),
+        # Two dates, or a year named as the graduation's own, is a closed window.
+        ("Graduating between December 2026 and June 2027.", "May 2028", True),
+        ("Class of 2027 only.", "May 2028", True),
+        # A year that is not the graduation's is no requirement at all.
+        ("We have hired new graduates every year since 2015.", "May 2028", False),
+        ("Our graduate programme has run since 2015.", "May 2026", False),
+        # No direction word either: a closed window at 2015 would knock out everyone.
+        ("Our team includes 2015 alumni of the graduate programme.", "May 2028", False),
+    ],
+)
+def test_a_graduation_window_is_read_in_the_direction_it_is_written(
+    text: str, graduation: str, flagged: bool
+) -> None:
+    """Mutations: treat every window as closed -- the "by"/"after" rows fail;
+    take any year in a graduation sentence -- the "since 2015" rows fail."""
+    profile = Profile(work_authorization="US citizen", graduation=graduation)
+    found = [f for f in check_eligibility(text, profile).findings if f.rule == "graduation"]
+    assert bool(found) is flagged, found

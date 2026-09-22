@@ -85,8 +85,8 @@ _ABOUT_CANDIDATE = re.compile(
     re.IGNORECASE,
 )
 _COMMITMENT = re.compile(
-    r"\b(?:salary|salaries|compensation|stipend|unpaid|pay\s+rate|relocat\w*|visa|"
-    r"sponsor(?:ship)?|start\s+date|availability|available\s+(?:to\s+start|immediately|from|in)|"
+    r"\b(?:salary|salaries|compensation|stipend|unpaid|pay\s+rate|relocat\w*|visas?|"
+    r"sponsor\w*|start\s+date|availability|available\s+(?:to\s+start|immediately|from|in)|"
     r"notice\s+period|willing\s+to|negotiab\w*)\b",
     re.IGNORECASE,
 )
@@ -118,7 +118,13 @@ def _heading_segments(posting: str) -> set[str]:
 
 
 def _posting_fact(posting: str) -> Fact:
-    numbers = {f"n{i}": Quantity(value=n.value) for i, n in enumerate(parse_numbers(posting))}
+    # The unit travels with the value: a unit-less quantity backs either a
+    # percentage or a count, so dropping it would let "40% of our traffic" in
+    # the posting ground a sentence claiming 40 of something.
+    numbers = {
+        f"n{i}": Quantity(value=n.value, unit="%" if n.is_percent else n.unit)
+        for i, n in enumerate(parse_numbers(posting))
+    }
     entities = sorted({canonicalize(t) for t in checkable_entity_tokens(posting)})
     return Fact(
         id="__posting__",

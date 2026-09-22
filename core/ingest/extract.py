@@ -23,8 +23,7 @@ at the cost of one process spawn per import — an entirely acceptable price
 on a path that runs once per document a person hands over, not in a hot
 loop.
 
-**Only `.pdf` is supported.** The specification's own review log defers
-`.docx` import pending better evidence, and this module holds that line:
+**Only `.pdf` is supported.** `.docx` import is deliberately not built:
 accepting a second container format would double the untrusted-parsing
 surface (a ZIP archive plus embedded XML, with its own history of entity-
 expansion and decompression-bomb attacks) for a format this project does
@@ -244,10 +243,9 @@ def gap_audit(text: str) -> list[str]:
 
     This is advice, never a verdict, and nothing in this project may gate on
     it. The signal is deliberately weak -- "the bullet contains a digit or
-    one of a handful of outcome verbs" -- and a task in this project's own
-    plan was cut for computing a *metric* from exactly this shape of oracle,
-    on the grounds that a past-tense verb is not evidence the candidate did
-    the thing. Here the same weak signal only ever produces one line of
+    one of a handful of outcome verbs" -- far too weak to compute a score
+    from, because a past-tense verb is not evidence the candidate did the
+    thing. Here that same weak signal only ever produces one line of
     advice to the person who will edit their own bullet, and a false
     positive costs them a single glance rather than a wrong number anywhere
     downstream.

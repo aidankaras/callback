@@ -13,6 +13,13 @@
 `take` copies a posting's own text into `inbox/<job>.md`, headed
 `# <title> - <company>` -- the posting a resume and cover letter are then
 checked against, straight from the employer rather than retyped.
+
+Every function here raises `DiscoveryError` for a source it could not read,
+and `resolve_inside` may additionally raise `OutsideHomeError` for a name
+that escapes the data home. That pair, with pydantic's `ValidationError` and
+`OSError`, is what a caller must catch; `core.cli._discovery_errors` names
+exactly that union, rather than this module flattening everything into one
+type the way `core.profile.store` does.
 """
 
 from __future__ import annotations

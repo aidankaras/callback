@@ -11,9 +11,12 @@ stricter than a browser's:
 
 - HTTPS on the default port only, with no user name or password, and never
   a platform in `DENIED_DOMAINS`.
-- Never a host that resolves to a private, loopback or link-local address,
-  or an IPv6 address embedding an IPv4 one: a URL copied from a posting
-  must not reach the candidate's own network.
+- Never a host whose name resolves, at the moment it is checked, to a
+  private, loopback or link-local address, or to an IPv6 address embedding
+  an IPv4 one: a URL copied from a posting must not reach the candidate's
+  own network. The connection resolves the name again, so a host whose DNS
+  answer changes in between is not caught; this raises the cost of reaching
+  a local address, and does not make it impossible.
 - `robots.txt` is honoured for our User-Agent. A robots file that is missing
   (any 4xx) allows; one that cannot be read for another reason refuses.
 - A redirect is followed only on the same host and port, and only to a path

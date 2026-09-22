@@ -814,3 +814,26 @@ def test_a_percent_matches_by_magnitude_and_a_count_by_sign(
     by magnitude -- the last passes."""
     _, found = check_bullet(text, [fact])
     assert (found == []) is grounded, found
+
+
+def test_a_written_minus_on_a_derived_percentage_is_still_verified() -> None:
+    """pct_change's sign says which input came first, not whether the change
+    was a cut, so a percentage is compared by magnitude on both sides.
+    Mutation: compare the claimed side signed -- "-40%" fails."""
+    f = fact(
+        "c",
+        numbers={"before": Quantity(value=500), "after": Quantity(value=300)},
+        derived=[
+            Derivation.model_validate(
+                {"label": "cut", "op": "pct_change", "from": ["before", "after"]}
+            )
+        ],
+    )
+    # Premise: the derivation's value is +40 for this reduction, so a signed
+    # comparison against a claimed -40 is exactly the mismatch under test.
+    from core.checks.derive import compute
+
+    assert compute(f.derived[0], [f]) == pytest.approx(40.0)
+    verdict, findings = check_bullet("Changed review volume by -40%", [f])
+    assert findings == []
+    assert verdict is Verdict.DERIVED_VERIFIED

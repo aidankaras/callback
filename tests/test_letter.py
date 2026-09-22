@@ -329,3 +329,30 @@ def test_a_letter_header_must_be_the_confirmed_identity() -> None:
     found = check_letter(letter(identity=forged), FACTS, POSTING).findings
     assert any("'Dr. Dana Vex'" in f for f in found), found
     assert check_letter(letter(), FACTS, POSTING).findings == ()
+
+
+@pytest.mark.parametrize("word", ["visas", "sponsors", "sponsoring", "relocating"])
+def test_commitment_language_is_caught_in_its_inflected_forms(word: str) -> None:
+    """Mutation: require a word boundary after "visa"/"sponsorship" -- the
+    plural and participle forms pass."""
+    text = f"The role mentions {word} for the successful candidate."
+    found = check_letter(
+        letter([Sentence(kind="employer", text=text, sources=["posting"])]), FACTS, POSTING
+    ).findings
+    assert any("commitment" in f for f in found), found
+
+
+def test_a_percentage_in_the_posting_cannot_ground_a_count() -> None:
+    """The posting's numbers keep their unit. Mutation: drop it -- "40" is
+    grounded by the posting's "40%"."""
+    posting = POSTING + "About 40% of our traffic is realtime.\n"
+    # Premise: the posting states 40 only as a percentage.
+    assert "40%" in posting and " 40 " not in posting
+    sentence = Sentence(
+        kind="employer", text="The team serves 40 customers in Python.", sources=["posting"]
+    )
+    found = check_letter(letter([sentence]), FACTS, posting).findings
+    assert any("not derivable" in f for f in found), found
+    # And the same claim as a percentage is grounded by it.
+    same = Sentence(kind="employer", text="The team serves 40% in Python.", sources=["posting"])
+    assert check_letter(letter([same]), FACTS, posting).findings == ()

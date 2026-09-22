@@ -499,10 +499,11 @@ def check_bullet(
         # change was an increase or a reduction, so comparing signed values
         # would reject a truthful "increased X 50%" bullet whenever the
         # derivation happened to be phrased as before/after.
+        claimed = abs(number.value) if number.is_percent else number.value
         derived_pool = (
             (abs(v) for v in derived_values) if number.is_percent else iter(derived_values)
         )
-        if any(values_match(number.value, source) for source in derived_pool):
+        if any(values_match(claimed, source) for source in derived_pool):
             used_derivation = True
             continue
         if (
