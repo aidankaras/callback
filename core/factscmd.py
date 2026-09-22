@@ -46,7 +46,10 @@ def add_from_file(path: Path) -> tuple[list[str], list[tuple[str, str]]]:
     Returns the ids added and, for each fact refused, its id (or its position
     when it has none) and the reason. One bad fact never costs the others.
     """
-    parsed: object = yaml.safe_load(path.read_text(encoding="utf-8"))
+    try:
+        parsed: object = yaml.safe_load(path.read_text(encoding="utf-8"))
+    except yaml.YAMLError as exc:
+        raise StoreError(f"{path} is not valid YAML: {exc}") from exc
     if not isinstance(parsed, list):
         raise StoreError(f"{path} must contain a list of facts")
     # The boundary where this starts trusting the file's shape;
@@ -59,6 +62,17 @@ def add_from_file(path: Path) -> tuple[list[str], list[tuple[str, str]]]:
         label = str(fid) if fid is not None else f"#{position}"
         try:
             fact = Fact.model_validate(body)
+            if fact.selectable():
+                # Only `confirm` makes a fact usable. Accepting one that arrives
+                # confirmed would let whoever wrote the file skip the candidate.
+                rejected.append(
+                    (
+                        label,
+                        "a fact cannot arrive confirmed; add it unconfirmed and run "
+                        "`callback facts confirm`",
+                    )
+                )
+                continue
             add_fact(fact)
         except (ValidationError, StoreError) as exc:
             rejected.append((label, str(exc)))

@@ -248,3 +248,28 @@ def test_an_unrecognised_answer_is_asked_again_and_end_of_input_stops(tmp_path: 
 
     assert confirm([], open_tty=_Tty) == ["a"]
     assert not load_facts()["b"].selectable()
+
+
+@pytest.mark.parametrize(
+    "source", ["assistant:skills", "onboarding_answer", "user:confirmed:import:x.pdf"]
+)
+def test_a_fact_cannot_arrive_already_confirmed(tmp_path: Path, source: str) -> None:
+    """Only `confirm` makes a fact usable. A file declaring `user_confirmed`
+    would let whoever wrote it skip the candidate entirely. Mutation: drop
+    the refusal -- the fact is stored confirmed and this test fails."""
+    body = _imported("self", "Holds a patent") | {
+        "provenance": {"source": source, "trust": "user_confirmed"}
+    }
+    added, rejected = add_from_file(_facts_file(tmp_path, [body]))
+    assert added == []
+    assert [fid for fid, _ in rejected] == ["self"]
+    assert "facts confirm" in rejected[0][1]
+    assert "self" not in load_facts()
+
+
+def test_malformed_yaml_is_a_named_error_not_a_crash(tmp_path: Path) -> None:
+    from core.cli import main
+
+    bad = tmp_path / "facts.yaml"
+    bad.write_text("not: [valid", encoding="utf-8")
+    assert main(["facts", "add", str(bad)]) == 3
