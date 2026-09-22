@@ -9,10 +9,12 @@ dependencies = [
     "typst==0.15.0",
     "pdfplumber>=0.11.10",
     "pypdf>=6.0",
+    "mcp>=1.0",
 ]
 
 [project.scripts]
 callback = "core.cli:main"
+callback-mcp = "core.mcp_server:main"
 
 [dependency-groups]
 dev = ["pytest>=8.3", "hypothesis>=6.112", "ruff>=0.7", "pyright>=1.1.390"]
