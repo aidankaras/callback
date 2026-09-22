@@ -21,11 +21,14 @@ below for you, except `facts confirm`, which only you can run.
 | Command | What it does | Exit codes |
 |---|---|---|
 | `callback import <resume.pdf>` | Extracts the text of an existing PDF into `inbox/`, after screening it for hidden text | 0 clean, 3 unreadable, 4 hidden content found or a page could not be screened |
-| `callback facts add <facts.yaml>` | Adds facts, all unconfirmed. Each fact is accepted or refused on its own | 0, 1 if any fact was refused, 3 unreadable file |
+| `callback facts add <facts.yaml>` | Adds facts, all unconfirmed. Each fact is accepted or refused on its own, and one that arrives already confirmed is refused | 0, 1 if any fact was refused, 3 unreadable file |
 | `callback facts list [--unconfirmed]` | Lists stored facts | 0 |
-| `callback facts confirm [ids...]` | Asks you, fact by fact, whether each is true | 0, 3 if not run from a terminal |
+| `callback facts confirm [ids...]` | Asks you, fact by fact, whether each is true | 0, 3 if not run from a terminal or an id is unknown or web-sourced |
 | `callback build <resume.yaml> --job <id>` | Renders the PDF and runs every gate, writing to `outputs/<id>/draft/` | 0 pass, 1 warn, 2 fail, 3 could not build |
-| `callback export <resume.yaml>` | Prints the resume as plain text for forms that want it pasted, and checks every critical field survived | 0, 2 if a field was lost |
+| `callback export <resume.yaml>` | Prints the resume as plain text for forms that want it pasted, and checks every critical field survived | 0, 2 if a field was lost, 3 unreadable document |
+| `callback letter <letter.yaml>` | Renders a cover letter and checks it against your facts and the saved posting | 0 pass, 2 fail, 3 could not run |
+| `callback apply <id> --company … --title … --source …` | Builds the application packet from a gated draft and records it; `--refresh` rebuilds it after the draft improves. **Never submits** | 0, 3 refused |
+| `callback outcome <id> <kind>` / `callback applications` | Records what happened; lists applications | 0, 3 unreadable record |
 
 Everything lives under `$CALLBACK_HOME` (default `~/.callback`). Directories there
 are `0700` and files `0600`.
@@ -100,6 +103,9 @@ sections:
   skills: [Python]
 ```
 
+Built as written, this example gives `WARN`: one bullet is under the
+three-per-role layout floor. Warnings are advice, and every other gate passes.
+
 ## Cover letters
 
 `callback letter <letter.yaml>` renders a letter to
@@ -116,7 +122,7 @@ greeting: Dear Hiring Team,
 paragraphs:
 - - {kind: courtesy, text: I am applying for the Machine Learning Intern role at Acme Robotics.}
   - {kind: employer, text: Acme Robotics is building a perception data platform., sources: [posting]}
-- - {kind: candidate, text: At Northwind Analytics I cut the review queue to 300 items using Python., sources: [role, queue]}
+- - {kind: candidate, text: At Northwind Analytics I brought the review queue down to 300 items with Python., sources: [role, queue]}
   - {kind: courtesy, text: Thank you for your consideration.}
 closing: Sincerely,
 ```
@@ -128,8 +134,9 @@ Every sentence declares what it is about:
   company.
 - **`employer`**: about the job. It cites `posting` and nothing else,
   begins with the company's name or "The role", "The position", "The
-  internship" or "The team", never speaks about you, and may say only what
-  the posting says.
+  internship" or "The team", and never speaks about you. Any number, tool,
+  name or claim word in it must appear in the posting. Its ordinary wording
+  is not compared with the posting.
 - **`courtesy`**: one of a short fixed list of sentences ("Thank you for your
   consideration.", "I am applying for the {role} role at {company}.").
 
@@ -139,8 +146,9 @@ Also checked:
   ("Sincerely,", "Best regards,", …).
 - The company and role must each be a segment of the posting's first line.
 - The letter fails if it runs past 300 words, uses commitment or negotiation
-  language (salary, availability, relocation, sponsorship), or reuses a resume
-  bullet verbatim.
+  language (salary, compensation, availability, "available to start",
+  relocation, visa or sponsorship, start date, notice period, "willing to"),
+  or reuses a resume bullet verbatim.
 - The PDF is screened for hidden text.
 
 ## What the gates guarantee, and what they do not
@@ -153,8 +161,9 @@ Also checked:
 - So does every claim word: award, patent, promoted, founded, valedictorian,
   doubled, hundreds, "led a team" and the rest of a fixed list.
 - A bullet cites only its own entry's facts.
-- Every entry header equals one confirmed fact field for field: organization,
-  title, location and both dates.
+- Every header field an entry prints (organization, title, location, both
+  dates) equals the same cited confirmed fact's field, ignoring case and
+  spacing. A field may be left out.
 - The identity block equals a confirmed `links` fact, and section titles come
   from a fixed list.
 - Every listed skill has confirmed backing.

@@ -16,11 +16,11 @@ something you can re-run, not something the model reports about itself. There is
 |---|---|
 | Only facts the candidate confirmed can back a document | `callback facts confirm` reads its answers from the controlling terminal, which an assistant's shell does not have; a write-guard hook refuses an assistant's edits to the fact store |
 | Bullets make no claim their facts do not state | every number (including spelled-out ones), date, technology, mid-sentence name and claim word (award, promoted, doubled, …) must appear in the cited facts; a count cannot rest on a percentage |
-| Entry headers are not inflated | employer, title, location and both dates must equal one cited fact field for field; a bullet may cite only its own entry's facts |
+| Entry headers are not inflated | every header field an entry prints (employer, title, location, dates) must equal the same cited fact's; a bullet may cite only its own entry's facts |
 | Nothing is added around the content | the identity block must match a confirmed contact fact; section titles come from a fixed list; every listed skill needs confirmed backing |
 | The PDF is machine-readable | the rendered PDF is re-extracted with a deliberately naive parser, and every critical field must be recovered in order |
 | Nothing hidden | no invisible, tiny, off-page or unpainted text, no suspicious Unicode, no unexpected metadata; anything the screen cannot judge fails rather than passes |
-| Cover letters stay honest | each sentence declares what it is about: claims about the candidate rest on their facts and never on the posting, claims about the employer only on the posting; commitment language (salary, availability, sponsorship) fails |
+| Cover letters stay honest | each sentence declares what it is about: claims about the candidate rest on their facts and never on the posting, names, numbers and claim words about the employer only on the posting; commitment language (salary, availability, relocation, sponsorship) fails |
 | Applications stay reasonable | at most 10 in 24 hours, no re-apply to the same posting within 90 days, and a packet is only built from a draft that passed, or whose warnings the candidate accepted |
 
 It does **not** check ordinary wording: "led the migration" and "helped with the migration" are
