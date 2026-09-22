@@ -120,6 +120,14 @@ someone asked that question of it.
   whether it exists: notes kept only in a git-ignored scratch directory read as absent once
   that directory is removed, and absent is indistinguishable from never-written. Design
   decisions a future reader would question belong in `docs/lessons/`, not in a working file.
+- **A review that never ran leaves the same trace as a review that found nothing: an
+  empty comment list.** The review workflow's `concurrency` group has
+  `cancel-in-progress: true`, and a real review of this PR takes over twenty minutes, so
+  two pushes twenty minutes apart cancelled both reviews mid-run and neither posted
+  anything. The audit has failed the same way twice for different reasons: its turn budget
+  ran out before it wrote the report, and once the model's own usage limit ended the run.
+  Read the run's conclusion and `num_turns`/`result` in the log before believing a clean
+  review; batch commits and push once per review.
 - **Pinned Action SHAs and dependency versions are verified against the source, not
   assumed correct because they appear in a plan.** `gh api repos/<org>/<repo>/git/ref/tags/<tag>
   --jq .object.sha` before any CI change lands; this caught a wrong pinned SHA before it
