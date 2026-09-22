@@ -34,14 +34,23 @@ are `0700` and files `0600`.
 A fact is one thing that is true about you, stated once:
 
 ```yaml
+- id: contact
+  kind: links
+  text: Dana Vex, dana@example.com, github.com/dv
+  entities: [Dana Vex, dana@example.com, github.com/dv]
+  provenance: {source: "import:old-resume.pdf", trust: import_unconfirmed}
 - id: role
   kind: experience
   text: Data Engineer at Northwind Analytics
+  organization: Northwind Analytics
+  title: Data Engineer
+  location: Boston, MA
   entities: [Northwind Analytics]
   dates: {start: "2024-06", end: "2025-08"}
   provenance: {source: "import:old-resume.pdf", trust: import_unconfirmed}
 - id: queue
   kind: experience_detail
+  parent: role
   text: Cut the review queue to 300 items using Python
   numbers: {queue: {value: 300}}
   entities: [Python]
@@ -50,9 +59,18 @@ A fact is one thing that is true about you, stated once:
 
 - `kind` is one of `experience`, `experience_detail`, `education`, `project`,
   `skill`, `links`.
-- `entities` holds the names a resume may print: the employer exactly as it
-  should appear, and tools. Tool names are matched through an alias table, so
-  `k8s` and `Kubernetes` are one skill.
+- An `experience`, `education` or `project` fact carries the entry header as
+  structured fields: `organization`, `title` and `location`, exactly as they
+  should print. A resume entry's header must equal them. A shortened title
+  doesn't count, since dropping "Intern" is inflation.
+- A detail fact names its role in `parent`. A bullet may cite only its own
+  entry's facts, or their children.
+- `entities` holds names and tools the fact states. Tool names are matched
+  through an alias table, so `k8s` and `Kubernetes` are one skill.
+- One `links` fact holds your name, email, phone and links as `entities`.
+  The resume's identity block must match it exactly.
+- Record a percentage with `unit: "%"`. A count can never be backed by a
+  percentage.
 - `dates` use `YYYY-MM`. Leave out `end` for a role that has not ended; that is
   what lets a resume say "Present".
 - A fact is usable only after `callback facts confirm`. That command reads your
@@ -84,20 +102,25 @@ sections:
 ## What the gates guarantee, and what they do not
 
 **They guarantee:**
-- Every number, date and recognised tool in a bullet appears in the confirmed
-  facts it cites.
-- Every employer, title, location and date in an entry header matches a
-  confirmed fact.
+- Every number (spelled-out ones included), date and recognised tool in a
+  bullet appears in the confirmed facts it cites.
+- Every capitalised name that doesn't start a sentence (a client, an award, a
+  title) also appears there.
+- So does every claim word: award, patent, promoted, founded, valedictorian,
+  doubled, hundreds, "led a team" and the rest of a fixed list.
+- A bullet cites only its own entry's facts.
+- Every entry header equals one confirmed fact field for field: organization,
+  title, location and both dates.
+- The identity block equals a confirmed `links` fact, and section titles come
+  from a fixed list.
 - Every listed skill has confirmed backing.
 - A naive text extractor reads the critical fields of the rendered PDF back in
   order.
 - The PDF carries no text a human cannot see.
 
 **They do not check:**
-- The *wording* of a bullet beyond those tokens. "Led" and "helped with" are
-  not distinguished, so read every bullet before you send it.
-- The identity block (name, contact details, links), which comes from your own
-  input.
+- Ordinary verbs and nouns. "Led the migration" and "helped with the
+  migration" are not distinguished, so read every bullet before you send it.
 - Whether a posting's requirements are covered. That is advice the skill gives,
   never a gate.
 

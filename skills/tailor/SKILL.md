@@ -59,10 +59,18 @@ If `callback facts list` shows no confirmed facts:
 2. Draft `facts.yaml` from that text in the format described in
    `docs/using-callback.md`. Write one fact per role, per education entry, per
    bullet-worthy detail, and per skill. Guidelines:
-   - Put the employer as an `entities` item exactly as it should print.
+   - Write one `links` fact whose `entities` are the name, email, phone and
+     each link exactly as the resume prints them.
+   - For each role, degree and project, set `organization`, `title` and
+     `location` exactly as they print. Use the full title: "Data Engineering
+     Intern", never "Data Engineering".
+   - Give each detail fact a `parent`: the id of its role.
    - Give dates as `YYYY-MM`.
-   - Record numbers as `numbers`.
+   - Record numbers as `numbers`, with `unit: "%"` on percentages.
    - For a current role, leave out `end` entirely rather than writing "Present".
+   - Keep names, awards and claim words (promoted, founded, doubled, …) in the
+     fact's `text` when they are true. A bullet may use them only if its
+     fact states them.
 3. Run `callback facts add facts.yaml` and report any refusals.
 4. Tell the user to run this **in their own terminal**:
 
@@ -112,8 +120,8 @@ ask the user, not findings to fix by inventing a number.
 
 | Gate | Fails when |
 |---|---|
-| grounding | a bullet's number, date or tool is absent from the facts it cites, or it cites an unconfirmed or unknown fact |
-| claims | an employer isn't an entity of the cited fact; a title or location isn't in it word-for-word; a date doesn't match; "Present" is used for an ended role; a skill has no confirmed backing |
+| grounding | a bullet's number (spelled-out too), date, tool, mid-sentence capitalised name or claim word (award, promoted, doubled, …) is absent from the facts it cites, or it cites an unconfirmed or unknown fact |
+| claims | the header isn't one cited fact's `organization`/`title`/`location`/dates exactly; a bullet cites another entry's fact; the identity block isn't a confirmed `links` fact; a section title isn't a standard one; a skill has no confirmed backing |
 | roundtrip | a naive ATS parser can't read back a critical field in order; warns on a skill it couldn't read |
 | hidden | text a human can't see: white or tiny text, off-page text, an unpainted rendering mode, odd Unicode, metadata |
 | skills | warns when a listed skill is backed but no grounded bullet shows it in use |
