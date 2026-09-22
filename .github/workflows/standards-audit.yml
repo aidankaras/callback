@@ -32,8 +32,10 @@ on:
   workflow_dispatch: {}
 
 permissions:
-  contents: write
-  pull-requests: write
+  # Read-only on the repository: the audit writes one report, which leaves as a
+  # run artifact rather than a commit, and it may run project code (`uv run`),
+  # so it holds no token that could push or open anything.
+  contents: read
   # The action authenticates by exchanging a GitHub OIDC token; without this
   # it fails before running, "Could not fetch an OIDC token".
   id-token: write
@@ -195,26 +197,14 @@ jobs:
               echo "::warning::no section found for claimed property $n"
           done
 
-      # Kept with the run wherever it happened. A run dispatched on a feature
-      # branch cannot open the pull request below: that branch's history
-      # changes workflow files, which the default token may not push.
+      # The report stays with the run and is not committed. It is a snapshot of
+      # one commit, so a copy in the tree goes stale as the code moves and the
+      # repository ends up asserting findings that may already be fixed; the
+      # artifact keeps it readable without that claim. An earlier version opened
+      # a pull request per run, which also could not work from a feature branch,
+      # whose workflow-file changes the default token may not push.
       - name: Keep the report with the run
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
         with:
           name: standards-audit
           path: reports/standards-audit.md
-
-      - name: Open a pull request with the findings
-        uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1  # v8.1.1
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          add-paths: reports/standards-audit.md
-          commit-message: "docs: scheduled standards audit"
-          title: "Scheduled standards audit"
-          body: >-
-            Automated audit against this project's own claimed properties.
-            Nothing else was changed; see reports/standards-audit.md for findings.
-            CI will not run automatically on this PR (default-token PRs don't
-            trigger other workflows) -- re-run or push an empty commit to get it.
-          branch: standards-audit/scheduled
-          delete-branch: true
