@@ -3,11 +3,13 @@
 An imported resume is untrusted twice over: it may have been written by
 another tool entirely, and a PDF can carry text that a reader never sees.
 `extract_document` never hands that text to a caller without first running
-it through `core.checks.hidden` and reporting whatever that gate finds —
-suspicious content is quoted back, not silently folded into the extracted
-text, because a document built outside this project's own renderer can
-exercise every channel that gate documents (see its module docstring for
-the five it checks and the ones it names as still open).
+it through `core.checks.hidden` and reporting whatever that gate finds,
+because a document built outside this project's own renderer can exercise
+every channel that gate documents (see its module docstring for the ones it
+checks and the ones it names as still open). The extracted text is returned
+*in full*, hidden content included: a finding names the channel and the page,
+not which part of `text` is affected, so a caller must treat a non-empty
+`suspicious` list as a reason not to trust `text` at all.
 
 **Why a subprocess, given `core` never touches the network.** A subprocess
 is not a network call, so it does not violate that boundary — the reason to
@@ -52,6 +54,7 @@ from __future__ import annotations
 
 import json
 import re
+import signal
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -101,6 +104,22 @@ _, findings = check_hidden(path)
 suspicious = [f"{f.kind}: {f.detail}" for f in findings]
 print(json.dumps({"text": text, "pages": pages, "suspicious": suspicious}))
 """
+
+
+def _worker_failure(completed: subprocess.CompletedProcess[str]) -> str:
+    """Why the worker failed, in one line: how it exited, then the last line
+    of its stderr -- a Python traceback's final line is the exception, and its
+    first four hundred characters are not."""
+    code = completed.returncode
+    if code < 0:
+        try:
+            how = f"killed by {signal.Signals(-code).name}"
+        except ValueError:
+            how = f"killed by signal {-code}"
+    else:
+        how = f"exited with status {code}"
+    lines = completed.stderr.strip().splitlines()
+    return f"{how}: {lines[-1]}" if lines else how
 
 
 class ExtractionError(ValueError):
@@ -185,7 +204,7 @@ def extract_document(path: Path, *, timeout_s: float = 20.0) -> ExtractResult:
         raise ExtractionError(f"reading {path.name} timed out after {timeout_s}s") from err
 
     if completed.returncode != 0:
-        raise ExtractionError(f"could not read {path.name}: {completed.stderr.strip()[:400]}")
+        raise ExtractionError(f"could not read {path.name}: {_worker_failure(completed)}")
 
     try:
         payload = json.loads(completed.stdout)

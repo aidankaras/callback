@@ -270,19 +270,48 @@ def test_worker_failure_is_reported_not_raised_as_a_bare_parser_exception(tmp_pa
     the worker's own parser raise inside the child process (verified
     directly: this fixture makes `pdfplumber` raise `PdfminerException("No
     /Root object!")` and exit non-zero with a traceback on stderr); that
-    failure must surface as this module's `ExtractionError`, carrying a
-    piece of the worker's own traceback, not as an empty, silently-successful
-    result. The assertion checks for `"Traceback"` rather than just "could
-    not read": that weaker substring is also produced by the unrelated
+    failure must surface as this module's `ExtractionError`, carrying the
+    exit status and the exception the worker died with, not as an empty,
+    silently-successful result. The assertion checks for both rather than
+    just "could not read": that weaker substring is also produced by the unrelated
     malformed-JSON branch, which a returncode-check mutation cannot reach
     (confirmed: disabling the `completed.returncode != 0` check outright
     still passed a `match="could not read"` assertion, because
     `json.loads("")` then raises and takes the *other* `ExtractionError`
     path). Mutation: replace `completed.returncode != 0` with `False` --
     this fails, because `stdout` is empty here and the resulting
-    `json.JSONDecodeError` produces a message with no `"Traceback"` in it.
+    `json.JSONDecodeError` produces a message with neither in it.
     """
     corrupt = tmp_path / "resume.pdf"
     corrupt.write_bytes(b"%PDF-1.4\nthis is not a real pdf body at all, just garbage\n%%EOF")
-    with pytest.raises(ExtractionError, match="Traceback"):
+    with pytest.raises(ExtractionError, match=r"exited with status 1: .*PdfminerException"):
         extract_document(corrupt)
+
+
+@pytest.mark.parametrize(
+    ("returncode", "stderr", "expected"),
+    [
+        (-9, "", "killed by SIGKILL"),
+        (3, "", "exited with status 3"),
+        (
+            1,
+            "Traceback (most recent call last):\n"
+            + "  File x, line 1, in f\n" * 40
+            + "PdfminerException: bad pw\n",
+            "PdfminerException: bad pw",
+        ),
+    ],
+)
+def test_a_failed_worker_says_why(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, returncode: int, stderr: str, expected: str
+) -> None:
+    """The last stderr line is the exception; the head of a traceback is not."""
+
+    def fake_run(*_args: object, **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess([], returncode, stdout="", stderr=stderr)
+
+    monkeypatch.setattr("core.ingest.extract.subprocess.run", fake_run)
+    pdf = tmp_path / "x.pdf"
+    pdf.write_bytes(b"%PDF-1.4")
+    with pytest.raises(ExtractionError, match=expected):
+        extract_document(pdf)
