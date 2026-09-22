@@ -15,6 +15,7 @@ process that can edit the store's file directly.
 
 from __future__ import annotations
 
+import errno
 from collections.abc import Callable
 from pathlib import Path
 from typing import Protocol, cast
@@ -66,9 +67,45 @@ def add_from_file(path: Path) -> tuple[list[str], list[tuple[str, str]]]:
     return added, rejected
 
 
+class _Tty:
+    """The controlling terminal, as separate read and write handles.
+
+    A single `"r+"` text handle on `/dev/tty` cannot be opened at all: text
+    mode in read-write requires a seekable stream, and a terminal is not one,
+    so `open` raises `io.UnsupportedOperation` -- which is an `OSError`, and
+    would read as "no terminal" to anything catching that.
+    """
+
+    def __init__(self) -> None:
+        self._read = Path("/dev/tty").open(encoding="utf-8")  # noqa: SIM115 -- closed in close()
+        try:
+            self._write = Path("/dev/tty").open("w", encoding="utf-8")  # noqa: SIM115
+        except BaseException:
+            self._read.close()
+            raise
+
+    def write(self, s: str, /) -> int:
+        return self._write.write(s)
+
+    def readline(self, size: int = -1, /) -> str:
+        return self._read.readline(size)
+
+    def flush(self) -> None:
+        self._write.flush()
+
+    def close(self) -> None:
+        self._write.close()
+        self._read.close()
+
+
+# The errors that mean "this process has no controlling terminal". Anything
+# else opening /dev/tty is a real failure and is raised as itself.
+_NO_TERMINAL = {errno.ENXIO, errno.ENOENT}
+
+
 def _open_terminal() -> Terminal:
     # Closed by `confirm` in its own `finally`.
-    return Path("/dev/tty").open("r+", encoding="utf-8")
+    return _Tty()
 
 
 def _confirmed(fact: Fact) -> Fact:
@@ -106,6 +143,8 @@ def confirm(ids: list[str], *, open_tty: Callable[[], Terminal] = _open_terminal
     try:
         tty = open_tty()
     except OSError as exc:
+        if exc.errno not in _NO_TERMINAL:
+            raise
         raise ConfirmError(
             "confirmation must be typed by the candidate in a terminal "
             f"(could not open /dev/tty: {exc.strerror or exc})"

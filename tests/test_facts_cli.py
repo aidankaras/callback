@@ -1,6 +1,10 @@
 from __future__ import annotations
 
 import io
+import os
+import shutil
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -175,3 +179,37 @@ def test_import_writes_private_text_and_exits_4_on_hidden_content(
     text = home / "inbox" / "old-resume.txt"
     assert stat.S_IMODE(text.stat().st_mode) == 0o600
     assert "kubernetes" in text.read_text()
+
+
+@pytest.mark.slow
+@pytest.mark.skipif(shutil.which("script") is None, reason="needs util-linux `script` for a pty")
+def test_confirm_works_on_a_real_terminal(tmp_path: Path, home: Path) -> None:
+    """No injected terminal: `script` runs the real command on a pseudo-terminal
+    and feeds it "y". Every other confirm test injects `open_tty`, which is how
+    a terminal that could not be opened at all once went unnoticed."""
+    add_from_file(_facts_file(tmp_path, [_imported("a", "Built the pipeline")]))
+    env = {**os.environ, "CALLBACK_HOME": str(home)}
+    command = f"{sys.executable} -m core.cli facts confirm"
+    done = subprocess.run(
+        ["script", "-qec", command, "/dev/null"],
+        input="y\n",
+        capture_output=True,
+        text=True,
+        env=env,
+        timeout=60,
+        check=False,
+    )
+    assert "confirmed 1 fact(s)" in done.stdout, (done.stdout, done.stderr)
+    assert load_facts()["a"].selectable()
+
+
+def test_an_unexpected_terminal_error_is_raised_not_reported_as_no_terminal(
+    tmp_path: Path,
+) -> None:
+    add_from_file(_facts_file(tmp_path, [_imported("a", "one")]))
+
+    def broken() -> io.StringIO:
+        raise io.UnsupportedOperation("File or stream is not seekable.")
+
+    with pytest.raises(io.UnsupportedOperation):
+        confirm([], open_tty=broken)
