@@ -9,6 +9,7 @@ an escape.
 from __future__ import annotations
 
 import os
+import tempfile
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -97,20 +98,28 @@ def private_dir(relative: str) -> Path:
 
 
 def write_private(path: Path, text: str) -> None:
-    """Write `text` to `path` atomically, at mode 0600, without ever truncating it in place.
+    """Write `text` to `path` atomically at mode 0600; see `write_private_bytes`."""
+    write_private_bytes(path, text.encode("utf-8"))
 
-    Writes to a hidden temporary file in the same directory as `path` — never a
-    system temp directory, since a rename across filesystems is not atomic —
-    chmods the temp file before the rename so its contents are never briefly
-    world-readable, then swaps it into place with `Path.replace`, a single
-    atomic operation on POSIX. A failure during the write only ever touches the
-    temp file: whatever was previously at `path` is left exactly as it was, and
-    the temp file is removed before the exception propagates.
+
+def write_private_bytes(path: Path, data: bytes) -> None:
+    """Write `data` to `path` atomically, at mode 0600, without ever truncating it in place.
+
+    The temporary file comes from `tempfile.mkstemp` in the same directory as
+    `path` -- never a system temp directory, since a rename across
+    filesystems is not atomic. `mkstemp` creates it exclusively, at 0600,
+    under a random name, so nothing can be planted at that name in advance
+    (a name derived from the pid could be, as a symlink the write would then
+    follow). `os.replace` then swaps it into place in one atomic step; if
+    `path` is itself a symlink, the link is replaced, never written through.
+    A failure only ever touches the temporary file, which is removed before
+    the exception propagates.
     """
-    tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    fd, name = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.", suffix=".tmp")
+    tmp = Path(name)
     try:
-        tmp.write_text(text, encoding="utf-8")
-        tmp.chmod(FILE_MODE)
+        with os.fdopen(fd, "wb") as handle:
+            handle.write(data)
         tmp.replace(path)
     except BaseException:
         tmp.unlink(missing_ok=True)

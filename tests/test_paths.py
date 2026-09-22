@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import os
 import stat
 from pathlib import Path
@@ -92,15 +94,31 @@ def test_write_private_preserves_existing_content_on_failed_write(
     target.write_text("original", encoding="utf-8")
     target.chmod(FILE_MODE)
 
-    def _boom(self: Path, *_args: object, **_kwargs: object) -> int:
-        raise OSError("simulated disk failure")
+    real_fdopen = os.fdopen
 
-    monkeypatch.setattr(Path, "write_text", _boom)
+    class _FailingHandle:
+        def __init__(self, fd: int) -> None:
+            self._handle = real_fdopen(fd, "wb")
 
-    with pytest.raises(OSError):
+        def __enter__(self) -> _FailingHandle:
+            return self
+
+        def __exit__(self, *_exc: object) -> None:
+            self._handle.close()
+
+        def write(self, _data: bytes) -> int:
+            raise OSError("simulated disk failure")
+
+    def _fdopen(fd: int, _mode: str) -> _FailingHandle:
+        return _FailingHandle(fd)
+
+    monkeypatch.setattr("core.paths.os.fdopen", _fdopen)
+
+    with pytest.raises(OSError, match="simulated disk failure"):
         write_private(target, "replacement")
 
     assert target.read_text(encoding="utf-8") == "original"
+    assert [p.name for p in tmp_path.iterdir()] == ["facts.yaml"], "temporary file left behind"
     assert list(tmp_path.iterdir()) == [target], "no leftover temp file should remain"
 
 
@@ -187,3 +205,37 @@ def test_private_dir_refuses_to_leave_the_home(
     with pytest.raises(OutsideHomeError):
         private_dir("../escape")
     assert not (tmp_path / "escape").exists()
+
+
+def test_write_private_replaces_a_symlink_instead_of_writing_through_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from core.paths import write_private
+
+    monkeypatch.setenv("CALLBACK_HOME", str(tmp_path / "cb"))
+    home = ensure_home()
+    victim = tmp_path / "outside.txt"
+    victim.write_text("SECRET", encoding="utf-8")
+    link = home / "report.md"
+    link.symlink_to(victim)
+
+    write_private(link, "# PASS")
+    assert victim.read_text(encoding="utf-8") == "SECRET"
+    assert not link.is_symlink() and link.read_text(encoding="utf-8") == "# PASS"
+    assert stat.S_IMODE(link.stat().st_mode) == 0o600
+
+
+def test_write_private_uses_an_unpredictable_temporary_name(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A temp name derived from the pid can be planted as a symlink in advance."""
+    from core.paths import write_private
+
+    monkeypatch.setenv("CALLBACK_HOME", str(tmp_path / "cb"))
+    home = ensure_home()
+    victim = tmp_path / "outside.txt"
+    victim.write_text("SECRET", encoding="utf-8")
+    (home / f".report.md.{os.getpid()}.tmp").symlink_to(victim)
+
+    write_private(home / "report.md", "# PASS")
+    assert victim.read_text(encoding="utf-8") == "SECRET"
