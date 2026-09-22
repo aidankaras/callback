@@ -104,6 +104,16 @@ def build_parser() -> argparse.ArgumentParser:
     outreach.add_argument("doc", type=Path, help="outreach note (YAML)")
     outreach.set_defaults(handler=_cmd_outreach)
 
+    fin = sub.add_parser(
+        "finalize", help="seal a gated draft into final/ and record it in the ledger"
+    )
+    fin.add_argument("job")
+    fin.add_argument("--accept-warnings", action="store_true")
+    fin.set_defaults(handler=_cmd_finalize)
+    ver = sub.add_parser("verify", help="check a sealed document, and the ledger, for changes")
+    ver.add_argument("job", nargs="?", help="job id; omit to check only the ledger")
+    ver.set_defaults(handler=_cmd_verify)
+
     interview = sub.add_parser(
         "interview", help="build an interview prep pack from exactly what you sent"
     )
@@ -425,6 +435,31 @@ def _cmd_outreach(args: argparse.Namespace) -> int:
     for finding in result.findings:
         print(f"  {finding}", file=sys.stderr)
     return 0 if result.verdict == "pass" else 2
+
+
+def _cmd_finalize(args: argparse.Namespace) -> int:
+    from datetime import UTC, datetime
+
+    from core.finalize import FinalizeError, finalize
+
+    try:
+        final = finalize(args.job, now=datetime.now(tz=UTC), accept_warnings=args.accept_warnings)
+    except (FinalizeError, OSError) as exc:
+        print(f"callback finalize: {exc}", file=sys.stderr)
+        return 3
+    print(f"sealed: {final}")
+    return 0
+
+
+def _cmd_verify(args: argparse.Namespace) -> int:
+    from core.finalize import verify, verify_ledger
+
+    problems = (verify(args.job) if args.job else []) + verify_ledger()
+    for problem in problems:
+        print(f"CHANGED  {problem}")
+    if not problems:
+        print("unchanged since sealed" if args.job else "ledger intact")
+    return 2 if problems else 0
 
 
 def _cmd_interview(args: argparse.Namespace) -> int:

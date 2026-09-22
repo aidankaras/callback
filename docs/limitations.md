@@ -36,9 +36,6 @@ by design rather than merely unimplemented.
 
 ## Not built yet
 
-- **Sealing a finished document** into `final/` with a keyed hash, and a hash-chained ledger of what
-  was generated from which facts. Today `build` writes a draft, and `apply` refuses a draft whose
-  PDF changed after it was gated.
 - **Job boards other than Greenhouse, Lever and Ashby.** Workday forbids
   automated access; generic careers pages (via `schema.org/JobPosting`) and
   aggregator APIs are not read yet.

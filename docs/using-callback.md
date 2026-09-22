@@ -29,6 +29,7 @@ below for you, except `facts confirm`, which only you can run.
 | `callback letter <letter.yaml>` | Renders a cover letter and checks it against your facts and the saved posting | 0 pass, 2 fail, 3 could not run |
 | `callback apply <id> --company … --title … --source …` | Builds the application packet from a gated draft and records it; `--refresh` rebuilds it after the draft improves. **Never submits** | 0, 3 refused |
 | `callback outcome <id> <kind>` / `callback applications` | Records what happened; lists applications | 0, 3 unreadable record |
+| `callback finalize <id>` / `callback verify [<id>]` | Seals a gated draft read-only into `final/` with a signed manifest and a hash-chained ledger entry; `verify` reports anything changed since, and any break in the ledger | 0, 2 changed, 3 |
 | `callback interview <id>` | An interview prep pack: the posting, exactly what was sent (verified against the application record) and the facts behind each claim | 0, 3 |
 
 Everything lives under `$CALLBACK_HOME` (default `~/.callback`). Directories there
@@ -261,9 +262,16 @@ its path at run time is not caught.
 bullets for a role, a second page, a near-empty last page) can only warn.
 They never fail a document.
 
-**Not built yet:**
-- Sealing a finished document into `final/`.
-- The hash-chained ledger.
-- The MCP server.
+**Sealing.** `build` only ever writes a draft. `finalize` is the only
+writer of `final/`:
+- It seals a gated draft read-only, with a manifest of every file's SHA-256
+  signed by a key kept at `0600` in the data home.
+- Each seal, application and refresh is recorded in a hash-chained
+  `ledger.log`.
+- `verify` reports any sealed file changed since, and any ledger entry
+  altered, removed or reordered.
 
-`build` only ever writes a draft.
+This is tamper-evidence, not tamper-proofing: anyone who can read the key
+can forge a signature.
+
+**Not built yet:** an MCP server; the skill drives the command line.

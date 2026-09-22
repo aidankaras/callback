@@ -9,8 +9,7 @@ gates for a generated resume or cover letter: grounding, structural claims, roun
 parseability, hidden-channel detection and layout lints, composed by `core/gates.py` and
 run by the `callback` CLI. The plugin surface today is the `tailor` skill
 (`skills/tailor/`) and the write-guard hook (`hooks/`); the skill drives the CLI. No LLM
-runs anywhere in `core`. Not built yet: sealing into `final/`, the hash-chained ledger,
-and an MCP server.
+runs anywhere in `core`. Not built yet: an MCP server.
 
 ## Non-negotiables
 

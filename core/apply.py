@@ -29,6 +29,7 @@ import yaml
 from pydantic import BaseModel, Field, ValidationError, field_validator
 
 from core.export.text import to_text
+from core.finalize import record_event
 from core.paths import private_dir, resolve_inside, write_private, write_private_bytes
 from core.resume.io import DocumentError, parse_doc
 
@@ -311,6 +312,15 @@ def apply(
                 letter_sha256=letter_sha256,
             )
         _save([*existing, record])
+        record_event(
+            {
+                "event": "refresh" if refresh else "apply",
+                "job_id": target.job_id,
+                "at": now.isoformat(),
+                "resume_sha256": resume_sha256,
+                "letter_sha256": letter_sha256,
+            }
+        )
     except BaseException:
         shutil.rmtree(staging, ignore_errors=True)
         raise
