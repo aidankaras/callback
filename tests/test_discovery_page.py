@@ -3,6 +3,7 @@ from __future__ import annotations
 import email.message
 import io
 import json
+import urllib.error
 import urllib.request
 import urllib.response
 from datetime import UTC, datetime
@@ -55,8 +56,8 @@ def _posting(**overrides: object) -> dict[str, object]:
 
 def test_a_job_posting_block_becomes_a_posting() -> None:
     (p,) = parse_job_postings(_page(_posting()), PAGE_URL, now=NOW)
-    assert (p.id, p.ats, p.company, p.title) == (
-        "page:careers.acme.example:R-1042",
+    assert p.id.startswith("page:careers.acme.example:R-1042-")
+    assert (p.ats, p.company, p.title) == (
         "page",
         "Acme Robotics",
         "Machine Learning Intern",
@@ -265,7 +266,7 @@ def home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 def test_a_careers_page_url_is_resolved_from_its_structured_data(home: Path) -> None:
     pages = _Pages(_page(_posting()))
     found = resolve(PAGE_URL, "Acme Robotics", _NoApi(), now=NOW, pages=pages)
-    assert found.id == "page:careers.acme.example:R-1042"
+    assert found.id.startswith("page:careers.acme.example:R-1042-")
     assert found.id in load_postings()
     assert pages.asked == [PAGE_URL]
 
@@ -278,9 +279,8 @@ def test_the_page_must_name_the_company_the_candidate_meant(home: Path) -> None:
     assert load_postings() == {}
     # Premise: a shorter form of the same name is accepted.
     ok = _Pages(_page(_posting(hiringOrganization={"name": "Acme Robotics, Inc."})))
-    assert (
-        resolve(PAGE_URL, "Acme Robotics", _NoApi(), now=NOW, pages=ok).company == "Acme Robotics"
-    )
+    stored = resolve(PAGE_URL, "Acme Robotics", _NoApi(), now=NOW, pages=ok)
+    assert stored.company == "Acme Robotics, Inc."  # the page's own name for itself
 
 
 def test_a_listing_page_needs_the_url_of_one_posting(home: Path) -> None:
@@ -301,3 +301,197 @@ def test_a_denied_platform_is_refused_by_name_even_with_a_page_fetcher(home: Pat
     with pytest.raises(DiscoveryError, match=r"linkedin\.com does not allow"):
         resolve("https://www.linkedin.com/jobs/view/1", "Acme", _NoApi(), now=NOW, pages=pages)
     assert pages.asked == []
+
+
+# --- the careful cases ------------------------------------------------------------------
+
+
+def _robots(rules: str) -> Route:
+    return (200, "text/plain", rules.encode(), None)
+
+
+def test_a_same_host_redirect_into_a_disallowed_path_is_refused() -> None:
+    """Mutation: check only the redirect's host -- the disallowed page is fetched."""
+    private = "https://careers.acme.example/private/admin"
+    fetcher, site = _fetcher(
+        {
+            ROBOTS: _robots("User-agent: *\nDisallow: /private/\n"),
+            PAGE_URL: (302, "", b"", private),
+            private: (200, HTML, b"secret", None),
+        }
+    )
+    with pytest.raises(DiscoveryError, match=r"which robots\.txt disallows"):
+        fetcher.get_page(PAGE_URL)
+    assert private not in site.opened
+
+
+@pytest.mark.parametrize(
+    ("url", "reason"),
+    [
+        ("https://careers.acme.example:8443/jobs/1", "names port 8443"),
+        ("https://user:pw@careers.acme.example/jobs/1", "user name or password"),
+        ("https://acme.example:abc/jobs/1", "is not a URL"),
+        ("https://[::1/jobs", "is not a URL"),
+    ],
+)
+def test_a_url_with_a_port_userinfo_or_bad_syntax_is_refused(url: str, reason: str) -> None:
+    fetcher, site = _fetcher({})
+    with pytest.raises(DiscoveryError, match=reason):
+        fetcher.get_page(url)
+    assert site.opened == []
+
+
+def test_a_redirect_to_another_port_is_refused() -> None:
+    fetcher, _ = _fetcher(
+        {
+            ROBOTS: _robots("User-agent: *\nAllow: /\n"),
+            PAGE_URL: (302, "", b"", "https://careers.acme.example:8443/x"),
+        }
+    )
+    with pytest.raises(DiscoveryError, match="port 8443"):
+        fetcher.get_page(PAGE_URL)
+
+
+@pytest.mark.parametrize("address", ["::127.0.0.1", "64:ff9b::a9fe:a9fe"])
+def test_an_ipv6_address_embedding_ipv4_is_refused(address: str) -> None:
+    """Both pass ipaddress's is_global. Mutation: drop the embedded check."""
+    fetcher, _ = _fetcher({}, addresses=[address])
+    with pytest.raises(DiscoveryError, match="non-public address"):
+        fetcher.get_page(PAGE_URL)
+
+
+def test_a_robots_file_that_failed_to_load_is_not_remembered_as_absent() -> None:
+    """The first fetch fails in transit; the second must read robots again,
+    not treat the failed read as "no rules". Mutation: keep the placeholder."""
+
+    class _Flaky(urllib.request.BaseHandler):
+        handler_order = 50
+        failed = False
+
+        def https_open(self, req: urllib.request.Request) -> urllib.response.addinfourl | None:
+            if req.full_url == ROBOTS and not _Flaky.failed:
+                _Flaky.failed = True
+                raise urllib.error.URLError("connection reset")
+            return None  # fall through to the next handler
+
+    fetcher, site = _fetcher(
+        {ROBOTS: _robots("User-agent: *\nDisallow: /\n"), PAGE_URL: (200, HTML, b"x", None)}
+    )
+    fetcher._extra.insert(0, _Flaky())  # type: ignore[reportPrivateUsage]
+    with pytest.raises(DiscoveryError, match="connection reset"):
+        fetcher.get_page(PAGE_URL)
+    with pytest.raises(DiscoveryError, match=r"robots\.txt does not allow"):
+        fetcher.get_page(PAGE_URL)
+    assert PAGE_URL not in site.opened
+
+
+def test_a_malformed_response_is_a_discovery_error() -> None:
+    import http.client
+
+    class _Broken(urllib.request.BaseHandler):
+        handler_order = 50
+
+        def https_open(self, req: urllib.request.Request) -> urllib.response.addinfourl:
+            raise http.client.BadStatusLine("HTTP/1.1 abc OK")
+
+    fetcher, _ = _fetcher({})
+    fetcher._extra.insert(0, _Broken())  # type: ignore[reportPrivateUsage]
+    with pytest.raises(DiscoveryError, match="could not fetch"):
+        fetcher.get_page(PAGE_URL)
+
+
+@pytest.mark.parametrize(
+    ("wanted", "stated", "same"),
+    [
+        ("Acme", "Acme Robotics, Inc.", True),
+        ("Acme Robotics", "ACME robotics LLC", True),
+        ("Globex Staffing", "A", False),
+        ("Acme Robotics, Inc.", "Inc.", False),
+        ("Meta", "Metabase", False),
+        ("Acme", "Acmeville Logistics", False),
+        ("A", "Globex Staffing Agency", False),
+    ],
+)
+def test_the_employer_must_be_the_same_name_in_whole_words(
+    wanted: str, stated: str, same: bool
+) -> None:
+    """Mutation: compare as raw substrings -- the five false cases pass."""
+    from core.discovery.store import same_company
+
+    assert same_company(wanted, stated) is same
+
+
+def test_a_closed_posting_is_not_replaced_by_its_open_neighbour(home: Path) -> None:
+    """Mutation: drop closed postings before choosing by URL -- the Staff
+    Engineer posting is stored in place of the closed internship."""
+    closed = _posting(validThrough="2026-09-01")
+    neighbour = _posting(
+        title="Senior Staff Engineer",
+        url="https://careers.acme.example/jobs/staff",
+        identifier="R-7",
+    )
+    pages = _Pages(_page(closed, neighbour))
+    with pytest.raises(DiscoveryError, match="closed 2026-09-01"):
+        resolve(PAGE_URL, "Acme Robotics", _NoApi(), now=NOW, pages=pages)
+    assert load_postings() == {}
+
+
+@pytest.mark.parametrize(
+    "stated", ["https://www.linkedin.com/jobs/view/999", "https://elsewhere.example/jobs/1"]
+)
+def test_a_posting_url_off_the_page_host_is_not_kept(home: Path, stated: str) -> None:
+    pages = _Pages(_page(_posting(url=stated)))
+    found = resolve(PAGE_URL, "Acme Robotics", _NoApi(), now=NOW, pages=pages)
+    assert (found.url, found.apply_url) == (PAGE_URL, PAGE_URL)
+
+
+def test_a_reused_identifier_does_not_merge_two_postings(home: Path) -> None:
+    """Mutation: key by identifier alone -- resolving B returns A."""
+    shared = {"@type": "PropertyValue", "name": "Acme", "value": "Acme"}
+    a_url, b_url = "https://careers.acme.example/jobs/a", "https://careers.acme.example/jobs/b"
+    a_page = _Pages(_page(_posting(url=a_url, identifier=shared)))
+    b_page = _Pages(_page(_posting(url=b_url, identifier=shared, title="Data Engineer")))
+    a = resolve(a_url, "Acme", _NoApi(), now=NOW, pages=a_page)
+    b = resolve(b_url, "Acme", _NoApi(), now=NOW, pages=b_page)
+    assert a.id != b.id
+    assert b.title == "Data Engineer"
+
+
+@pytest.mark.parametrize(
+    "value", ["September 1, 2026", "2026/09/01", 1756684800, ["2026-09-01"], "2026-09-01 UTC"]
+)
+def test_an_unreadable_valid_through_is_not_read_as_open(value: object) -> None:
+    """Mutation: treat an unreadable date as absent -- each posting is kept."""
+    from core.discovery.page import posting_at
+
+    with pytest.raises(DiscoveryError, match="cannot be read"):
+        posting_at(_page(_posting(validThrough=value)), PAGE_URL, now=NOW)
+
+
+def test_a_date_only_valid_through_is_open_all_that_day() -> None:
+    """NOW is 15:00 on 1 October. Mutation: read the date as midnight -- closed."""
+    from core.discovery.page import posting_at
+
+    assert posting_at(_page(_posting(validThrough="2026-10-01")), PAGE_URL, now=NOW)
+
+
+def test_an_undecodable_block_does_not_cost_the_posting_beside_it() -> None:
+    """Mutation: catch only JSONDecodeError -- RecursionError escapes."""
+    deep = '<script type="application/ld+json">' + "[" * 100000 + "]" * 100000 + "</script>"
+    big = '<script type="application/ld+json">{"n": ' + "9" * 5000 + "}</script>"
+    markup = _page(_posting(), raw=deep + big)
+    assert [p.title for p in parse_job_postings(markup, PAGE_URL, now=NOW)] == [
+        "Machine Learning Intern"
+    ]
+
+
+def test_a_lone_surrogate_is_replaced_so_the_posting_can_be_written(home: Path) -> None:
+    """Mutation: skip the cleaning -- `take` cannot encode the title."""
+    from core.discovery.store import take
+
+    # JSON's own escape for a lone high surrogate, which json.loads accepts.
+    markup = _page(_posting()).replace("Machine Learning Intern", "Intern \\ud800")
+    assert chr(0xD800) in json.loads(markup.split(">", 3)[3].split("</script>")[0])["title"]
+    found = resolve(PAGE_URL, "Acme Robotics", _NoApi(), now=NOW, pages=_Pages(markup))
+    assert chr(0xD800) not in found.title
+    take(found.id, "acme-ml").read_text(encoding="utf-8")

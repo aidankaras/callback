@@ -92,8 +92,11 @@ def resolve_url(url: str) -> tuple[Ats, str, str]:
     A URL on a platform that forbids automated access is refused by name,
     so the caller can say why rather than report it as unrecognised.
     """
-    parts = urlsplit(url.strip())
-    host = (parts.hostname or "").lower()
+    try:
+        parts = urlsplit(url.strip())
+        host = (parts.hostname or "").lower()
+    except ValueError as exc:
+        raise DiscoveryError(f"{url!r} is not a URL: {exc}") from exc
     forbidden = denied_domain(host)
     if forbidden:
         raise DiscoveryError(

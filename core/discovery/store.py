@@ -209,31 +209,41 @@ def _store(posting: Posting, now: datetime) -> Found:
     return found
 
 
-def _norm_company(name: str) -> str:
-    return " ".join(re.sub(r"[^a-z0-9]+", " ", name.casefold()).split())
+_COMPANY_SUFFIXES = frozenset(
+    {"inc", "llc", "ltd", "co", "corp", "corporation", "company", "plc", "gmbh", "sa", "ag"}
+)
+
+
+def _company_tokens(name: str) -> list[str]:
+    words = re.findall(r"[a-z0-9]+", name.casefold())
+    while words and words[-1] in _COMPANY_SUFFIXES:
+        words.pop()
+    return words
+
+
+def same_company(wanted: str, stated: str) -> bool:
+    """Whether one name is the other's words, whole, in order: "Acme" names
+    "Acme Robotics, Inc.", but not "Acmeville" and not a bare "A"."""
+    a, b = _company_tokens(wanted), _company_tokens(stated)
+    if not a or not b or not any(len(w) >= 2 for w in a + b):
+        return False
+    short, long_ = (a, b) if len(a) <= len(b) else (b, a)
+    return any(long_[i : i + len(short)] == short for i in range(len(long_) - len(short) + 1))
 
 
 def resolve_page(url: str, company: str, pages: PageSource, *, now: datetime) -> Found:
     """Read the `schema.org/JobPosting` data on an employer's careers page and store it.
 
-    The page must name `company` as the hiring organisation (either name may
-    contain the other, so "Acme" matches "Acme Robotics, Inc."): a page that
-    names someone else is not the posting the candidate meant.
+    The page must name `company` as the hiring organisation (see
+    `same_company`): a page naming someone else is not the posting the
+    candidate meant. The page's own name for the employer is what is stored.
     """
-    from core.discovery.page import parse_job_postings
+    from core.discovery.page import posting_at
 
-    postings = parse_job_postings(pages.get_page(url), url, now=now)
-    if len(postings) > 1:
-        postings = [p for p in postings if p.url.rstrip("/") == url.strip().rstrip("/")]
-        if len(postings) != 1:
-            raise DiscoveryError(
-                f"{url} lists several postings; resolve the URL of the one you want"
-            )
-    posting = postings[0]
-    wanted, stated = _norm_company(company), _norm_company(posting.company)
-    if not wanted or not (wanted in stated or stated in wanted):
+    posting = posting_at(pages.get_page(url), url, now=now)
+    if not same_company(company, posting.company):
         raise DiscoveryError(f"{url} names {posting.company!r} as the employer, not {company!r}")
-    return _store(posting.model_copy(update={"company": company.strip()}), now)
+    return _store(posting, now)
 
 
 def resolve(
@@ -247,7 +257,11 @@ def resolve(
     try:
         ats, board, job_id = resolve_url(url)
     except DiscoveryError:
-        if pages is None or denied_domain((urlsplit(url).hostname or "").lower()):
+        try:
+            host = (urlsplit(url).hostname or "").lower()
+        except ValueError as exc:
+            raise DiscoveryError(f"{url!r} is not a URL: {exc}") from exc
+        if pages is None or denied_domain(host):
             raise
         return resolve_page(url, company, pages, now=now)
     payload = fetcher.get_json(posting_url_for(ats, board))
