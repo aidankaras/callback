@@ -151,6 +151,7 @@ def confirm(ids: list[str], *, open_tty: Callable[[], Terminal] = _open_terminal
         ) from exc
 
     confirmed: list[str] = []
+    shown: dict[str, Fact] = {}
     try:
         for n, fact in enumerate(targets, 1):
             tty.write(f"\n[{n}/{len(targets)}] {fact.id} ({fact.kind})\n  {fact.text}\n")
@@ -164,10 +165,18 @@ def confirm(ids: list[str], *, open_tty: Callable[[], Terminal] = _open_terminal
             if answer == "q":
                 break
             if answer == "y":
-                facts[fact.id] = _confirmed(fact)
+                shown[fact.id] = fact
                 confirmed.append(fact.id)
     finally:
         tty.close()
     if confirmed:
-        save_facts(facts)
+        # Re-read the store rather than saving the snapshot taken before the
+        # prompts, which would silently drop anything added meanwhile. A fact
+        # that changed or vanished since it was shown is not confirmed: the
+        # candidate answered about the text they saw.
+        current = load_facts()
+        confirmed = [fid for fid in confirmed if current.get(fid) == shown[fid]]
+        for fid in confirmed:
+            current[fid] = _confirmed(current[fid])
+        save_facts(current)
     return confirmed

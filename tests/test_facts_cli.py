@@ -213,3 +213,19 @@ def test_an_unexpected_terminal_error_is_raised_not_reported_as_no_terminal(
 
     with pytest.raises(io.UnsupportedOperation):
         confirm([], open_tty=broken)
+
+
+def test_a_fact_added_while_confirming_is_not_lost(tmp_path: Path) -> None:
+    add_from_file(_facts_file(tmp_path, [_imported("a", "one")]))
+    later = _facts_file(tmp_path / "..", [_imported("meanwhile", "added from another shell")])
+
+    class _Tty(io.TextIOBase):
+        def readline(self, size: int = -1, /) -> str:
+            add_from_file(later)
+            return "y\n"
+
+        def write(self, s: str, /) -> int:
+            return len(s)
+
+    assert confirm([], open_tty=_Tty) == ["a"]
+    assert set(load_facts()) == {"a", "meanwhile"}
