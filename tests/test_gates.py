@@ -230,3 +230,21 @@ def test_a_report_verdict_is_derived_from_its_outcomes() -> None:
     outcomes = [GateOutcome(g, "pass", ()) for g in GATES]
     outcomes[3] = GateOutcome("hidden", "fail", ("invisible_text: x",))
     assert GateReport(tuple(outcomes)).verdict == "fail"
+
+
+@pytest.mark.slow
+def test_a_layout_lint_makes_an_otherwise_clean_document_a_warning(tmp_path: Path) -> None:
+    """One bullet in a role is below the three-per-role floor. Mutation: make
+    the lints gate always pass -- this test fails."""
+    doc = _doc()
+    entry = doc.sections[0].entries[0]
+    single = entry.model_copy(update={"bullets": entry.bullets[:1]})
+    doc = doc.model_copy(
+        update={
+            "sections": [doc.sections[0].model_copy(update={"entries": [single]}), doc.sections[1]]
+        }
+    )
+    report = _run(doc, tmp_path)
+    verdicts = {o.gate: o.verdict for o in report.outcomes}
+    assert verdicts == {g: ("warn" if g == "lints" else "pass") for g in GATES}, report.outcomes
+    assert report.verdict == "warn"
