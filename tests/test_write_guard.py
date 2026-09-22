@@ -105,6 +105,10 @@ def test_a_finalised_document_is_not_writable(home: Path) -> None:
         "uv run --no-project python -m core.cli facts confirm",
         "uv run --directory {home}/inbox rm ../facts.yaml",
         "uv run --frozen --directory {home}/outputs/job cp /tmp/x.pdf final/resume.pdf",
+        # A "#" must not hide the rest of the command from the guard.
+        "# tidy up\nrm {home}/facts.yaml",
+        "echo hi # note\nrm {home}/facts.yaml",
+        "# a comment\ncallback facts confirm",
     ],
 )
 def test_bash_forms_that_touch_a_protected_path_are_denied(home: Path, command: str) -> None:

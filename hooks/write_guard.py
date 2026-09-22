@@ -129,6 +129,12 @@ def _segments(command: str) -> list[list[str]]:
     """`command` as simple commands, each a list of words, split at shell operators."""
     lexer = shlex.shlex(command.replace("\n", " ; "), posix=True, punctuation_chars=True)
     lexer.whitespace_split = True
+    # Newlines became ";" above, so the whole command is one logical line and
+    # shlex's default comment character would swallow everything after the
+    # first unquoted "#" -- including the command on the next line. A guard
+    # that reads less than the shell will run fails open, so nothing is
+    # treated as a comment: a protected path named in one is checked too.
+    lexer.commenters = ""
     try:
         words = list(lexer)
     except ValueError:
