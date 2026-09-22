@@ -45,6 +45,11 @@ def build_parser() -> argparse.ArgumentParser:
     app.add_argument(
         "--accept-warnings", action="store_true", help="apply although the gates warned"
     )
+    app.add_argument(
+        "--refresh",
+        action="store_true",
+        help="rebuild the packet for a job already recorded, after improving its draft",
+    )
     app.set_defaults(handler=_cmd_apply)
 
     outcome = sub.add_parser("outcome", help="record what happened to an application")
@@ -110,7 +115,12 @@ def _cmd_apply(args: argparse.Namespace) -> int:
             url=args.url,
             source=args.source,
         )
-        packet = apply(target, now=datetime.now(tz=UTC), accept_warnings=args.accept_warnings)
+        packet = apply(
+            target,
+            now=datetime.now(tz=UTC),
+            accept_warnings=args.accept_warnings,
+            refresh=args.refresh,
+        )
     except (ApplyError, ValidationError, OSError) as exc:
         print(f"callback apply: {exc}", file=sys.stderr)
         return 3

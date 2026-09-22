@@ -232,8 +232,15 @@ def _check_volume(target: Target, existing: list[Application], now: datetime) ->
         )
 
 
-def apply(target: Target, *, now: datetime, accept_warnings: bool = False) -> Path:
+def apply(
+    target: Target, *, now: datetime, accept_warnings: bool = False, refresh: bool = False
+) -> Path:
     """Build the application packet for `target` and record the application.
+
+    With `refresh`, rebuild the packet for a job already recorded -- after the
+    draft was improved, say -- under the same gate and hash checks. The
+    record keeps its original date and is not counted again; only its hashes
+    change, to name what the new packet holds.
 
     Returns the packet directory. Raises `ApplyError`, having written
     nothing, when the draft is not ready or a volume rule refuses it.
@@ -242,7 +249,13 @@ def apply(target: Target, *, now: datetime, accept_warnings: bool = False) -> Pa
     draft = resolve_inside(f"outputs/{target.job_id}/draft")
     resume, letter = _check_draft(draft, accept_warnings=accept_warnings)
     existing = load_applications()
-    _check_volume(target, existing, now)
+    prior = next((a for a in existing if a.job_id == target.job_id), None)
+    if refresh:
+        if prior is None:
+            raise ApplyError(f"no application recorded for {target.job_id!r} to refresh")
+        existing = [a for a in existing if a.job_id != target.job_id]
+    else:
+        _check_volume(target, existing, now)
     try:
         doc = parse_doc((draft / "resume.yaml").read_bytes(), origin=draft / "resume.yaml")
     except (DocumentError, OSError) as exc:
@@ -265,12 +278,19 @@ def apply(target: Target, *, now: datetime, accept_warnings: bool = False) -> Pa
             "links": identity.links,
         }
         write_private(staging / "fields.json", json.dumps(fields, indent=2) + "\n")
-        record = Application(
-            **target.model_dump(),
-            submitted_at=now,
-            resume_sha256=_sha256(resume),
-            letter_sha256=_sha256(letter) if letter is not None else None,
-        )
+        resume_sha256 = _sha256(resume)
+        letter_sha256 = _sha256(letter) if letter is not None else None
+        if refresh and prior is not None:
+            record = prior.model_copy(
+                update={"resume_sha256": resume_sha256, "letter_sha256": letter_sha256}
+            )
+        else:
+            record = Application(
+                **target.model_dump(),
+                submitted_at=now,
+                resume_sha256=resume_sha256,
+                letter_sha256=letter_sha256,
+            )
         _save([*existing, record])
     except BaseException:
         shutil.rmtree(staging, ignore_errors=True)

@@ -275,3 +275,31 @@ def test_a_gate_record_missing_or_mistyping_a_field_is_named(
     (home / "outputs" / "acme-ml" / "draft" / "report.json").write_text(json.dumps(record))
     with pytest.raises(ApplyError, match="gate record"):
         apply(_target(), now=NOW)
+
+
+def test_refreshing_a_packet_rebuilds_it_without_counting_a_new_application(home: Path) -> None:
+    """Mutation: let refresh append a second record -- this test fails."""
+    _built(home, "acme-ml")
+    apply(_target(), now=NOW)
+    draft = home / "outputs" / "acme-ml" / "draft"
+    improved = b"%PDF-1.7 improved resume"
+    (draft / "resume.pdf").write_bytes(improved)
+    record = json.loads((draft / "report.json").read_text())
+    record["pdf_sha256"] = hashlib.sha256(improved).hexdigest()
+    (draft / "report.json").write_text(json.dumps(record))
+
+    packet = apply(_target(), now=NOW + timedelta(hours=1), refresh=True)
+    assert (packet / "resume.pdf").read_bytes() == improved
+    (only,) = load_applications()
+    assert only.submitted_at == NOW
+    assert only.resume_sha256 == hashlib.sha256(improved).hexdigest()
+
+
+def test_refresh_still_requires_a_gated_draft_and_a_prior_record(home: Path) -> None:
+    _built(home, "acme-ml")
+    with pytest.raises(ApplyError, match="to refresh"):
+        apply(_target(), now=NOW, refresh=True)
+    apply(_target(), now=NOW)
+    (home / "outputs" / "acme-ml" / "draft" / "resume.pdf").write_bytes(b"%PDF tampered")
+    with pytest.raises(ApplyError, match="changed since"):
+        apply(_target(), now=NOW, refresh=True)
