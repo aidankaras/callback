@@ -1,7 +1,7 @@
 [project]
 name = "callback"
 version = "0.1.0"
-description = "Resume tailoring with deterministic checks: grounded claims, verified ATS parseability, no hidden text"
+description = "Tailor, check and package a job application: grounded claims, verified ATS parseability, no hidden text"
 requires-python = ">=3.12,<3.13"
 dependencies = [
     "pydantic>=2.9",
