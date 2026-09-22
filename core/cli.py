@@ -32,6 +32,12 @@ def build_parser() -> argparse.ArgumentParser:
     build.add_argument("--job", required=True, help="job id: lowercase letters, digits, hyphens")
     build.set_defaults(handler=_cmd_build)
 
+    letter = sub.add_parser(
+        "letter", help="render a cover letter and check it against your facts and the posting"
+    )
+    letter.add_argument("doc", type=Path, help="cover letter (YAML)")
+    letter.set_defaults(handler=_cmd_letter)
+
     export = sub.add_parser(
         "export", help="print a resume document as plain text, for forms that take pasted text"
     )
@@ -60,6 +66,23 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 _SAFE_STEM = re.compile(r"[^a-z0-9-]+")
+
+
+def _cmd_letter(args: argparse.Namespace) -> int:
+    from core.buildcmd import BuildError
+    from core.letter.cmd import build_letter
+    from core.profile.store import StoreError
+    from core.resume.io import DocumentError
+
+    try:
+        result = build_letter(args.doc)
+    except (BuildError, DocumentError, StoreError, OSError) as exc:
+        print(f"callback letter: {exc}", file=sys.stderr)
+        return 3
+    print(f"{'FAIL' if result.findings else 'PASS'}  {result.out_dir / 'cover-letter.pdf'}")
+    for finding in result.findings:
+        print(f"  {finding}")
+    return result.exit_code
 
 
 def _cmd_export(args: argparse.Namespace) -> int:
