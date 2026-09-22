@@ -26,6 +26,12 @@ jobs:
           fetch-depth: 1
 
       - uses: anthropics/claude-code-action@cfc3eb22bfed5c26ef66e3223c982af27e4524de  # v1
+        env:
+          # Keep subagents in the foreground. The review and audit both start
+          # agents in the background and end their turn to wait for them, and
+          # in an unattended run ending the turn ends the run: reviews finished
+          # in three turns with no comments, and one audit wrote no report.
+          CLAUDE_CODE_DISABLE_BACKGROUND_TASKS: "1"
         with:
           # OAuth token rather than a metered API key: this project runs on a
           # subscription, and a pull-request trigger fires far more often than
