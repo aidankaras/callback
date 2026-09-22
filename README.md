@@ -1,50 +1,52 @@
 # callback
 
 Tailoring a resume or cover letter for a specific role is high-effort, low-feedback work, and
-generic language-model assistance tends to make it worse: it invents accomplishments and produces
-documents that read as machine-written.
+generic language-model assistance tends to make it worse: it invents accomplishments, inflates
+titles, and produces documents nobody has checked an applicant-tracking system can read.
 
-`callback` is a deterministic verification layer for that process: a candidate's facts are held in
-a structured, provenance-tracked store, and generated text is checked mechanically against that
-store rather than trusted on its face.
+`callback` is a Claude Code plugin built the other way round. The candidate's facts live in a local,
+provenance-tracked store; Claude arranges them for a posting; and a deterministic Python package
+checks every document mechanically against that store before it is delivered. A quality claim is
+something you can re-run, not something the model reports about itself. There is no LLM call in
+`core/`.
 
-## What's implemented
+## What the checks guarantee
 
-- **Provenance-tracked facts** — every fact carries where it came from and how confirmed it is; only
-  a fact the candidate explicitly confirmed can back generated text. Facts that would record a
-  legally sensitive attribute (date of birth, SSN, marital status, and similar) are refused at write
-  time, and technology names are canonicalised against a fixed alias table so the same tool can't
-  end up stored under two different spellings (`core/profile`, `core/aliases`).
-- **Grounding** — every number, entity, and date in a piece of text must be derivable from the cited
-  facts: a derived figure is recomputed from its inputs rather than pattern-matched, and an entity is
-  checked against the facts only when it's a known technology or looks like an identifier
-  (`core/checks`). This is a traceability guarantee, not an absolute one — an invented product or
-  tool name that is neither a known alias nor identifier-shaped currently passes grounding
-  unchecked. See `docs/limitations.md` for the full list of what grounding does and does not catch.
-- **Deterministic rendering** — a structured document (`core/resume`) is compiled to PDF with Typst
-  (`core/render`) under conditions chosen so the same input always produces the same bytes: system
-  fonts are ignored in favour of a vendored, licensed font family, any compiler warning (including a
-  silently substituted font) is a hard failure rather than advisory, and the document's embedded
-  timestamp is fixed rather than left to wall-clock time. This is the rendering step the layout gates
-  below will measure; it does not itself check the result's structure or content.
-- A minimal CLI (`callback init`, `callback delete-all`) for managing the private data directory.
+| Property | Mechanism |
+|---|---|
+| Only facts the candidate confirmed can back a document | `callback facts confirm` reads its answers from the controlling terminal, which an assistant's shell does not have; a write-guard hook refuses an assistant's edits to the fact store |
+| Bullets make no claim their facts do not state | every number (including spelled-out ones), date, technology, mid-sentence name and claim word (award, promoted, doubled, …) must appear in the cited facts; a count cannot rest on a percentage |
+| Entry headers are not inflated | employer, title, location and both dates must equal one cited fact field for field; a bullet may cite only its own entry's facts |
+| Nothing is added around the content | the identity block must match a confirmed contact fact; section titles come from a fixed list; every listed skill needs confirmed backing |
+| The PDF is machine-readable | the rendered PDF is re-extracted with a deliberately naive parser, and every critical field must be recovered in order |
+| Nothing hidden | no invisible, tiny, off-page or unpainted text, no suspicious Unicode, no unexpected metadata; anything the screen cannot judge fails rather than passes |
+| Cover letters stay honest | each sentence declares what it is about: claims about the candidate rest on their facts and never on the posting, claims about the employer only on the posting; commitment language (salary, availability, sponsorship) fails |
+| Applications stay reasonable | at most 10 in 24 hours, no re-apply to the same posting within 90 days, and a packet is only built from a draft that passed, or whose warnings the candidate accepted |
 
-## Planned
+It does **not** check ordinary wording: "led the migration" and "helped with the migration" are
+indistinguishable to it. And it cannot know whether a fact the candidate confirmed is true. See
+`docs/limitations.md` for the full list.
 
-The parseability gate, the hidden-channels gate, additional layout gates, and a ledger of what was
-generated and from which facts are not built yet:
+## Using it
 
-- **Machine-parseable** — the rendered PDF will be re-extracted with a pessimistic parser and diffed
-  against the structured source to catch ambiguous reading order or broken field segmentation before
-  the candidate sees a review comment about it.
-- **Free of hidden channels** — extracted text will be checked against visible text, and document
-  metadata will be constrained to carry nothing beyond title and author.
+```bash
+uv sync
+claude --plugin-dir .      # loads the `tailor` skill and the write guard
+```
 
-`pyproject.toml` already pins the extraction dependency these will use (`pdfplumber`); it is not
-called from `core/` yet. `pypdf` is already used, but only by rendering itself, to verify the fonts
-it embedded — not yet for the broader text-and-structure extraction these gates will need.
+Then ask Claude to tailor your resume to a posting. The underlying commands:
 
-See `docs/limitations.md` for what the verification gates do and do not guarantee.
+| Command | Does |
+|---|---|
+| `callback import resume.pdf` | extract an existing resume's text, screening it for hidden content |
+| `callback facts add / list / confirm` | store facts (unconfirmed), list them, confirm them yourself |
+| `callback build resume.yaml --job <id>` | render the PDF and run every gate; exit 0 pass, 1 warn, 2 fail |
+| `callback letter letter.yaml` | render and check a cover letter |
+| `callback export resume.yaml` | the resume as plain text, for forms that want it pasted |
+| `callback apply <id> …` | build the application packet and record it; **callback never submits** |
+| `callback outcome <id> <kind>`, `callback applications` | track what happened |
+
+`docs/using-callback.md` has the fact format, the document format and every rule.
 
 ## Development
 
@@ -52,17 +54,14 @@ Requires Python 3.12 and [`uv`](https://docs.astral.sh/uv/).
 
 ```bash
 uv sync
-uv run pytest -v
+uv run pytest -q
 uv run ruff check .
 uv run ruff format --check .
 uv run pyright
 ```
 
-The `callback` console script is installed into the project's virtual environment by `uv sync`:
-
-```bash
-uv run callback --version
-```
+`CLAUDE.md` holds the repository's non-negotiables and the defects it has actually shipped, and
+`docs/lessons/` records design decisions with their evidence.
 
 ## License
 

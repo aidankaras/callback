@@ -4,12 +4,13 @@ Guidance for anyone, human or agent, contributing to callback.
 
 ## What this project is
 
-callback is a Python package (`core`) of deterministic quality gates for a generated
-document — grounding, round-trip parseability, hidden-channel detection, layout lints,
-and a hash-chained ledger — that will later be exposed over MCP as a Claude Code plugin.
-Phase 1 builds and proves the deterministic substrate with no LLM anywhere in `core`;
-the plugin surface (MCP server, playbook skills, subagent definitions, write guard) is
-the final phase-1 task, built once the substrate underneath it is trustworthy.
+callback is a Claude Code plugin over a Python package (`core`) of deterministic quality
+gates for a generated resume or cover letter: grounding, structural claims, round-trip
+parseability, hidden-channel detection and layout lints, composed by `core/gates.py` and
+run by the `callback` CLI. The plugin surface today is the `tailor` skill
+(`skills/tailor/`) and the write-guard hook (`hooks/`); the skill drives the CLI. No LLM
+runs anywhere in `core`. Not built yet: sealing into `final/`, the hash-chained ledger,
+and an MCP server.
 
 ## Non-negotiables
 

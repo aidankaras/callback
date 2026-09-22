@@ -1,61 +1,64 @@
 # Limitations
 
-This document tracks what `callback`'s verification gates do and do not guarantee today, and
-separately records functionality that is planned but not yet built, and functionality that is
-explicitly out of scope rather than merely unimplemented.
+What `callback`'s checks do and do not guarantee, what is not built yet, and what is out of scope
+by design rather than merely unimplemented.
 
-## What's implemented today
+## What the checks cannot know
 
-- **Grounding**: every factual claim in a generated document is derivable from data the candidate
-  supplied. This is a claim about traceability, not about truthfulness of the underlying facts —
-  `callback` cannot verify that a fact the candidate entered is itself accurate — and it does not
-  catch every kind of invented content; see Known constraints below for the specific gap.
-- **Deterministic rendering**: a structured document renders to PDF such that the same input always
-  produces the same bytes, on any machine — system fonts are never substituted for the vendored
-  family, a compiler warning always aborts the render rather than producing a silently-different
-  result, and the document's embedded timestamp is fixed. This is a guarantee about the rendering
-  step itself, not about the rendered document's structure or content; the checks below that will
-  measure that PDF are not built yet.
+- **Whether a confirmed fact is true.** Every guarantee is about traceability: a document says
+  nothing its cited, candidate-confirmed facts do not. A fact the candidate confirmed but that is
+  false passes everything.
+- **Ordinary wording.** Bullets and cover-letter sentences are checked for numbers, dates,
+  technologies, mid-sentence capitalised names, a fixed list of claim words, and spelled-out
+  numbers. Ordinary verbs and nouns are not compared: "led the migration" and "helped with the
+  migration" ground identically.
+- **Which occurrence of a value a claim means.** Numbers match by value against the cited facts,
+  not by position. A quantity recorded with a percent unit cannot back a plain count, but a quantity
+  recorded with no unit can back either.
+- **Whether a saved posting is the real one.** A cover letter's claims about the employer are held
+  to the posting saved in `inbox/<job>.md`. `callback` does not fetch postings, so it cannot tell a
+  genuine posting from an edited one.
 
-## Planned, not yet built
+## Guards that are defence in depth, not containment
 
-Text extraction and metadata inspection do not exist in `core/` yet, so neither of the following is
-checked today:
+- **The write guard** refuses an assistant's writes to the fact store, the application record,
+  sealed documents and itself. For Bash, it resolves the paths a command names, after `cd`,
+  `pushd` and `-C`, and with `~`, `$HOME` and `$CALLBACK_HOME` expanded. It does not catch a path a
+  command builds at run time: from another variable, `find`, an encoded string, or a script it runs.
+  It guards against accidental writes, not a determined process.
+- **Confirmation needs a terminal.** `callback facts confirm` reads from `/dev/tty`, so a process
+  without one cannot confirm a fact. Anyone at the candidate's own terminal can.
+- **The hidden-content screen** reads colour, size, position, rendering mode and Unicode from the PDF
+  and follows form XObjects. It does not measure pixels. The module docstring of
+  `core/checks/hidden.py` lists the remaining channels (zero opacity, clipping, a colour-matched box,
+  CMYK conversion bias). Anything it cannot judge, such as a pattern fill or an unreadable
+  background, fails rather than passes.
 
-- **Parseability**: a document's rendered layout will be checked against an independent,
-  deliberately pessimistic text extraction to confirm its field structure and reading order survive
-  intact. This will prove the document is *structurally* unambiguous to a generic text extractor —
-  it is not intended as a compatibility claim about any specific applicant-tracking system.
-- **No hidden channels**: extracted text will be checked against visible text, and document metadata
-  will be constrained to carry nothing beyond title and author, ruling out a document that presents
-  different content to a human reader than to an automated one.
+## Not built yet
+
+- **Sealing a finished document** into `final/` with a keyed hash, and a hash-chained ledger of what
+  was generated from which facts. Today `build` writes a draft, and `apply` refuses a draft whose
+  PDF changed after it was gated.
+- **Research about an employer.** A cover letter may say about the company only what the posting
+  says.
+- **An MCP server.** The skill drives the command line.
 
 ## Explicit non-goals
 
-- No job-board search, scraping for open positions, or credential storage.
-- No browser automation or automated submission to any platform.
+- No automated submission to any platform, and no browser automation that clicks submit. Every major
+  application platform either requires the employer's own credentials to post an application or
+  forbids automation. `callback apply` builds a packet and the candidate submits it.
+- No scraping of job boards whose terms forbid it, and no credential storage.
 - No attempt to evade or test against AI-generated-text detectors.
-- No claim of compatibility with any named applicant-tracking system or vendor.
-- No at-rest encryption of locally stored data.
+- No claim of compatibility with any named applicant-tracking system. The parseability check
+  proves a document is structurally unambiguous to a naive extractor, nothing more.
+- No at-rest encryption of locally stored data. Files are `0600` and directories `0700` under
+  `$CALLBACK_HOME`.
 
 ## Known constraints
 
-- The grounding check operates on the facts and derivations it is given; it cannot detect a fact
-  that is internally consistent but factually false.
-- The grounding check's entity matching is narrow by design: a word in generated text is checked
-  against the cited facts only when it is a known technology (matched case-insensitively against
-  the alias table) or "identifier-shaped" — it contains a digit, `+`, `#` or `.`, or is 2-6 letters
-  that are all capitals — and starts with a capital letter. An invented tool or product name that is
-  neither a known alias nor identifier-shaped (a plausible-looking but nonexistent name in ordinary
-  title case) passes through unchecked; catching that class of fabrication is a job for later
-  review, not for this gate.
-- The grounding check's number matching is by value, not by occurrence: it asks "does some cited
-  fact or derivation produce this value anywhere," not "does this specific claim in the text trace
-  to this specific fact." A bullet with two independent numeric claims that happen to share a value
-  (a genuinely sourced `42` and an unrelated, fabricated `42%` in the same sentence) will ground
-  both from the one stored figure. Linking a specific span of text to a specific fact is out of
-  scope.
-- The sensitive-attribute screen on fact storage is a heuristic refusal of self-attributed
-  protected attributes (e.g. "I am married", "Date of birth: ..."), not a general PII classifier;
-  it may occasionally refuse legitimate text that happens to match a pattern, and the remedy is to
-  rephrase the fact rather than to bypass the check.
+- The sensitive-attribute screen on fact storage is a heuristic refusal of self-attributed protected
+  attributes (for example "I am married", "Date of birth: ..."), not a general PII classifier. It may
+  refuse legitimate text that happens to match; rephrase the fact rather than bypass the check.
+- Section titles come from a fixed list, and a cover letter's courtesy sentences from a short fixed
+  set. An unusual but legitimate title or sentence is refused rather than guessed about.
