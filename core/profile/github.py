@@ -8,9 +8,12 @@ store. The candidate reads the file, edits what is wrong, adds it with
 as for an imported resume.
 
 A fork is someone else's project and is skipped; so is a repository with no
-description, which would give a fact no text to ground a bullet in. A
-topic becomes an entity only when the alias table knows it as a
-technology: "python" does, "event-study" does not.
+description, which would give a fact no text to ground a bullet in.
+
+The entities are the repository's name and its primary language, which
+GitHub computes from the code the repository holds. Topics are not used:
+they are tags anyone can set, not evidence of what the code does, and an
+entity is what lets a bullet name a technology.
 """
 
 from __future__ import annotations
@@ -19,7 +22,7 @@ import re
 from dataclasses import dataclass, field
 from typing import cast
 
-from core.aliases import ALIAS_TABLE, canonicalize
+from core.aliases import canonicalize
 from core.discovery.fetch import DiscoveryError, Fetcher
 from core.profile.models import Dates, Fact, FactKind, Provenance, Trust
 
@@ -73,10 +76,6 @@ def draft_facts(user: str, payload: object) -> Drafted:
         language = repo.get("language")
         if isinstance(language, str) and language:
             entities.append(canonicalize(language))
-        topics = repo.get("topics")
-        for topic in cast("list[object]", topics) if isinstance(topics, list) else []:
-            if isinstance(topic, str) and topic.lower() in ALIAS_TABLE:
-                entities.append(canonicalize(topic))
         start, end = _month(repo.get("created_at")), _month(repo.get("pushed_at"))
         drafted.facts.append(
             Fact(

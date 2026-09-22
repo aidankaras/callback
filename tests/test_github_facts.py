@@ -50,8 +50,8 @@ def test_each_own_described_repository_becomes_an_unconfirmed_project_fact() -> 
     assert fact.text == (
         "signal-lab: Event-study pipeline over public filings, with point-in-time labels."
     )
-    # Topics the alias table does not know are not technologies.
-    assert fact.entities == ["signal-lab", "Python", "PostgreSQL"]
+    # Topics are tags, not evidence: "postgresql" is one here and is not an entity.
+    assert fact.entities == ["signal-lab", "Python"]
     assert fact.dates is not None
     assert (fact.dates.start, fact.dates.end) == ("2026-03", "2026-09")
     assert fact.provenance.trust is Trust.IMPORT_UNCONFIRMED

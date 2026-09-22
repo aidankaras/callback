@@ -230,8 +230,9 @@ uv run --project <repo root> callback apply <job-id> --company "<company>" --tit
   - Propose each status change with the sender, date and one quoted line.
   - Record only the ones the user approves, with
     `uv run --project <repo root> callback outcome <job-id> <kind>`.
-- **Enriching facts.** When the user links a public GitHub profile,
-  portfolio or course page, read it and draft facts from what it
+- **Enriching facts.** For a GitHub profile, `callback facts github <user>`
+  drafts the project facts (see step 2). For a portfolio or course page,
+  read it and draft facts from what it
   demonstrably shows. Each draft carries
   `provenance: {source: "assistant:<url>", trust: import_unconfirmed}`, one
   fact per project and one per skill it actually evidences. Add them with

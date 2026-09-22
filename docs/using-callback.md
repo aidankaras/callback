@@ -23,7 +23,7 @@ below for you, except `facts confirm`, which only you can run.
 | `callback import <resume.pdf>` | Extracts the text of an existing PDF into `inbox/`, after screening it for hidden text | 0 clean, 3 unreadable, 4 hidden content found or a page could not be screened |
 | `callback facts add <facts.yaml>` | Adds facts, all unconfirmed. Each fact is accepted or refused on its own, and one that arrives already confirmed is refused | 0, 1 if any fact was refused, 3 unreadable file |
 | `callback facts list [--unconfirmed]` | Lists stored facts | 0 |
-| `callback facts github <user>` | Drafts an unconfirmed `project` fact for each of your own public, described, non-fork repositories, to `inbox/github-<user>.yaml`. Nothing reaches the store until you `facts add` the file | 0, 1 nothing drafted, 3 |
+| `callback facts github <user>` | Drafts an unconfirmed `project` fact (description as text; name and primary language as entities) for each of your own public, described, non-fork repositories, to `inbox/github-<user>.yaml`. Nothing reaches the store until you `facts add` the file | 0, 1 nothing drafted, 3 |
 | `callback facts confirm [ids...]` | Asks you, fact by fact, whether each is true | 0, 3 if not run from a terminal or an id is unknown or web-sourced |
 | `callback build <resume.yaml> --job <id>` | Renders the PDF and runs every gate, writing to `outputs/<id>/draft/` | 0 pass, 1 warn, 2 fail, 3 could not build |
 | `callback export <resume.yaml>` | Prints the resume as plain text for forms that want it pasted, and checks every critical field survived | 0, 2 if a field was lost, 3 unreadable document |
