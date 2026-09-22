@@ -57,6 +57,7 @@ postings anyway.
 | `callback postings resolve <url> --company "<company>"` | The canonical posting behind a Greenhouse, Lever or Ashby URL, or an employer careers page's `schema.org/JobPosting` data | 0, 3 |
 | `callback postings take <id> --job <job-id>` | Saves the posting's own text to `inbox/<job-id>.md` | 0, 3 |
 | `callback profile --work-authorization … --graduation … --degree …` | What eligibility is judged against | 0, 3 |
+| `callback agenda` | What to do next, most time-sensitive first: interviews recorded with no prep pack, drafts built but never sent, the five freshest eligible postings at companies not yet applied to, and applications silent for 21+ days. Each line names the command that acts; this one never does | 0, 3 |
 | `callback template save <job-id> --name <name>` / `list` / `use <name> --job <job-id> [--overwrite]` | Saves a document whose build passed under a name, and copies it into another job's draft as a starting point. The copy is an ordinary draft: every gate runs against it again, and its bullets still cite facts that must still be confirmed | 0, 3 |
 | `callback fit <job-id>` | The same knockouts, plus every technology the posting names that the alias table knows: which ones confirmed facts back (with the fact ids to cite) and which are missing | 0 eligible or stretch, 1 a question, 2 knockout, 3 |
 | `callback eligibility <job-id>` | Knockout requirements in a saved posting, each quoted | 0 eligible or stretch, 1 a question, 2 knockout, 3 |

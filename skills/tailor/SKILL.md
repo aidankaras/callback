@@ -249,6 +249,12 @@ uv run --project <repo root> callback apply <job-id> --company "<company>" --tit
 
 ## Keeping the record current
 
+- **Where to start a session.** `callback agenda` answers "what now" from what
+  is already recorded: a booked interview with no prep pack, a draft built but
+  never sent, the freshest eligible postings, and applications gone quiet. Lead
+  with it when the user asks what to work on, and read its lines rather than
+  re-deriving them from `triage` and `applications`.
+
 - **Status from email.** If the Gmail connector is available, and when the
   user asks, search their mail for replies about each recorded application
   (`callback applications`): interview invitations, assessments,

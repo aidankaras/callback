@@ -102,6 +102,11 @@ def build_parser() -> argparse.ArgumentParser:
     fit_cmd.add_argument("job", help="job id of a posting saved in inbox/")
     fit_cmd.set_defaults(handler=_cmd_fit)
 
+    sub.add_parser(
+        "agenda",
+        help="what to do next: interviews to prepare, postings to take, quiet applications",
+    ).set_defaults(handler=_cmd_agenda)
+
     templates = sub.add_parser(
         "template", help="reuse a document that passed as the starting point for the next one"
     )
@@ -468,6 +473,30 @@ def _cmd_fit(args: argparse.Namespace) -> int:
     for tech in result.missing:
         print(f"  missing  {tech}")
     return {"eligible": 0, "stretch": 0, "unknown": 1, "knockout": 2}[result.eligibility.verdict]
+
+
+def _cmd_agenda(_args: argparse.Namespace) -> int:
+    from datetime import UTC, datetime
+
+    from core.agenda import agenda, render
+    from core.apply import ApplyError, load_applications
+    from core.discovery.store import load_postings
+    from core.profile.store import StoreError, load_facts
+    from core.triage import load_profile
+
+    try:
+        result = agenda(
+            list(load_postings().values()),
+            load_applications(),
+            load_profile(),
+            load_facts(),
+            now=datetime.now(tz=UTC),
+        )
+    except (ApplyError, StoreError, OSError, ValueError) as exc:
+        print(f"callback agenda: {exc}", file=sys.stderr)
+        return 3
+    print(render(result))
+    return 0
 
 
 def _cmd_template_save(args: argparse.Namespace) -> int:
