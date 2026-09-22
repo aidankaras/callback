@@ -164,10 +164,19 @@ def confirm(ids: list[str], *, open_tty: Callable[[], Terminal] | None = None) -
     unknown = [i for i in ids if i not in facts]
     if unknown:
         raise ConfirmError(f"no such fact(s): {unknown}")
-    targets = [facts[i] for i in ids] if ids else [f for f in facts.values() if not f.selectable()]
-    web = [f.id for f in targets if f.provenance.trust is Trust.WEB]
-    if web:
-        raise ConfirmError(f"web-sourced facts cannot be confirmed as the candidate's own: {web}")
+    if ids:
+        targets = [facts[i] for i in ids]
+        web = [f.id for f in targets if f.provenance.trust is Trust.WEB]
+        if web:
+            raise ConfirmError(
+                f"web-sourced facts cannot be confirmed as the candidate's own: {web}"
+            )
+    else:
+        # Offering everything unconfirmed skips web facts rather than refusing:
+        # one stored piece of research must not block confirming everything else.
+        targets = [
+            f for f in facts.values() if not f.selectable() and f.provenance.trust is not Trust.WEB
+        ]
     targets = [f for f in targets if not f.selectable()]
     if not targets:
         return []

@@ -165,6 +165,11 @@ def test_the_application_record_is_not_writable_by_a_tool(home: Path) -> None:
         "pushd ~/.callback/inbox && rm ../facts.yaml",
         "git -C ~/.callback/inbox checkout -- ../facts.yaml",
         "tar --directory=$HOME/.callback/inbox -xf backup.tar ../facts.yaml",
+        # A look-only command, or a cd, still writes through a redirect.
+        "ls > ~/.callback/facts.yaml",
+        "stat x >>~/.callback/.key",
+        "du 2>~/.callback/ledger.log",
+        "cd /tmp > ~/.callback/facts.yaml",
     ],
 )
 def test_the_default_home_and_its_ordinary_spellings_are_guarded(

@@ -745,3 +745,44 @@ def test_a_technology_ending_a_sentence_is_not_misread_as_an_identifier() -> Non
         Verdict.PASS,
         [],
     )
+
+
+# --- an ongoing role has no end date ----------------------------------------------------
+
+
+def _dated(fid: str, dates: Dates | None) -> Fact:
+    return Fact(
+        id=fid,
+        kind=FactKind.EXPERIENCE_DETAIL,
+        text="Built the reporting dashboard",
+        dates=dates,
+        provenance=Provenance(source="x", trust=Trust.USER_CONFIRMED),
+    )
+
+
+ONGOING = _dated("now", Dates(start="2023-01"))
+CLOSED = _dated("then", Dates(start="2020-01", end="2021-06"))
+
+
+@pytest.mark.parametrize(
+    ("text", "cited", "grounded"),
+    [
+        ("Built the reporting dashboard in 2024", [ONGOING], True),
+        ("Built the reporting dashboard in March 2024", [ONGOING], True),
+        # Cited beside a finished role, the current one is still unbounded.
+        ("Built the reporting dashboard in 2024", [ONGOING, CLOSED], True),
+        ("Built the reporting dashboard in March 2024", [ONGOING, CLOSED], True),
+        # The open end does not open the start.
+        ("Built the reporting dashboard in 2019", [ONGOING], False),
+        ("Built the reporting dashboard in 2024", [CLOSED], False),
+        # No dates at all ground no year.
+        ("Built the reporting dashboard in 2024", [_dated("x", None)], False),
+    ],
+)
+def test_a_year_is_grounded_by_an_ongoing_role(
+    text: str, cited: list[Fact], grounded: bool
+) -> None:
+    """Mutations: treat a missing end as disqualifying -- the ongoing cases
+    fail; take the closed fact's end for the hull -- the mixed cases fail."""
+    _, found = check_bullet(text, cited)
+    assert (found == []) is grounded, found

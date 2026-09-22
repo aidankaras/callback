@@ -209,11 +209,15 @@ def _year_within_hull(value: float, start: str | None, end: str | None) -> bool:
     year-only date unable to win a max comparison against a same-year
     month-precision date. Comparing the bare year as an integer against the
     year components of the hull sidesteps that precision mismatch entirely.
+
+    A missing bound is open, as in the month check: `end` is None for an
+    ongoing role. With neither bound the facts carry no dates, and a year
+    cannot be grounded in them.
     """
-    if start is None or end is None:
+    if start is None and end is None:
         return False
     year = int(value)
-    return int(start[:4]) <= year <= int(end[:4])
+    return (start is None or int(start[:4]) <= year) and (end is None or year <= int(end[:4]))
 
 
 def checkable_entity_tokens(text: str) -> list[str]:

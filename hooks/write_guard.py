@@ -169,10 +169,14 @@ def check_bash(command: str, cwd: Path) -> None:
             "confirm",
         ]:
             deny("`callback facts confirm` must be typed by the candidate in their own terminal")
+        # A redirect turns any command into a write, so a segment with one is
+        # never exempt: `ls > facts.yaml` truncates the file as surely as `echo`.
+        redirects = any(">" in w for w in words)
         if words[0] in {"cd", "pushd"} and len(words) > 1:
             bases += [base / _expand(words[1]) for base in bases]
-            continue
-        if words[0] in _LOOK_ONLY:
+            if not redirects:
+                continue
+        if words[0] in _LOOK_ONLY and not redirects:
             continue
         local = list(bases)
         checked: list[str] = []

@@ -134,6 +134,25 @@ def test_a_web_sourced_fact_can_never_be_confirmed(tmp_path: Path) -> None:
     assert not load_facts()["w"].selectable()
 
 
+def test_a_stored_web_fact_does_not_block_confirming_the_rest(tmp_path: Path) -> None:
+    """Named, a web fact is refused; offered implicitly, it is skipped.
+    Mutation: refuse it in the implicit set too -- nothing is confirmed."""
+    web = _imported("w", "Company raised a Series B") | {
+        "provenance": {"source": "web:example.com", "trust": "web"}
+    }
+    add_from_file(_facts_file(tmp_path, [web, _imported("a", "one")]))
+
+    class _Tty(io.TextIOBase):
+        def readline(self, size: int = -1, /) -> str:
+            return "y\n"
+
+        def write(self, s: str, /) -> int:
+            return len(s)
+
+    assert confirm([], open_tty=_Tty) == ["a"]
+    assert not load_facts()["w"].selectable()
+
+
 # --- the command line ------------------------------------------------------------
 
 

@@ -197,7 +197,13 @@ def date_hull(facts: Sequence[Fact]) -> tuple[str | None, str | None]:
     enforce that invariant either. This function only takes the min of
     every start and the max of every end it is handed, whatever those
     values are; a caller must not assume a fact's own dates arrive in order.
+
+    A fact with a start and no end is ongoing, so the hull has no end either,
+    whatever end dates the other cited facts carry: otherwise citing a current
+    role beside a finished one would bound the current one by the other's end.
     """
-    starts = [fact.dates.start for fact in facts if fact.dates and fact.dates.start]
-    ends = [fact.dates.end for fact in facts if fact.dates and fact.dates.end]
-    return (min(starts) if starts else None, max(ends) if ends else None)
+    dated = [fact.dates for fact in facts if fact.dates]
+    starts = [d.start for d in dated if d.start]
+    ends = [d.end for d in dated if d.end]
+    ongoing = any(d.start and not d.end for d in dated)
+    return (min(starts) if starts else None, max(ends) if ends and not ongoing else None)
