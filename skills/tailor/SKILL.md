@@ -140,6 +140,24 @@ bullets; say why the experience fits. Never write about salary,
 availability, relocation or sponsorship: a signed letter must not concede
 terms, and the check fails on it.
 
+## Preparing the application
+
+Only once the user has read the draft and wants to apply, run:
+
+```bash
+callback apply <job-id> --company "<company>" --title "<role>" \
+  --location "<location>" --url "<posting url>" --source <greenhouse|lever|ashby|workday|linkedin|handshake|indeed|company-site|email|referral|other>
+```
+
+- `--accept-warnings` only if the user has read the warnings and said to
+  proceed.
+- The packet (resume, cover letter, plain-text resume, form fields) lands in
+  `outputs/<job-id>/packet/`. **callback never submits**, and neither do you:
+  tell the user where the packet is and where to submit it.
+- A refusal is a rule, not an obstacle: already applied, the same posting
+  within 90 days, or 10 in the last 24 hours. Report it; don't route around it.
+- Afterwards, record what happened with `callback outcome <job-id> <kind>`.
+
 ## What the gates check (so you know what "fix the document" means)
 
 | Gate | Fails when |
