@@ -156,3 +156,25 @@ def test_ranking_puts_knockouts_last_and_prefers_fresh_postings_you_can_evidence
     assert fresh.coverage == (["Python", "SQL"], [])
     # Only technologies the alias table recognises count; it has no "Rust".
     assert ranked[2].coverage == ([], ["Kubernetes", "PyTorch"])
+
+
+def test_the_triage_commands(
+    tmp_path: object, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from pathlib import Path
+
+    from core.cli import main
+    from core.paths import ensure_home
+
+    assert isinstance(tmp_path, Path)
+    monkeypatch.setenv("CALLBACK_HOME", str(tmp_path / "cb"))
+    home = ensure_home()
+    assert main(["profile", "--work-authorization", "US citizen", "--graduation", "May 2028"]) == 0
+    assert "May 2028" in capsys.readouterr().out
+    (home / "inbox" / "ko.md").write_text("# Intern - Acme\n\nClass of 2027 only.\n")
+    assert main(["eligibility", "ko"]) == 2
+    out = capsys.readouterr().out
+    assert out.startswith("KNOCKOUT") and "Class of 2027 only." in out
+    (home / "inbox" / "ok.md").write_text("# Intern - Acme\n\nPython and SQL.\n")
+    assert main(["eligibility", "ok"]) == 0
+    assert main(["triage"]) == 0

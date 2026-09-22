@@ -71,6 +71,27 @@ def build_parser() -> argparse.ArgumentParser:
     p_take.add_argument("--job", required=True)
     p_take.set_defaults(handler=_cmd_postings_take)
 
+    profile = sub.add_parser("profile", help="what eligibility is judged against")
+    profile.add_argument(
+        "--work-authorization", help='e.g. "US citizen", "F-1, will need sponsorship"'
+    )
+    profile.add_argument("--graduation", help='expected graduation, e.g. "May 2028"')
+    profile.add_argument(
+        "--degree", choices=["high school", "associate", "bachelor", "master", "phd"]
+    )
+    profile.set_defaults(handler=_cmd_profile)
+
+    triage = sub.add_parser("triage", help="rank stored postings: eligibility, evidence, freshness")
+    triage.add_argument(
+        "--days", type=int, default=None, help="only postings first seen this recently"
+    )
+    triage.add_argument("--limit", type=int, default=20)
+    triage.set_defaults(handler=_cmd_triage)
+
+    elig = sub.add_parser("eligibility", help="check a saved posting for knockout requirements")
+    elig.add_argument("job", help="job id of a posting saved in inbox/")
+    elig.set_defaults(handler=_cmd_eligibility)
+
     app = sub.add_parser(
         "apply",
         help="build the application packet for a gated draft and record it (never submits)",
@@ -262,6 +283,86 @@ def _cmd_postings_take(args: argparse.Namespace) -> int:
         return 3
     print(f"posting saved to {path}")
     return 0
+
+
+def _cmd_profile(args: argparse.Namespace) -> int:
+    from core.paths import ensure_home
+    from core.triage import load_profile, save_profile
+
+    ensure_home()
+    try:
+        current = load_profile()
+        updates = {
+            k: v
+            for k, v in (
+                ("work_authorization", args.work_authorization),
+                ("graduation", args.graduation),
+                ("degree", args.degree),
+            )
+            if v is not None
+        }
+        profile = current.model_copy(update=updates)
+        save_profile(profile)
+    except (ValueError, OSError) as exc:
+        print(f"callback profile: {exc}", file=sys.stderr)
+        return 3
+    for key, value in profile.model_dump().items():
+        print(f"{key:<20} {value if value is not None else '(not set)'}")
+    return 0
+
+
+def _print_eligibility(eligibility: object) -> None:
+    from core.triage import Eligibility
+
+    assert isinstance(eligibility, Eligibility)
+    for f in eligibility.findings:
+        print(f"  {f.level.upper():<9} {f.rule}: {f.reason}")
+        print(f'            "{f.quote[:160]}"')
+
+
+def _cmd_triage(args: argparse.Namespace) -> int:
+    from datetime import UTC, datetime, timedelta
+
+    from core.discovery.store import load_postings
+    from core.profile.store import StoreError, load_facts
+    from core.triage import load_profile, rank
+
+    now = datetime.now(tz=UTC)
+    try:
+        postings = list(load_postings().values())
+        profile = load_profile()
+        facts = load_facts()
+    except (*_discovery_errors(), StoreError, ValueError) as exc:
+        print(f"callback triage: {exc}", file=sys.stderr)
+        return 3
+    if args.days is not None:
+        postings = [p for p in postings if now - p.first_seen <= timedelta(days=args.days)]
+    for r in rank(postings, profile, facts, now=now)[: args.limit]:
+        have, missing = r.coverage
+        print(
+            f"{r.score:>6.2f}  {r.eligibility.verdict:<9} {r.age_days:>3}d  "
+            f"{r.posting.company} / {r.posting.title}  [{r.posting.id}]"
+        )
+        if have or missing:
+            evidenced, gaps = ", ".join(have) or "-", ", ".join(missing) or "-"
+            print(f"        evidenced: {evidenced}   missing: {gaps}")
+        _print_eligibility(r.eligibility)
+    return 0
+
+
+def _cmd_eligibility(args: argparse.Namespace) -> int:
+    from core.paths import resolve_inside
+    from core.triage import check_eligibility, load_profile
+
+    try:
+        text = resolve_inside(f"inbox/{args.job}.md").read_text(encoding="utf-8")
+        eligibility = check_eligibility(text, load_profile())
+    except (OSError, ValueError) as exc:
+        print(f"callback eligibility: {exc}", file=sys.stderr)
+        return 3
+    print(eligibility.verdict.upper())
+    _print_eligibility(eligibility)
+    return {"eligible": 0, "stretch": 0, "unknown": 1, "knockout": 2}[eligibility.verdict]
 
 
 def _cmd_apply(args: argparse.Namespace) -> int:
