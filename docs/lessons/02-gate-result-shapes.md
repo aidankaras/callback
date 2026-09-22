@@ -89,3 +89,15 @@ it reads as conforming while telling a reader less.
   that mark the cycle.
 - `core/checks/roundtrip.py`, `core/checks/hidden.py` — the two gates that
   return their own shapes.
+
+## Outcome (recorded later)
+
+The prediction did not hold. When the remaining gates were built, they were
+composed by `core/gates.py`, which adapts each gate's own result into a
+`GateOutcome` and folds them into a `GateReport`, rather than having every gate
+return `GateResult`. `GateResult` and `check_document_gate` were left with no
+production caller, reached only by their own tests, and carrying a load-order
+workaround for an import nothing used. Both were removed. The lesson survives the
+code: a shared shape introduced ahead of its consumers is a guess about how they
+will be composed, and here the composition layer, once it existed, wanted a
+different shape.

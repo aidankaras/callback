@@ -182,8 +182,9 @@ def _discovery_errors() -> tuple[type[Exception], ...]:
     from pydantic import ValidationError
 
     from core.discovery.fetch import DiscoveryError
+    from core.paths import OutsideHomeError
 
-    return (DiscoveryError, ValidationError, OSError)
+    return (DiscoveryError, ValidationError, OSError, OutsideHomeError)
 
 
 def _cmd_targets_add(args: argparse.Namespace) -> int:
