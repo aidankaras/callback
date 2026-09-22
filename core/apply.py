@@ -214,6 +214,22 @@ def _check_draft(draft: Path, *, accept_warnings: bool) -> tuple[Path, Path | No
     return resume, letter
 
 
+def _check_answers(draft: Path) -> str | None:
+    """The form answers to include, if there are any, once their record says they may be."""
+    path = draft / "answers.md"
+    if not path.is_file():
+        return None
+    record = _read_record(draft / "answers-report.json", "form answers", ("verdict", "sha256"))
+    if record["verdict"] != "pass":
+        raise ApplyError("the form answers did not pass their checks: run `callback answers` again")
+    text = path.read_text(encoding="utf-8")
+    if hashlib.sha256(text.encode("utf-8")).hexdigest() != record["sha256"]:
+        raise ApplyError(
+            "answers.md has changed since it was checked: run `callback answers` again"
+        )
+    return text
+
+
 def _check_volume(target: Target, existing: list[Application], now: datetime) -> None:
     for prior in existing:
         if prior.job_id == target.job_id:
@@ -248,6 +264,7 @@ def apply(
     _aware(now)
     draft = resolve_inside(f"outputs/{target.job_id}/draft")
     resume, letter = _check_draft(draft, accept_warnings=accept_warnings)
+    answers = _check_answers(draft)
     existing = load_applications()
     prior = next((a for a in existing if a.job_id == target.job_id), None)
     if refresh:
@@ -269,6 +286,8 @@ def apply(
         write_private_bytes(staging / "resume.pdf", resume.read_bytes())
         if letter is not None:
             write_private_bytes(staging / "cover-letter.pdf", letter.read_bytes())
+        if answers is not None:
+            write_private(staging / "answers.md", answers)
         write_private(staging / "resume.txt", to_text(doc))
         identity = doc.identity
         fields = {

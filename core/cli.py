@@ -92,6 +92,12 @@ def build_parser() -> argparse.ArgumentParser:
     elig.add_argument("job", help="job id of a posting saved in inbox/")
     elig.set_defaults(handler=_cmd_eligibility)
 
+    answers = sub.add_parser(
+        "answers", help="check free-text application-form answers and write them paste-ready"
+    )
+    answers.add_argument("doc", type=Path, help="answers (YAML)")
+    answers.set_defaults(handler=_cmd_answers)
+
     app = sub.add_parser(
         "apply",
         help="build the application packet for a gated draft and record it (never submits)",
@@ -363,6 +369,21 @@ def _cmd_eligibility(args: argparse.Namespace) -> int:
     print(eligibility.verdict.upper())
     _print_eligibility(eligibility)
     return {"eligible": 0, "stretch": 0, "unknown": 1, "knockout": 2}[eligibility.verdict]
+
+
+def _cmd_answers(args: argparse.Namespace) -> int:
+    from core.answers import AnswersError, build_answers
+    from core.profile.store import StoreError, load_facts
+
+    try:
+        result, out_dir = build_answers(args.doc, load_facts())
+    except (AnswersError, StoreError, OSError) as exc:
+        print(f"callback answers: {exc}", file=sys.stderr)
+        return 3
+    print(f"{result.verdict.upper()}  {out_dir / 'answers.md'}")
+    for finding in result.findings:
+        print(f"  {finding}")
+    return 0 if result.verdict == "pass" else 2
 
 
 def _cmd_apply(args: argparse.Namespace) -> int:

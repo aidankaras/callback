@@ -303,3 +303,27 @@ def test_refresh_still_requires_a_gated_draft_and_a_prior_record(home: Path) -> 
     (home / "outputs" / "acme-ml" / "draft" / "resume.pdf").write_bytes(b"%PDF tampered")
     with pytest.raises(ApplyError, match="changed since"):
         apply(_target(), now=NOW, refresh=True)
+
+
+@pytest.mark.parametrize("state", ["pass", "fail", "edited"])
+def test_form_answers_join_the_packet_only_when_checked_and_unchanged(
+    home: Path, state: str
+) -> None:
+    """Mutation: skip the answers' hash check -- the edited case is packed."""
+    _built(home, "acme-ml")
+    draft = home / "outputs" / "acme-ml" / "draft"
+    text = "# answers\n\nWhy us? Because.\n"
+    (draft / "answers.md").write_text(text, encoding="utf-8")
+    record = {
+        "verdict": "fail" if state == "fail" else "pass",
+        "sha256": hashlib.sha256(text.encode()).hexdigest(),
+    }
+    (draft / "answers-report.json").write_text(json.dumps(record), encoding="utf-8")
+    if state == "edited":
+        (draft / "answers.md").write_text(text + "Also I founded a company.\n", encoding="utf-8")
+    if state == "pass":
+        packet = apply(_target(), now=NOW)
+        assert (packet / "answers.md").read_text() == text
+    else:
+        with pytest.raises(ApplyError, match="answers"):
+            apply(_target(), now=NOW)
