@@ -39,6 +39,9 @@ by design rather than merely unimplemented.
 - **Sealing a finished document** into `final/` with a keyed hash, and a hash-chained ledger of what
   was generated from which facts. Today `build` writes a draft, and `apply` refuses a draft whose
   PDF changed after it was gated.
+- **Job boards other than Greenhouse, Lever and Ashby.** Workday forbids
+  automated access; generic careers pages (via `schema.org/JobPosting`) and
+  aggregator APIs are not read yet.
 - **Research about an employer.** A cover letter may say about the company only what the posting
   says.
 - **An MCP server.** The skill drives the command line.
@@ -48,7 +51,8 @@ by design rather than merely unimplemented.
 - No automated submission to any platform, and no browser automation that clicks submit. Every major
   application platform either requires the employer's own credentials to post an application or
   forbids automation. `callback apply` builds a packet and the candidate submits it.
-- No scraping of job boards whose terms forbid it, and no credential storage.
+- No scraping of job boards whose terms forbid it (LinkedIn, Indeed, Handshake, Workday,
+  Glassdoor), no evasion of anti-bot measures, and no credential storage.
 - No attempt to evade or test against AI-generated-text detectors.
 - No claim of compatibility with any named applicant-tracking system. The parseability check
   proves a document is structurally unambiguous to a naive extractor, nothing more.

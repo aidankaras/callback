@@ -21,6 +21,7 @@ something you can re-run, not something the model reports about itself. There is
 | The PDF is machine-readable | the rendered PDF is re-extracted with a deliberately naive parser, and every critical field must be recovered in order |
 | Nothing hidden | no invisible, tiny, off-page or unpainted text, no suspicious Unicode, no unexpected metadata; anything the screen cannot judge fails rather than passes |
 | Cover letters stay honest | each sentence declares what it is about: claims about the candidate rest on their facts and never on the posting, names, numbers and claim words about the employer only on the posting; commitment language (salary, availability, relocation, sponsorship) fails |
+| Postings come from the source | discovery reads employers' documented public posting APIs over HTTPS, politely, and refuses LinkedIn, Indeed, Handshake, Workday and Glassdoor by name |
 | Applications stay reasonable | at most 10 in 24 hours, no re-apply to the same posting within 90 days, and a packet is only built from a draft that passed, or whose warnings the candidate accepted |
 
 It does **not** check ordinary wording: "led the migration" and "helped with the migration" are
@@ -38,6 +39,8 @@ Then ask Claude to tailor your resume to a posting. The underlying commands:
 
 | Command | Does |
 |---|---|
+| `callback targets add`, `criteria`, `watch`, `postings` | find postings on employers' own Greenhouse, Lever and Ashby boards, never by scraping job sites |
+| `callback profile`, `eligibility`, `triage` | flag knockout requirements (sponsorship, citizenship, graduation window) quoted from the posting, and rank postings by evidence and freshness |
 | `callback import resume.pdf` | extract an existing resume's text, screening it for hidden content |
 | `callback facts add / list / confirm` | store facts (unconfirmed), list them, confirm them yourself |
 | `callback build resume.yaml --job <id>` | render the PDF and run every gate; exit 0 pass, 1 warn, 2 fail |

@@ -33,6 +33,38 @@ below for you, except `facts confirm`, which only you can run.
 Everything lives under `$CALLBACK_HOME` (default `~/.callback`). Directories there
 are `0700` and files `0600`.
 
+## Finding postings
+
+callback reads postings from employers' own applicant-tracking boards
+(Greenhouse, Lever and Ashby, through their documented public APIs) rather
+than from job boards. Most LinkedIn and Indeed listings are reposts of these.
+
+| Command | What it does | Exit codes |
+|---|---|---|
+| `callback targets add "<company>" --ats <ats> --board <name>` / `targets list` | Choose the companies to watch | 0, 3 |
+| `callback criteria --include "…" --exclude "…"` | Title terms a watch keeps: whole words, with a trailing `*` for a prefix | 0, 3 |
+| `callback watch` | Polls every target and stores new matching postings with when they were first seen | 0, 1 if a board could not be read, 3 |
+| `callback postings list [--days N]` | Stored postings, newest first | 0, 3 |
+| `callback postings resolve <url> --company "<company>"` | The canonical posting behind a Greenhouse, Lever or Ashby URL | 0, 3 |
+| `callback postings take <id> --job <job-id>` | Saves the posting's own text to `inbox/<job-id>.md` | 0, 3 |
+| `callback profile --work-authorization … --graduation … --degree …` | What eligibility is judged against | 0, 3 |
+| `callback eligibility <job-id>` | Knockout requirements in a saved posting, each quoted | 0 eligible or stretch, 1 a question, 2 knockout, 3 |
+| `callback triage [--days N]` | Stored postings ranked: knockouts last, then by evidenced technologies and freshness | 0, 3 |
+
+**Network access.** Discovery is the only part of callback that uses the
+network:
+- It reaches only those three APIs, over HTTPS, with an honest User-Agent
+  and at least a second between requests to a host.
+- LinkedIn, Indeed, Handshake, Workday and Glassdoor forbid automated
+  access, and callback refuses them by name.
+- For a posting found there, find the same role on the employer's own
+  board, or paste its text.
+
+**Eligibility** reads the posting's words for a refusal to sponsor, a
+citizenship or clearance requirement, a graduation window, and graduate-degree
+or years-of-experience requirements. It judges them against your profile and
+quotes each one. It is advice and never blocks a document.
+
 ## Facts
 
 A fact is one thing that is true about you, stated once:

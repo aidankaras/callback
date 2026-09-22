@@ -90,6 +90,38 @@ If `callback facts list` shows no confirmed facts:
 The gap-audit lines `import` prints ("no outcome or figure") are questions to
 ask the user, not findings to fix by inventing a number.
 
+## Finding postings
+
+Postings come from the employer's own board, never from a scraper.
+
+- **Onboarding.** Ask which companies the user wants to watch, then find
+  each one's applicant-tracking board with a web search, e.g.
+  `"<company>" site:boards.greenhouse.io OR site:jobs.lever.co OR site:jobs.ashbyhq.com`.
+  Add each with `callback targets add "<company>" --ats <greenhouse|lever|ashby> --board <name>`.
+  The board name is the path segment after the host in the posting URLs.
+- **Criteria.** Set title terms once:
+  `callback criteria --include "intern,intern*,data scien*,machine learning,data analyst" --exclude "senior,staff,principal,director"`.
+  Terms are whole words; a trailing `*` makes a prefix.
+- **Profile.** Set it once, so eligibility can be judged:
+  `callback profile --work-authorization "<…>" --graduation "<Month Year>" --degree <bachelor|master|phd>`.
+- **Watching.** `callback watch` stores new matches. `callback triage`
+  ranks them: knockouts last, then by what the user can evidence and by
+  freshness. Applying in a posting's first days matters, so suggest the
+  freshest eligible ones first.
+- **Web search** (Firecrawl or other search) for roles at companies not
+  watched, restricted to the ATS domains above. Then
+  `callback postings resolve <url> --company "<company>"` fetches the
+  canonical posting.
+- **LinkedIn, Indeed, Handshake or Workday.** Never fetch or scrape them;
+  they forbid automated access, and callback refuses them. If the user
+  shares one, ask for the company, find the same role on its own board,
+  and resolve that. For a Handshake-only listing, ask the user to paste the
+  text into `inbox/<job-id>.md`, first line `# <role> - <company>`.
+- **Starting a job.** `callback postings take <posting-id> --job <job-id>`
+  saves the employer's own text as the job's posting. Then run
+  `callback eligibility <job-id>`. On a knockout, stop and tell the user
+  why, quoting the posting. On a question, ask it.
+
 ## Each posting
 
 1. **Save the posting.** Write it to `$CALLBACK_HOME/inbox/<job-id>.md`. The
