@@ -227,3 +227,27 @@ def test_the_latest_hiring_thread_is_chosen_not_the_seekers_thread() -> None:
     assert latest_hn_thread(HN_SEARCH) == "100"
     with pytest.raises(DiscoveryError, match="hiring thread"):
         latest_hn_thread({"hits": []})
+
+
+@pytest.mark.parametrize(
+    "target",
+    [
+        "https://www.linkedin.com/jobs/view/1",
+        "http://api.lever.co/v0/postings/acme",
+        "https://example.com/elsewhere",
+    ],
+)
+def test_a_redirect_is_followed_only_to_where_the_fetcher_may_go(target: str) -> None:
+    """urllib follows redirects by default. Mutation: drop the redirect check
+    -- a 301 from an allowed host would reach any of these."""
+    import urllib.request
+
+    from core.discovery.fetch import _CheckedRedirects  # pyright: ignore[reportPrivateUsage]
+
+    request = urllib.request.Request("https://api.lever.co/v0/postings/acme?mode=json")
+    with pytest.raises(DiscoveryError):
+        _CheckedRedirects().redirect_request(request, None, 301, "Moved", {}, target)
+    allowed = _CheckedRedirects().redirect_request(
+        request, None, 301, "Moved", {}, "https://api.lever.co/v0/postings/acme2?mode=json"
+    )
+    assert allowed is not None

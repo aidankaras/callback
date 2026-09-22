@@ -46,6 +46,38 @@ def denied_domain(host: str) -> str | None:
     return next((d for d in DENIED_DOMAINS if host == d or host.endswith("." + d)), None)
 
 
+def check_url(url: str) -> None:
+    """Refuse `url` unless it is HTTPS to an allowed host; name a denied platform."""
+    parts = urlsplit(url)
+    host = (parts.hostname or "").lower()
+    forbidden = denied_domain(host)
+    if forbidden:
+        raise DiscoveryError(f"{forbidden} does not allow automated access")
+    if parts.scheme != "https" or host not in ALLOWED_HOSTS:
+        raise DiscoveryError(f"{url!r} is not a documented public posting API")
+
+
+class _CheckedRedirects(urllib.request.HTTPRedirectHandler):
+    """Follow a redirect only to a URL the fetcher would request directly.
+
+    urllib follows redirects by default, so without this an allowed host
+    answering with a redirect would take a request anywhere, including a
+    platform that forbids automated access.
+    """
+
+    def redirect_request(
+        self,
+        req: urllib.request.Request,
+        fp: object,
+        code: int,
+        msg: str,
+        headers: object,
+        newurl: str,
+    ) -> urllib.request.Request | None:
+        check_url(newurl)
+        return super().redirect_request(req, fp, code, msg, headers, newurl)  # type: ignore[arg-type]
+
+
 class Fetcher(Protocol):
     def get_json(self, url: str) -> object: ...
 
@@ -55,21 +87,17 @@ class HttpFetcher:
 
     def __init__(self) -> None:
         self._last: dict[str, float] = {}
+        self._opener = urllib.request.build_opener(_CheckedRedirects)
 
     def get_json(self, url: str) -> object:
-        parts = urlsplit(url)
-        host = (parts.hostname or "").lower()
-        forbidden = denied_domain(host)
-        if forbidden:
-            raise DiscoveryError(f"{forbidden} does not allow automated access")
-        if parts.scheme != "https" or host not in ALLOWED_HOSTS:
-            raise DiscoveryError(f"{url!r} is not a documented public posting API")
+        check_url(url)
+        host = (urlsplit(url).hostname or "").lower()
         wait = MIN_INTERVAL - (time.monotonic() - self._last.get(host, float("-inf")))
         if wait > 0:
             time.sleep(wait)
         request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
         try:
-            with urllib.request.urlopen(request, timeout=TIMEOUT) as response:
+            with self._opener.open(request, timeout=TIMEOUT) as response:
                 body = response.read(MAX_BYTES + 1)
         except (urllib.error.URLError, TimeoutError) as exc:
             raise DiscoveryError(f"could not fetch {url}: {exc}") from exc
