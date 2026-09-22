@@ -179,6 +179,15 @@ jobs:
               echo "::warning::no section found for claimed property $n"
           done
 
+      # Kept with the run wherever it happened. A run dispatched on a feature
+      # branch cannot open the pull request below: that branch's history
+      # changes workflow files, which the default token may not push.
+      - name: Keep the report with the run
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: standards-audit
+          path: reports/standards-audit.md
+
       - name: Open a pull request with the findings
         uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1  # v8.1.1
         with:
