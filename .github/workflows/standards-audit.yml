@@ -52,9 +52,12 @@ jobs:
           # only CLAUDE_CODE_OAUTH_TOKEN set, so asking for ANTHROPIC_API_KEY
           # also meant this job could never start.
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          # Printed so a failed run says why; the repository is private and
+          # the audit reads nothing a contributor cannot already see.
+          show_full_output: true
           claude_args: |
-            --max-turns 40
-            --allowedTools "Read,Grep,Glob,Bash(git log:*),Bash(git show:*),Bash(git diff:*),Bash(find:*),Bash(cat:*),Bash(ls:*),Write(reports/standards-audit.md)"
+            --max-turns 100
+            --allowedTools "Read,Grep,Glob,Bash(git log:*),Bash(git show:*),Bash(git diff:*),Bash(find:*),Bash(cat:*),Bash(ls:*),Bash(wc:*),Bash(head:*),Bash(tail:*),Bash(sed -n:*),Bash(grep:*),Write(reports/standards-audit.md)"
           prompt: |
             You are auditing this repository, `callback`, against the properties
             it claims for itself. This is a read-only audit: do not edit, fix, or
