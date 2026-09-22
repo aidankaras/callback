@@ -117,3 +117,24 @@ def test_the_cli_prints_the_text_and_exits_on_its_check(
     assert main(["export", str(path)]) == 0
     assert capsys.readouterr().out == to_text(DOC)
     assert main(["export", str(tmp_path / "missing.yaml")]) == 3
+
+
+def test_the_cli_exits_2_and_names_a_field_the_export_lost(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The export includes every field by construction, so a lost field means
+    a regression in `to_text`; simulate one. Mutation: always exit 0 -- fails."""
+    import core.export.text
+    from core.cli import main
+    from core.resume.io import dump_doc
+
+    real = core.export.text.to_text
+
+    def lossy(doc: ResumeDoc, *, width: int = 78) -> str:
+        return real(doc, width=width).replace("Data Engineer", "")
+
+    monkeypatch.setattr(core.export.text, "to_text", lossy)
+    path = tmp_path / "resume.yaml"
+    path.write_text(dump_doc(DOC), encoding="utf-8")
+    assert main(["export", str(path)]) == 2
+    assert "title[0]: 'Data Engineer'" in capsys.readouterr().err
