@@ -1,5 +1,10 @@
 from __future__ import annotations
 
+import email.message
+import io
+import urllib.request
+import urllib.response
+
 import pytest
 
 from core.discovery.ats import html_to_text, parse_board, posting_url_for, resolve_url
@@ -251,3 +256,60 @@ def test_a_redirect_is_followed_only_to_where_the_fetcher_may_go(target: str) ->
         request, None, 301, "Moved", {}, "https://api.lever.co/v0/postings/acme2?mode=json"
     )
     assert allowed is not None
+
+
+class _Redirecting(urllib.request.BaseHandler):
+    """Answers every HTTPS request itself -- no socket -- with a redirect to
+    `target`, and records each URL it was asked for."""
+
+    handler_order = 100  # ahead of the real HTTPSHandler
+
+    def __init__(self, target: str) -> None:
+        self.target = target
+        self.opened: list[str] = []
+
+    def https_open(self, req: urllib.request.Request) -> urllib.response.addinfourl:
+        self.opened.append(req.full_url)
+        headers = email.message.Message()
+        if req.full_url == self.target:
+            response = urllib.response.addinfourl(io.BytesIO(b"{}"), headers, req.full_url, 200)
+            response.msg = "OK"  # type: ignore[attr-defined]
+            return response
+        headers["Location"] = self.target
+        response = urllib.response.addinfourl(io.BytesIO(b""), headers, req.full_url, 302)
+        response.msg = "Found"  # type: ignore[attr-defined]
+        return response
+
+
+def test_the_fetcher_itself_refuses_a_redirect_to_a_denied_platform() -> None:
+    """The handler above is only a guard if the fetcher's opener installs it.
+    Mutation: build the opener without it -- the redirect is followed to
+    linkedin.com."""
+    fetcher = HttpFetcher()
+    fake = _Redirecting("https://www.linkedin.com/jobs/search?keywords=ml")
+    fetcher._opener.add_handler(fake)  # type: ignore[reportPrivateUsage]
+    with pytest.raises(DiscoveryError, match=r"linkedin\.com"):
+        fetcher.get_json(posting_url_for("greenhouse", "acme"))
+    assert fake.opened == [posting_url_for("greenhouse", "acme")]
+    # Premise: the same fake, redirecting somewhere allowed, is followed.
+    allowed = _Redirecting("https://api.lever.co/v0/postings/acme?mode=json")
+    fetcher = HttpFetcher()
+    fetcher._opener.add_handler(allowed)  # type: ignore[reportPrivateUsage]
+    assert fetcher.get_json(posting_url_for("greenhouse", "acme")) == {}
+    assert len(allowed.opened) == 2
+
+
+@pytest.mark.parametrize("item", ["1/../../x", "1?x=https://linkedin.com", "1 2", ""])
+def test_a_hiring_thread_id_must_be_an_item_number(item: str) -> None:
+    from core.discovery.ats import latest_hn_thread
+
+    search = {"hits": [{"objectID": item, "title": "Ask HN: Who is hiring? (September 2026)"}]}
+    with pytest.raises(DiscoveryError, match="not an item number"):
+        latest_hn_thread(search)
+
+
+def test_a_malformed_url_is_a_discovery_error_not_a_crash() -> None:
+    """http.client raises InvalidURL for a control character, which is not a
+    URLError; uncaught, one bad target aborted the poll of every other."""
+    with pytest.raises(DiscoveryError, match="control characters"):
+        HttpFetcher().get_json("https://hn.algolia.com/api/v1/items/1 2")

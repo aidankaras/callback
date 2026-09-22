@@ -208,7 +208,12 @@ def latest_hn_thread(search: object) -> str:
     hits = cast("dict[str, object]", search).get("hits") if isinstance(search, dict) else None
     for hit in cast("list[dict[str, object]]", hits or []):
         if _HN_HIRING.match(str(hit.get("title", ""))):
-            return str(hit["objectID"])
+            # It becomes part of the next URL, so it must be the item number it
+            # claims to be: never a path or a query string.
+            item = str(hit.get("objectID", ""))
+            if not re.fullmatch(r"\d{1,12}", item):
+                raise DiscoveryError(f"the hiring thread's id {item!r} is not an item number")
+            return item
     raise DiscoveryError("no Hacker News hiring thread found")
 
 

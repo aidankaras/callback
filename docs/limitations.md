@@ -16,8 +16,13 @@ by design rather than merely unimplemented.
   not by position. A quantity recorded with a percent unit cannot back a plain count, but a quantity
   recorded with no unit can back either.
 - **Whether a saved posting is the real one.** A cover letter's claims about the employer are held
-  to the posting saved in `inbox/<job>.md`. `callback` does not fetch postings, so it cannot tell a
-  genuine posting from an edited one.
+  to the posting saved in `inbox/<job>.md`. `callback postings take` writes the text a board's API
+  returned, but the file can be edited afterwards, and a posting pasted in by hand is trusted as it
+  is: neither can be told from a genuine one.
+- **Every way to describe the candidate indirectly.** An employer sentence may not use first-person
+  words, the candidate's name, or a fixed list of referents and relationship verbs ("applicant",
+  "she", "interviewed", "hired"); a relationship with the reader ("met", "referred", "suggested")
+  must be stated in a cited fact. Both are word lists, so a paraphrase outside them is not seen.
 
 ## Guards that are defence in depth, not containment
 
@@ -41,7 +46,6 @@ by design rather than merely unimplemented.
   aggregator APIs are not read yet.
 - **Research about an employer.** A cover letter may say about the company only what the posting
   says.
-- **An MCP server.** The skill drives the command line.
 
 ## Explicit non-goals
 

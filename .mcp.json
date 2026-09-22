@@ -2,7 +2,7 @@
   "mcpServers": {
     "callback": {
       "command": "uv",
-      "args": ["run", "--project", "${CLAUDE_PLUGIN_ROOT}", "callback-mcp"]
+      "args": ["run", "--locked", "--project", "${CLAUDE_PLUGIN_ROOT}", "callback-mcp"]
     }
   }
 }

@@ -76,3 +76,25 @@ def test_outreach_sentences_are_held_to_the_letter_rules() -> None:
 def test_a_recipient_name_must_look_like_a_name() -> None:
     with pytest.raises(ValueError):
         note(recipient="Sam, a recruiter who loves PhDs")
+
+
+def test_a_possessive_still_names_the_recipient() -> None:
+    """Mutation: split on whitespace and strip only ",." -- "Sam's" passes."""
+    s = Sentence(
+        kind="candidate", text="Sam's talk on robotics convinced me to write.", sources=["nw"]
+    )
+    found = check_outreach(note("email", s, ASK), FACTS, POSTING).findings
+    assert any("names the recipient" in f for f in found), found
+
+
+@pytest.mark.parametrize("name", ["Dr. Dana Vex", "   "])
+def test_the_candidate_name_is_a_name(name: str) -> None:
+    """It is the sign-off, so a title or a blank is refused before rendering."""
+    with pytest.raises(ValueError, match="person's name"):
+        note(candidate_name=name)
+
+
+def test_the_candidate_name_must_be_the_confirmed_one() -> None:
+    """Mutation: skip the links check -- a different name signs the note."""
+    found = check_outreach(note(candidate_name="Dana Vexington"), FACTS, POSTING).findings
+    assert any("not an entity of any confirmed links fact" in f for f in found), found

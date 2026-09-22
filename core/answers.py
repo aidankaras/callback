@@ -24,7 +24,8 @@ from typing import Literal
 import yaml
 from pydantic import BaseModel, Field, ValidationError
 
-from core.letter.checks import check_sentence, context_for, heading_findings
+from core.checks.claims import name_findings
+from core.letter.checks import check_sentence, context_for, heading_findings, question_findings
 from core.letter.models import Sentence
 from core.paths import private_dir, resolve_inside, write_private
 from core.profile.models import Fact
@@ -76,8 +77,10 @@ def check_answers(
 ) -> AnswersResult:
     """Every way `doc` fails: its sentences' rules, and each answer's limit."""
     findings = heading_findings(doc.company, doc.role, posting)
+    findings.extend(name_findings(doc.candidate_name, facts))
     ctx = context_for(doc.company, doc.role, doc.candidate_name, facts, posting, resume_bullets)
     for n, answer in enumerate(doc.answers):
+        findings.extend(f"answer {n}: {f}" for f in question_findings(answer.question, ctx))
         for s, sentence in enumerate(answer.sentences):
             findings.extend(f"answer {n}: {f}" for f in check_sentence(f"{n}.{s}", sentence, ctx))
         text = answer.text

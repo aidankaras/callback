@@ -277,6 +277,16 @@ _CLAIM_PHRASES = (
     r"head of",
     r"led a team",
     r"managed a team",
+    # A relationship with the reader -- "we met", "Alex referred me" -- is a
+    # claim about the candidate's history like any other.
+    r"met",
+    r"suggested",
+    r"referred",
+    r"referral",
+    r"introduced",
+    r"recommended",
+    r"mutual",
+    r"reach(?:ed)? out",
 )
 _CLAIM_WORDS = re.compile(
     r"(?<![\w'])(?:" + "|".join(_CLAIM_PHRASES) + r")(?![\w'])", re.IGNORECASE

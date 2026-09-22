@@ -7,9 +7,10 @@ Guidance for anyone, human or agent, contributing to callback.
 callback is a Claude Code plugin over a Python package (`core`) of deterministic quality
 gates for a generated resume or cover letter: grounding, structural claims, round-trip
 parseability, hidden-channel detection and layout lints, composed by `core/gates.py` and
-run by the `callback` CLI. The plugin surface today is the `tailor` skill
-(`skills/tailor/`) and the write-guard hook (`hooks/`); the skill drives the CLI. No LLM
-runs anywhere in `core`. Not built yet: an MCP server.
+run by the `callback` CLI. The plugin surface is the `tailor` skill (`skills/tailor/`),
+the write-guard hook (`hooks/`) and an MCP server (`core/mcp_server.py`, registered in
+`.mcp.json`) whose tools wrap the same functions the CLI calls. No LLM runs anywhere in
+`core`.
 
 ## Non-negotiables
 
@@ -22,9 +23,9 @@ even if every test passes.
 2. **No PyMuPDF, ever.** It is AGPL; this repo is MIT. PDF parsing is `pdfplumber` (MIT)
    and `pypdf` (BSD-3) only. This is a licensing constraint, not a technical preference —
    do not reach for PyMuPDF to fix a parsing gap no matter how well it would close it.
-3. **`uv` only, with `uv.lock` committed.** CI and the MCP server both run
-   `uv run --locked --no-sync`; a dependency change that is not reflected in the
-   committed lockfile will pass locally and fail in CI or at plugin-install time.
+3. **`uv` only, with `uv.lock` committed.** CI runs `uv sync --locked` and the MCP
+   server starts with `uv run --locked`; a dependency change that is not reflected in the
+   committed lockfile will pass locally and fail in CI or when the plugin starts.
 4. **`pyright` strict, zero errors. `ruff` lint and format, both checked in CI — not
    lint alone.** `DTZ` rules are on: every date/time value is timezone-aware. A naive
    `date.today()` in a stored field is not a style nit; it is undefined behavior across

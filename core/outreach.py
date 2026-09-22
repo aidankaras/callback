@@ -18,6 +18,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
 
+from core.checks.claims import name_findings
 from core.letter.checks import check_sentence, context_for, heading_findings
 from core.letter.models import Sentence
 from core.profile.models import Fact
@@ -30,6 +31,7 @@ LIMITS: dict[str, tuple[int | None, int | None]] = {
     "email": (None, 150),
 }
 _NAME = re.compile(r"[A-Z][A-Za-z'\-]+(?: [A-Z][A-Za-z'\-]+){0,3}")
+_WORD = re.compile(r"[A-Za-z]+")
 
 
 class Outreach(BaseModel):
@@ -43,11 +45,11 @@ class Outreach(BaseModel):
     channel: Channel
     sentences: list[Sentence] = Field(min_length=1)
 
-    @field_validator("recipient")
+    @field_validator("recipient", "candidate_name")
     @classmethod
-    def _recipient_is_a_name(cls, value: str) -> str:
+    def _is_a_name(cls, value: str) -> str:
         if not _NAME.fullmatch(value.strip()):
-            raise ValueError(f"recipient {value!r} must be a person's name, e.g. 'Sam Rivera'")
+            raise ValueError(f"{value!r} must be a person's name, e.g. 'Sam Rivera'")
         return value.strip()
 
 
@@ -70,10 +72,12 @@ def render_outreach(doc: Outreach) -> str:
 def check_outreach(doc: Outreach, facts: Mapping[str, Fact], posting: str) -> OutreachResult:
     findings = heading_findings(doc.company, doc.role, posting)
     ctx = context_for(doc.company, doc.role, doc.candidate_name, facts, posting)
-    recipient_words = {w.casefold() for w in doc.recipient.split() if len(w) > 1}
+    findings.extend(name_findings(doc.candidate_name, facts))
+    recipient_words = {w.casefold() for w in _WORD.findall(doc.recipient) if len(w) > 1}
     for n, sentence in enumerate(doc.sentences):
         findings.extend(check_sentence(f"0.{n}", sentence, ctx))
-        if recipient_words & {w.casefold().strip(",.") for w in sentence.text.split()}:
+        # Word tokens, so a possessive ("Sam's") is still the name.
+        if recipient_words & {w.casefold() for w in _WORD.findall(sentence.text)}:
             findings.append(f"sentence 0.{n}: names the recipient; the greeting does that")
     text = render_outreach(doc)
     max_chars, max_words = LIMITS[doc.channel]

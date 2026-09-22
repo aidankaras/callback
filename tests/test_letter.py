@@ -287,3 +287,45 @@ def test_callback_letter_refuses_without_a_saved_posting(
     assert main(["letter", str(source)]) == 3
     # The refusal, not a crash reading the missing file, which also exits 3.
     assert "no saved posting" in capsys.readouterr().err
+
+
+# --- sentences that describe the candidate by other means ------------------------------
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Acme Robotics already hired this applicant as a Python intern last summer.",
+        "The team interviewed the applicant twice and extended an offer.",
+        "The team met her at the robotics expo.",
+    ],
+)
+def test_an_employer_sentence_may_not_describe_the_candidate(text: str) -> None:
+    """Neither "I" nor the candidate's name appears, so only the referent rule
+    can see these. Mutation: drop it -- each passes the posting grounding."""
+    found = check_letter(
+        letter([Sentence(kind="employer", text=text, sources=["posting"])]), FACTS, POSTING
+    ).findings
+    assert any("may not speak about the candidate" in f for f in found), found
+
+
+@pytest.mark.parametrize(
+    "text",
+    ["Alex suggested I apply for the role.", "We met at the career fair last spring."],
+)
+def test_a_relationship_is_a_claim_its_fact_must_state(text: str) -> None:
+    """The cited fact says nothing of a meeting or a referral. Mutation: drop
+    the relationship words from the claim list -- both pass."""
+    found = check_letter(
+        letter([Sentence(kind="candidate", text=text, sources=["nw"])]), FACTS, POSTING
+    ).findings
+    assert any("unsupported_claim_word" in f for f in found), found
+
+
+def test_a_letter_header_must_be_the_confirmed_identity() -> None:
+    """The header is rendered as-is. Mutation: skip the identity check -- the
+    invented credential and email pass."""
+    forged = Identity(name="Dr. Dana Vex", email="dana@example.com")
+    found = check_letter(letter(identity=forged), FACTS, POSTING).findings
+    assert any("'Dr. Dana Vex'" in f for f in found), found
+    assert check_letter(letter(), FACTS, POSTING).findings == ()

@@ -44,7 +44,7 @@ from typing import Literal
 
 from core.aliases import canonicalize
 from core.checks.grounding import iso_month_dates
-from core.profile.models import Fact, FactKind
+from core.profile.models import Fact, FactKind, Identity
 from core.resume.models import Entry, ResumeDoc
 
 _YEAR = re.compile(r"^\d{4}$")
@@ -173,14 +173,26 @@ def _check_entry(label: str, entry: Entry, facts: Mapping[str, Fact]) -> list[st
     return findings
 
 
-def _identity_findings(doc: ResumeDoc, facts: Mapping[str, Fact]) -> list[str]:
-    stated = {
+def _stated_identity(facts: Mapping[str, Fact]) -> set[str]:
+    return {
         _norm(e)
         for f in facts.values()
         if f.selectable() and f.kind is FactKind.LINKS
         for e in f.entities
     }
-    identity = doc.identity
+
+
+def name_findings(name: str, facts: Mapping[str, Fact]) -> list[str]:
+    """Whether `name` is the candidate's name as a confirmed links fact states it."""
+    if _norm(name) in _stated_identity(facts):
+        return []
+    return [f"candidate name {name!r} is not an entity of any confirmed links fact"]
+
+
+def identity_findings(identity: Identity, facts: Mapping[str, Fact]) -> list[str]:
+    """Every identity value -- name, email, phone, link -- that no confirmed
+    links fact states. The header is rendered as-is, so it is a claim too."""
+    stated = _stated_identity(facts)
     values = [("name", identity.name), ("email", identity.email)]
     if identity.phone:
         values.append(("phone", identity.phone))
@@ -211,7 +223,7 @@ def _skill_backing(doc: ResumeDoc, facts: Mapping[str, Fact]) -> set[str]:
 
 def check_claims(doc: ResumeDoc, facts: Mapping[str, Fact]) -> ClaimsResult:
     """Check identity, section titles, every entry header and every listed skill."""
-    findings = _identity_findings(doc, facts)
+    findings = identity_findings(doc.identity, facts)
     index = 0
     for section in doc.sections:
         if _norm(section.title) not in SECTION_TITLES:

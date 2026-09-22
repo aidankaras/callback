@@ -208,7 +208,9 @@ answers:
   - {kind: candidate, text: At Northwind Analytics I brought the review queue down to 300 items with Python., sources: [role, queue]}
 ```
 
-Each sentence follows the cover-letter kinds. Each answer must fit its
+Each sentence follows the cover-letter kinds. A `question` is copied from the
+form: one line, not a heading, and never about the candidate, because it is
+printed above its answer. Each answer must fit its
 `max_chars` or `max_words`, counted on the exact text to be pasted. `apply`
 adds `answers.md` to the packet only when its check passed and the file is
 unchanged. Exit codes: 0 pass, 2 fail, 3 could not run.
@@ -217,7 +219,9 @@ unchanged. Exit codes: 0 pass, 2 fail, 3 could not run.
 company. Its fields are the same as a form answer's, plus `recipient` (a
 name) and `channel`: `linkedin-note` (300 characters), `linkedin-message`
 (1,900 characters, 200 words) or `email` (150 words). The greeting and
-sign-off are generated. The recipient appears only in the greeting, and the
+sign-off are generated. `candidate_name` (here and in form answers) must be
+the name a confirmed `links` fact states, since it signs the message. The
+recipient appears only in the greeting, possessives included, and the
 whole message is measured against the channel's limit. It prints the note,
 and exits 0 pass, 2 fail, 3 could not run.
 
@@ -274,4 +278,17 @@ writer of `final/`:
 This is tamper-evidence, not tamper-proofing: anyone who can read the key
 can forge a signature.
 
-**Not built yet:** an MCP server; the skill drives the command line.
+Each ledger entry also carries an HMAC under the same key, so a ledger
+rewritten from scratch fails even when every entry chains correctly, and
+`verify` reports a sealed document the ledger does not record.
+
+## The MCP server
+
+The plugin registers `callback-mcp` (see `.mcp.json`), which serves the same
+checks as tools: `build`, `letter`, `answers`, `outreach`, `facts_add`,
+`facts_list`, `watch`, `triage`, `postings_take`, `postings_resolve`,
+`eligibility`, `apply`, `interview` and `verify`. Each wraps the function the
+command line calls, so a result is identical whichever way it is reached, and
+a failure is a tool error, never an empty result. `facts confirm` and
+`delete-all` are deliberately not tools: only the candidate, at a terminal,
+may make a fact usable or erase the data home.

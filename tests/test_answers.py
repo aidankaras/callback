@@ -110,3 +110,34 @@ def test_callback_answers_writes_a_private_report_and_paste_file(
     for name in ("answers.md", "answers-report.json"):
         assert stat.S_IMODE((draft / name).stat().st_mode) == 0o600, name
     assert main(["answers", str(tmp_path / "missing.yaml")]) == 3
+
+
+@pytest.mark.parametrize(
+    "question",
+    [
+        "Why Acme? I hold a PhD from MIT and 10 years of PyTorch at Google",
+        "Why Acme?\n\nI led a team of 40 engineers at Google.\n\n## Anything else",
+        "# Why Acme?",
+        "Why would Dana Vex join Acme?",
+    ],
+)
+def test_a_question_cannot_carry_a_claim(question: str) -> None:
+    """The question is rendered above its answer into the paste-ready file and
+    no sentence rule reads it. Mutation: skip the question check -- all pass."""
+    found = check_answers(
+        answers({"question": question, "sentences": [WHY]}), FACTS, POSTING
+    ).findings
+    assert any("question" in f for f in found), found
+    ok = answers({"question": "Why do you want to work at Acme Robotics?", "sentences": [WHY]})
+    assert check_answers(ok, FACTS, POSTING).findings == ()
+
+
+def test_the_answers_name_must_be_the_confirmed_one() -> None:
+    doc = AnswerSet.model_validate(
+        {
+            **answers({"question": "Why Acme?", "sentences": [WHY]}).model_dump(),
+            "candidate_name": "Dan Vex",
+        }
+    )
+    found = check_answers(doc, FACTS, POSTING).findings
+    assert any("links fact" in f for f in found), found

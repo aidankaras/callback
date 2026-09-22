@@ -17,6 +17,7 @@ The rules are enforced here rather than left to callers:
 
 from __future__ import annotations
 
+import http.client
 import json
 import time
 import urllib.error
@@ -99,7 +100,7 @@ class HttpFetcher:
         try:
             with self._opener.open(request, timeout=TIMEOUT) as response:
                 body = response.read(MAX_BYTES + 1)
-        except (urllib.error.URLError, TimeoutError) as exc:
+        except (urllib.error.URLError, http.client.HTTPException, TimeoutError, ValueError) as exc:
             raise DiscoveryError(f"could not fetch {url}: {exc}") from exc
         finally:
             self._last[host] = time.monotonic()

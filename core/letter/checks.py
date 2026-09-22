@@ -36,6 +36,7 @@ from dataclasses import dataclass
 from typing import Literal
 
 from core.aliases import canonicalize
+from core.checks.claims import identity_findings
 from core.checks.grounding import check_bullet, checkable_entity_tokens
 from core.checks.numbers import parse_numbers
 from core.letter.models import POSTING, CoverLetter, Sentence
@@ -72,6 +73,15 @@ _INTERNAL_BREAK = re.compile(r"[.!?;:]\s+\S")
 _APOSTROPHE = "['\u2019]"
 _FIRST_PERSON = re.compile(
     rf"\b(?:i|i{_APOSTROPHE}(?:m|ve|d|ll)|me|my|mine|myself|we|we{_APOSTROPHE}(?:re|ve)|us|our|ours)\b",
+    re.IGNORECASE,
+)
+# An employer sentence is what the posting says about the company or the role.
+# These words make it a statement about the candidate instead -- "the team
+# interviewed this applicant" -- which the posting cannot ground.
+_ABOUT_CANDIDATE = re.compile(
+    r"\b(?:applicants?|candidates?|this (?:person|student)|him|her|he|she|hired|interviewed|"
+    r"met|referred|recommended|introduced|contacted|emailed|invited|reached out|"
+    r"(?:extended|made) (?:an|the) offer|offered (?:him|her|them|the|this))\b",
     re.IGNORECASE,
 )
 _COMMITMENT = re.compile(
@@ -160,6 +170,18 @@ def heading_findings(company: str, role: str, posting: str) -> list[str]:
     ]
 
 
+def question_findings(question: str, ctx: SentenceContext) -> list[str]:
+    """A form question is copied from the form, never written, and it is
+    rendered above its answer: so it may not carry a claim of its own."""
+    findings: list[str] = []
+    if "\n" in question.strip() or question.lstrip().startswith("#"):
+        findings.append("the question must be one line, as the form shows it, not a heading")
+    name_parts = {w for w in _norm(ctx.candidate_name).split() if len(w) > 1}
+    if _FIRST_PERSON.search(question) or name_parts & set(_norm(question).split()):
+        findings.append("the question speaks about the candidate; copy it from the form")
+    return findings
+
+
 def check_sentence(label: str, sentence: Sentence, ctx: SentenceContext) -> list[str]:
     """Every rule `sentence` breaks, for its declared kind -- see the module docstring."""
     findings = _kind_findings(label, sentence, ctx)
@@ -190,7 +212,11 @@ def _kind_findings(label: str, sentence: Sentence, ctx: SentenceContext) -> list
                 "the role, position, internship or team"
             ]
         name_parts = {w for w in _norm(ctx.candidate_name).split() if len(w) > 1}
-        if _FIRST_PERSON.search(text) or name_parts & set(subject.split()):
+        if (
+            _FIRST_PERSON.search(text)
+            or name_parts & set(subject.split())
+            or _ABOUT_CANDIDATE.search(text)
+        ):
             return [f"sentence {label}: an employer sentence may not speak about the candidate"]
         return _grounding(label, text, [ctx.posting])
     # candidate
@@ -222,6 +248,7 @@ def check_letter(
     if letter.closing.strip().casefold() not in CLOSINGS:
         findings.append(f"closing {letter.closing!r} must be one of {sorted(CLOSINGS)}")
 
+    findings.extend(identity_findings(letter.identity, facts))
     ctx = context_for(
         letter.company, letter.role, letter.identity.name, facts, posting, resume_bullets
     )
