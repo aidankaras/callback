@@ -12,6 +12,7 @@ What is protected, under `$CALLBACK_HOME` (default `~/.callback`):
   through `callback facts confirm`, which only the candidate can answer. A
   tool that could write the store directly could skip both.
 - anything under an `outputs/<job>/final/` or `released/` directory.
+- `applications.yaml`, the application record the volume limits read.
 - key, ledger and database files.
 - and, wherever the plugin lives, this guard and its `hooks.json`.
 
@@ -20,14 +21,18 @@ runs on every write in the session, and confining all writes to the data
 home would stop the assistant editing anything else at all.
 
 Every path is resolved before comparison, so `..` and symlinks cannot reach a
-protected file. For Bash, each path-like token is resolved against the
-session's working directory and against every `cd` target in the command,
-and a command naming a protected path is refused whether it reads or writes
-it: telling the two apart in an arbitrary shell command is not reliable
-(`cat x | tee x`, `sed -n` against `sed -i`), and nothing needs the raw store,
-which `callback facts list` reads. `callback facts confirm` is refused
-outright. Any payload this script cannot read is denied: a guard that fails
-open would imply a guarantee it does not give.
+protected file, and a directory holding a protected file counts as protected:
+removing or moving it rewrites what is inside. For Bash, the command is split
+into simple commands at shell operators and line breaks; `~`, `$HOME` and
+`$CALLBACK_HOME` are expanded; and every word is resolved against the
+session's working directory, every `cd` or `pushd` target, and any `-C` or
+`--directory` argument. A command naming a protected path is refused whether
+it reads or writes it -- telling the two apart in an arbitrary command is not
+reliable (`cat x | tee x`, `sed -n` against `sed -i`) and nothing needs the
+raw store, which `callback facts list` reads -- except `ls`, `stat` and `du`,
+which only look, and the argument of a `-m` commit message. `callback facts
+confirm` is refused in command position. Any payload this script cannot read
+is denied: a guard that fails open would imply a guarantee it does not give.
 
 Bash guarding is defence in depth, not containment. A shell is a general
 tool, and a command that builds a path at run time -- from a variable other
@@ -49,12 +54,21 @@ import sys
 from pathlib import Path
 
 WRITE_TOOLS = {"Write", "Edit", "MultiEdit", "NotebookEdit"}
-PROTECTED_NAMES = {"facts.yaml", "ledger.log", ".key", "callback.db", "callback.db-wal"}
+PROTECTED_NAMES = {
+    "facts.yaml",
+    "applications.yaml",
+    "ledger.log",
+    ".key",
+    "callback.db",
+    "callback.db-wal",
+}
 SEALED_DIRS = {"final", "released"}
 GUARD_FILES = {Path(__file__).resolve(), Path(__file__).resolve().with_name("hooks.json")}
 
-_CONFIRM = re.compile(r"\bcallback\s+facts\s+confirm\b")
-_CD = re.compile(r"(?:^|[;&|(]\s*)cd\s+(\S+)")
+_OPERATORS = {";", "&&", "||", "|", "&", "(", ")"}
+# Commands that only look: naming a protected path to one of these is not a write.
+_LOOK_ONLY = {"ls", "stat", "du"}
+_MESSAGE_FLAGS = {"-m", "--message"}
 
 
 def deny(reason: str) -> None:
@@ -68,14 +82,27 @@ def data_home() -> Path:
 
 
 def _expand(raw: str) -> str:
+    """`raw` with `~`, `$HOME` and `$CALLBACK_HOME` spelled out, as a shell would."""
     home = str(data_home())
-    for var in ("${CALLBACK_HOME}", "$CALLBACK_HOME"):
-        raw = raw.replace(var, home)
-    return str(Path(raw).expanduser())
+    user_home = str(Path.home())
+    for var, value in (
+        ("${CALLBACK_HOME}", home),
+        ("$CALLBACK_HOME", home),
+        ("${HOME}", user_home),
+        ("$HOME", user_home),
+    ):
+        raw = raw.replace(var, value)
+    if raw == "~" or raw.startswith("~/"):
+        raw = user_home + raw[1:]
+    return raw
 
 
 def protected(path: Path) -> str | None:
-    """Why `path` may not be written, or `None` if it may."""
+    """Why `path` may not be written, or `None` if it may.
+
+    A directory counts as protected when anything protected lies inside it:
+    deleting or moving `outputs/<job>` rewrites the `final/` beneath it.
+    """
     target = path.resolve()
     if target in GUARD_FILES:
         return "the write guard is not writable by a tool"
@@ -91,28 +118,88 @@ def protected(path: Path) -> str | None:
         return f"{target.name} is written only by callback itself"
     if SEALED_DIRS & set(inside):
         return "a finalised document is never rewritten"
+    if target.is_dir() and any(
+        p.name in PROTECTED_NAMES or p.name in SEALED_DIRS for p in target.rglob("*")
+    ):
+        return f"{target} holds protected files; use `callback delete-all` to remove your data"
     return None
 
 
-def check_bash(command: str, cwd: Path) -> None:
-    if _CONFIRM.search(command):
-        deny("`callback facts confirm` must be typed by the candidate in their own terminal")
-    expanded = _expand(command)
-    bases = [cwd, *((cwd / _expand(d)) for d in _CD.findall(expanded))]
+def _segments(command: str) -> list[list[str]]:
+    """`command` as simple commands, each a list of words, split at shell operators."""
+    lexer = shlex.shlex(command.replace("\n", " ; "), posix=True, punctuation_chars=True)
+    lexer.whitespace_split = True
     try:
-        tokens = shlex.split(expanded, comments=False, posix=True)
+        words = list(lexer)
     except ValueError:
-        tokens = expanded.split()
-    for token in tokens:
-        # A token may carry a path inside quotes or code, e.g. open('<path>','w').
-        for candidate in re.findall(r"[\w~./@+-]*[/.][\w~./@+-]*", token):
-            for base in bases:
-                reason = protected(base / candidate)
-                if reason:
-                    deny(
-                        f"command names a protected path ({candidate}): {reason}; "
-                        "read facts with `callback facts list`"
-                    )
+        words = command.split()
+    segments: list[list[str]] = [[]]
+    for word in words:
+        if word in _OPERATORS or set(word) <= set(";&|()"):
+            segments.append([])
+        else:
+            segments[-1].append(word)
+    return [s for s in segments if s]
+
+
+def _command_words(segment: list[str]) -> list[str]:
+    """`segment` without leading `VAR=value` assignments and a `uv run [--flag value]` prefix."""
+    words = list(segment)
+    while words and re.fullmatch(r"[A-Za-z_]\w*=.*", words[0]):
+        words.pop(0)
+    if words[:2] == ["uv", "run"]:
+        words = words[2:]
+        while words and words[0].startswith("-"):
+            flag = words.pop(0)
+            if "=" not in flag and words:
+                words.pop(0)
+    return words
+
+
+def check_bash(command: str, cwd: Path) -> None:
+    bases = [cwd]
+    for segment in _segments(command):
+        words = _command_words(segment)
+        if not words:
+            continue
+        if words[:3] == ["callback", "facts", "confirm"] or words[1:5] == [
+            "-m",
+            "core.cli",
+            "facts",
+            "confirm",
+        ]:
+            deny("`callback facts confirm` must be typed by the candidate in their own terminal")
+        if words[0] in {"cd", "pushd"} and len(words) > 1:
+            bases += [base / _expand(words[1]) for base in bases]
+            continue
+        if words[0] in _LOOK_ONLY:
+            continue
+        local = list(bases)
+        checked: list[str] = []
+        skip_next = False
+        for n, word in enumerate(words):
+            if skip_next:
+                skip_next = False
+                continue
+            if word in _MESSAGE_FLAGS:
+                skip_next = True
+                continue
+            if word in {"-C", "--directory"} and n + 1 < len(words):
+                local += [base / _expand(words[n + 1]) for base in bases]
+            elif word.startswith("--directory="):
+                local += [base / _expand(word.split("=", 1)[1]) for base in bases]
+            checked.append(word)
+        for word in checked:
+            # A word may carry a path inside quotes or code, e.g. open('<path>','w').
+            candidates = {word, *re.findall(r"[\w~$./@+{}-]+", word)}
+            for candidate in candidates:
+                for base in local:
+                    reason = protected(base / _expand(candidate))
+                    if reason:
+                        deny(
+                            f"command names a protected path ({candidate}): {reason}; "
+                            "read facts with `callback facts list`"
+                        )
 
 
 def main() -> int:

@@ -139,3 +139,64 @@ def test_reading_the_store_through_the_shell_is_refused_with_the_alternative(hom
     result = run_guard(_bash(f"cat {home}/facts.yaml | tee {home}/facts.yaml"), home)
     assert denied(result)
     assert "callback facts list" in result.stderr
+
+
+def test_the_application_record_is_not_writable_by_a_tool(home: Path) -> None:
+    """The daily and re-apply limits read it; editing it would lift them."""
+    assert denied(run_guard(_write(str(home / "applications.yaml")), home))
+    assert denied(run_guard(_bash(f"echo '[]' > {home}/applications.yaml"), home))
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "rm ~/.callback/facts.yaml",
+        "echo x > ~/.callback/facts.yaml",
+        "cp a.pdf ~/.callback/outputs/job/final/resume.pdf",
+        "rm $HOME/.callback/facts.yaml",
+        'rm "${HOME}/.callback/facts.yaml"',
+        "rm -rf ~/.callback/outputs/job",
+        "mv ~/.callback/outputs/job ~/.callback/outputs/moved",
+        "rm -rf ~/.callback",
+        "cd ~/.callback/outputs/job && rm -rf final",
+        # Each of these names only inbox/, which holds nothing protected; only
+        # tracking the directory change reveals that ../facts.yaml is the store.
+        "git status\ncd ~/.callback/inbox\nrm ../facts.yaml",
+        "pushd ~/.callback/inbox && rm ../facts.yaml",
+        "git -C ~/.callback/inbox checkout -- ../facts.yaml",
+        "tar --directory=$HOME/.callback/inbox -xf backup.tar ../facts.yaml",
+    ],
+)
+def test_the_default_home_and_its_ordinary_spellings_are_guarded(
+    tmp_path: Path, command: str
+) -> None:
+    """With CALLBACK_HOME unset the home is ~/.callback, and `~`, `$HOME`,
+    later-line cds, pushd and -C are how an assistant would ordinarily name
+    it. Deleting a directory that holds a protected file is a write to it."""
+    home = tmp_path / ".callback"
+    (home / "outputs" / "job" / "final").mkdir(parents=True)
+    (home / "inbox").mkdir()
+    (home / "facts.yaml").write_text("{}\n")
+    result = subprocess.run(
+        [sys.executable, str(GUARD)],
+        input=json.dumps(_bash(command) | {"cwd": str(tmp_path / "repo")}),
+        capture_output=True,
+        text=True,
+        env={"PATH": "/usr/bin:/bin", "HOME": str(tmp_path)},
+        check=False,
+    )
+    assert denied(result), command
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        'git commit -m "docs: explain callback facts confirm"',
+        'grep -rn "callback facts confirm" docs/',
+        'git commit -m "validate facts.yaml schema"',
+        "ls {home}/outputs/job/final",
+    ],
+)
+def test_mentioning_a_protected_name_is_not_writing_it(home: Path, command: str) -> None:
+    result = run_guard(_bash(command.format(home=home)), home, cwd=home)
+    assert result.returncode == 0, (command, result.stderr)
