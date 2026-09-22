@@ -75,6 +75,7 @@ if TYPE_CHECKING:
     # loading.
     from core.checks.result import GateResult
 from core.profile.models import Fact
+from core.resume.models import carries_content
 
 _MONTHS = {
     m: i
@@ -231,8 +232,10 @@ def check_bullet(
     derivation, else `ALIAS_MATCH` if any entity needed alias resolution,
     else plain `PASS`.
     """
-    if not text.strip():
-        return Verdict.FAIL, [Finding(index, FindingKind.EMPTY_BULLET, "bullet has no text")]
+    if not carries_content(text):
+        return Verdict.FAIL, [
+            Finding(index, FindingKind.EMPTY_BULLET, "bullet has no letter or digit to ground")
+        ]
     if not sources:
         return Verdict.FAIL, [Finding(index, FindingKind.MISSING_SOURCE, "bullet cites no fact")]
 

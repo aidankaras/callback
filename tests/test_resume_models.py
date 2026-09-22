@@ -85,7 +85,12 @@ def test_resume_doc_round_trips_sources_through_sections() -> None:
     assert entry.bullets[0].sources == ["fact-bullet-1"]
 
 
-@pytest.mark.parametrize("text", ["", "   "])
+@pytest.mark.parametrize("text", ["", "   ", "\u200b", "\u2014", "..."])
 def test_a_blank_bullet_is_rejected_at_the_model_boundary(text: str) -> None:
     with pytest.raises(ValidationError, match="blank"):
         Bullet(text=text, sources=["a"])
+
+
+@pytest.mark.parametrize("text", ["15%", "Led ML", "\u00c9cole"])
+def test_a_short_bullet_with_real_content_is_accepted(text: str) -> None:
+    assert Bullet(text=text, sources=["a"]).text == text

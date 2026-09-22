@@ -18,9 +18,23 @@ unsourced bullet, which defeats the point of grounding as a whole.
 
 from __future__ import annotations
 
+import unicodedata
+
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from core.profile.models import Identity
+
+
+def carries_content(text: str) -> bool:
+    """True if `text` contains at least one letter or digit.
+
+    `str.strip()` is not enough: it leaves zero-width and soft-hyphen format
+    characters in place, and says nothing about a string of only dashes,
+    dots or bullet glyphs. None of those makes a claim, so none can be
+    grounded, and each would otherwise pass every per-token check by giving
+    it nothing to reject.
+    """
+    return any(unicodedata.category(c)[0] in "LN" for c in text)
 
 
 class Bullet(BaseModel):
@@ -37,8 +51,8 @@ class Bullet(BaseModel):
         """Refuse a bullet with no text: it makes no claim, so no grounding
         check has anything to reject, and it would otherwise pass at the
         strongest verdict its sources allow."""
-        if not text.strip():
-            raise ValueError("a bullet's text cannot be blank")
+        if not carries_content(text):
+            raise ValueError("a bullet's text cannot be blank: it has no letter or digit")
         return text
 
 

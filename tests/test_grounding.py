@@ -653,7 +653,9 @@ def test_empty_document_fails_rather_than_passing_vacuously() -> None:
     assert [(f.bullet_index, f.kind) for f in findings] == [(-1, FindingKind.EMPTY_DOCUMENT)]
 
 
-@pytest.mark.parametrize("text", ["", "   ", "\n\t"])
+@pytest.mark.parametrize(
+    "text", ["", "   ", "\n\t", "\u200b", "\xad", "\u2014", "...", "\u2022", "-"]
+)
 def test_blank_bullet_fails_even_with_a_valid_source(text: str) -> None:
     verdict, findings = check_bullet(text, [fact("a")], index=4)
     assert verdict is Verdict.FAIL
