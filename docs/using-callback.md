@@ -20,6 +20,8 @@ below for you, except `facts confirm`, which only you can run.
 
 | Command | What it does | Exit codes |
 |---|---|---|
+| `callback init` | Creates the data home (`$CALLBACK_HOME`, default `~/.callback`) with private permissions; every other command does this for itself | 0 |
+| `callback delete-all` | Removes every file under the data home: facts, postings, drafts, packets, sealed documents, the ledger and the signing key. There is no undo, and no tool can run it -- it is not an MCP tool, and the write guard cannot stop it | 0 |
 | `callback import <resume.pdf>` | Extracts the text of an existing PDF into `inbox/`, after screening it for hidden text | 0 clean, 3 unreadable, 4 hidden content found or a page could not be screened |
 | `callback facts add <facts.yaml>` | Adds facts, all unconfirmed. Each fact is accepted or refused on its own, and one that arrives already confirmed is refused | 0, 1 if any fact was refused, 3 unreadable file |
 | `callback facts list [--unconfirmed]` | Lists stored facts | 0 |
