@@ -12,32 +12,40 @@ alias. A containment check rejects all of those, and a gate that refuses
 truthful text teaches the person using it that the tool is broken — which is
 worse than the gate occasionally missing a genuine fabrication.
 
-Entity checking is deliberately narrow, and this is a real limitation, not
-an oversight: a token in the text is only checked against the cited facts'
-entities when it is either a known technology (matched against the alias
-table case-insensitively) or "identifier-shaped" — it contains a digit, `+`,
-`#` or `.`, or is 2-6 letters that are all capitals — *and* starts with a
-capital letter. Every other capitalised word (a company name, a project
-title, an ordinary noun) is ignored outright, because a looser rule that
-also flags plain capitalised words produces false positives on ordinary
-prose (a percentile like "p99" would be one, if the capital-letter
-requirement above were dropped) that this gate cannot tell apart from a
-fabricated one. An invented tool name that happens to be neither a known
-alias nor identifier-shaped — a plausible-looking but nonexistent product
-name in title case, say — passes through unchecked. Catching that class of
-fabrication is left to later review, not to this gate.
+Entity checking has two tiers. A known technology (matched against the
+alias table case-insensitively) or an "identifier-shaped" token -- one that
+contains a digit, `+`, `#` or `.`, or is 2-6 letters all in capitals --
+must appear among the cited facts' entities, through the alias table.
+
+Every other capitalised word that does not begin a sentence -- a company, a
+client, an award, a title -- must appear as a whole word somewhere in what
+the cited facts state (their text, entities, organization, title or
+location). A capital mid-sentence marks a name, and a name is a claim: an
+invented partner, an award or a promotion reads exactly like ordinary prose
+to a rule that checks only digits and acronyms. Sentence-initial words are
+exempt because bullets begin with a capitalised verb, and so are tokens glued
+to a preceding digit ("1.2M"), which the number rule owns.
+
+Two rules cover what carries neither a digit nor a capital. A short list of
+claim words -- award, patent, promoted, founded, valedictorian, doubled,
+hundreds, "led a team" and the like (`_CLAIM_PHRASES`) -- must be stated in a
+cited fact. A spelled-out number ("twelve") must match a cited quantity or
+appear in a fact's words. What remains unchecked is ordinary verbs and
+nouns: "led" and "helped with" are not distinguished.
 
 A hyphenated compound ("S3-backed") is checked one hyphen-split component
 at a time when the whole token isn't itself a table entry, because `-` has
 to stay part of a token for entries like "scikit-learn" to match as a
-whole. Every component that is itself checkable must be cited — accepting
+whole. Every component that is itself checkable must be cited -- accepting
 on any single component's match would let a hyphen hide an uncited
 technology sitting next to a cited one ("S3-H100" passing on "S3" alone
 even though "H100" is not cited, when the space-separated form of the same
-claim would correctly fail). A component that is not itself checkable
-("backed", "Redshift") is ignored, exactly as it would be as a standalone
-word — this is the same entity-detection limitation above, not a separate
-hole that hyphens introduce.
+claim would correctly fail). A capitalised component ("Redshift") falls to
+the name rule like any other capitalised word.
+
+A quantity recorded with a percent unit never backs a plain count, and a
+quantity recorded with any other unit never backs a percentage; a quantity
+with no unit may back either.
 
 Number matching is by value, against the union of every cited fact's
 numbers and derivations — not by which occurrence in the text a value came
@@ -158,6 +166,8 @@ class FindingKind(StrEnum):
     UNRESOLVED_NUMBER = "unresolved_number"
     UNKNOWN_ENTITY = "unknown_entity"
     UNRESOLVED_DATE = "unresolved_date"
+    UNSUPPORTED_NAME = "unsupported_name"
+    UNSUPPORTED_CLAIM_WORD = "unsupported_claim_word"
     EMPTY_BULLET = "empty_bullet"
     EMPTY_DOCUMENT = "empty_document"
 
@@ -218,7 +228,199 @@ def _year_within_hull(value: float, start: str | None, end: str | None) -> bool:
 
 def _checkable_entity_tokens(text: str) -> list[str]:
     """Every token worth checking against the cited entities — see module docstring."""
-    return [t for t in _TOKEN.findall(text) if t.lower() in ALIAS_TABLE or _SHAPED.match(t)]
+    # A trailing full stop ends the sentence, not the token: "Python." is
+    # Python, and would otherwise look identifier-shaped for its "." and
+    # match no entity. Internal dots ("3.12", "Node.js") are kept.
+    tokens = (t.rstrip(".") for t in _TOKEN.findall(text))
+    return [t for t in tokens if t and (t.lower() in ALIAS_TABLE or _SHAPED.match(t))]
+
+
+_PERCENT_UNITS = frozenset({"%", "percent", "pct", "percentage"})
+
+
+def _is_percent(unit: str | None) -> bool:
+    return unit is not None and unit.strip().casefold() in _PERCENT_UNITS
+
+
+def _is_count(unit: str | None) -> bool:
+    """A unit that is present and is not a percent: a percent claim cannot
+    rest on it. A quantity with no unit may back either kind of claim."""
+    return unit is not None and not _is_percent(unit)
+
+
+# Words that assert something a reader will take as a specific claim --
+# recognition, rank, ownership, scale -- and that the number and entity rules
+# cannot see because they carry no digit and no capital. Each must be stated
+# in a cited fact. Deliberately a short, readable list: every entry is a word a
+# resume uses to inflate, not a word it uses to describe.
+_CLAIM_PHRASES = (
+    r"awards?",
+    r"awarded",
+    r"patents?",
+    r"patented",
+    r"promoted",
+    r"promotion",
+    r"(?:co-?)?founded",
+    r"(?:co-?)?founder",
+    r"scholar",
+    r"scholarship",
+    r"valedictorian",
+    r"salutatorian",
+    r"summa cum laude",
+    r"magna cum laude",
+    r"cum laude",
+    r"honou?rs",
+    r"dean's list",
+    r"doubled",
+    r"tripled",
+    r"quadrupled",
+    r"halved",
+    r"tenfold",
+    r"dozens",
+    r"hundreds",
+    r"thousands",
+    r"millions",
+    r"billions",
+    r"first",
+    r"sole",
+    r"best",
+    r"head of",
+    r"led a team",
+    r"managed a team",
+)
+_CLAIM_WORDS = re.compile(
+    r"(?<![\w'])(?:" + "|".join(_CLAIM_PHRASES) + r")(?![\w'])", re.IGNORECASE
+)
+
+_NUMBER_WORDS: dict[str, float] = {
+    w: float(n)
+    for n, w in enumerate(
+        [
+            "zero",
+            "one",
+            "two",
+            "three",
+            "four",
+            "five",
+            "six",
+            "seven",
+            "eight",
+            "nine",
+            "ten",
+            "eleven",
+            "twelve",
+            "thirteen",
+            "fourteen",
+            "fifteen",
+            "sixteen",
+            "seventeen",
+            "eighteen",
+            "nineteen",
+            "twenty",
+        ]
+    )
+} | {
+    "thirty": 30.0,
+    "forty": 40.0,
+    "fifty": 50.0,
+    "sixty": 60.0,
+    "seventy": 70.0,
+    "eighty": 80.0,
+    "ninety": 90.0,
+    "dozen": 12.0,
+    "hundred": 100.0,
+    "thousand": 1_000.0,
+    "million": 1_000_000.0,
+}
+# "one" is excluded: "one of the", "one-off" and "no one" are not quantities.
+_NUMBER_WORD = re.compile(
+    r"(?<![\w-])(" + "|".join(w for w in _NUMBER_WORDS if w != "one") + r")(?![\w-])",
+    re.IGNORECASE,
+)
+
+_MONTH_AND_DAY_NAMES = frozenset(
+    [
+        "january",
+        "february",
+        "march",
+        "april",
+        "may",
+        "june",
+        "july",
+        "august",
+        "september",
+        "october",
+        "november",
+        "december",
+        "jan",
+        "feb",
+        "mar",
+        "apr",
+        "jun",
+        "jul",
+        "aug",
+        "sep",
+        "sept",
+        "oct",
+        "nov",
+        "dec",
+        "monday",
+        "tuesday",
+        "wednesday",
+        "thursday",
+        "friday",
+        "saturday",
+        "sunday",
+    ]
+)
+_SENTENCE_BREAK = '.;:!?("\u2013\u2014-\u2022'
+
+
+def _support_corpus(sources: Sequence[Fact]) -> str:
+    """Everything the cited facts state in words, normalised for matching."""
+    parts: list[str] = []
+    for f in sources:
+        parts.append(f.text)
+        parts.extend(f.entities)
+        parts.extend(v for v in (f.organization, f.title, f.location) if v)
+    return " ".join(" ".join(parts).casefold().split())
+
+
+def _has_words(phrase: str, corpus: str) -> bool:
+    pattern = r"(?<![\w'])" + re.escape(" ".join(phrase.casefold().split())) + r"(?![\w'])"
+    return re.search(pattern, corpus) is not None
+
+
+def _unsupported_names(text: str, corpus: str, cited_entities: set[str]) -> list[str]:
+    """Capitalised words, other than a sentence's first, absent from the cited facts.
+
+    A capital mid-sentence marks a name -- a client, a partner, an award, a
+    title -- and a name is a claim. The first word of a sentence is exempt,
+    because bullets begin with a capitalised verb. Tokens the entity rule
+    already checks (known technologies, identifier-shaped tokens) and month
+    and day names (the date rule's) are left to those rules.
+    """
+    unsupported: list[str] = []
+    for match in _TOKEN.finditer(text):
+        word = match.group().rstrip(".")
+        if not word or not word[0].isupper():
+            continue
+        if match.start() and text[match.start() - 1].isalnum():
+            # Glued to what precedes it: a magnitude ("1.2M") or part of an
+            # identifier, which the number and entity rules own.
+            continue
+        before = text[: match.start()].rstrip()
+        if not before or before[-1] in _SENTENCE_BREAK:
+            continue
+        for part in (p for p in word.split("-") if p and p[0].isupper()):
+            if part.casefold() in _MONTH_AND_DAY_NAMES or part in {"I", "A"}:
+                continue
+            if part.lower() in ALIAS_TABLE or _SHAPED.match(part):
+                continue
+            if _has_words(part, corpus) or canonicalize(part) in cited_entities:
+                continue
+            unsupported.append(part)
+    return unsupported
 
 
 def check_bullet(
@@ -253,7 +455,9 @@ def check_bullet(
     used_derivation = False
     used_alias = False
 
-    literal_values = {q.value for f in sources for q in f.numbers.values()}
+    quantities = [q for f in sources for q in f.numbers.values()]
+    percent_values = {q.value for q in quantities if not _is_count(q.unit)}
+    count_values = {q.value for q in quantities if not _is_percent(q.unit)}
 
     derived_values: set[float] = set()
     for f in sources:
@@ -276,6 +480,9 @@ def check_bullet(
     start, end = date_hull(sources)
 
     for number in parse_numbers(text):
+        # A quantity recorded as a percent never backs a plain count, so
+        # "42 direct reports" cannot rest on a fact that says 42%.
+        literal_values = percent_values if number.is_percent else count_values
         if any(values_match(number.value, source) for source in literal_values):
             continue
         # A percentage is compared against the *magnitude* of a derived
@@ -359,6 +566,32 @@ def check_bullet(
                 f"{token!r} (canonical form {canonical!r}) appears in no cited fact",
             )
         )
+
+    corpus = _support_corpus(sources)
+    for word in _unsupported_names(text, corpus, cited_entities):
+        findings.append(
+            Finding(index, FindingKind.UNSUPPORTED_NAME, f"{word!r} appears in no cited fact")
+        )
+    for claim in _CLAIM_WORDS.findall(text):
+        if not _has_words(claim, corpus):
+            findings.append(
+                Finding(
+                    index,
+                    FindingKind.UNSUPPORTED_CLAIM_WORD,
+                    f"claim {claim!r} is not stated in any cited fact",
+                )
+            )
+    all_values = {q.value for q in quantities}
+    for word in _NUMBER_WORD.findall(text):
+        value = _NUMBER_WORDS[word.casefold()]
+        if not _has_words(word, corpus) and not any(values_match(value, v) for v in all_values):
+            findings.append(
+                Finding(
+                    index,
+                    FindingKind.UNRESOLVED_NUMBER,
+                    f"{word!r} ({value:g}) is not derivable from the cited facts",
+                )
+            )
 
     for iso in iso_month_dates(text):
         if (start is not None and iso < start) or (end is not None and iso > end):

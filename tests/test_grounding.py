@@ -325,33 +325,45 @@ def test_hyphenated_alias_table_entry_fails_when_not_cited() -> None:
     assert any(f.kind == "unknown_entity" for f in findings)
 
 
-def test_hyphen_with_an_uncheckable_second_component_is_a_documented_limitation() -> None:
-    """This passes because 'Redshift' is not checkable, not because hyphens
-    are trusted. 'Redshift' has no digit, is not all-caps, and is not in the
-    alias table, so it is ignored exactly as it would be as a standalone
-    word — 'Built an S3 Redshift sync' (space, not hyphen) passes the same
-    way with the same single cited entity. Do not "fix" this into the
-    S3-H100 behaviour above: that case differs because both halves are
-    independently checkable, and this one differs because only one is.
-    """
+def test_a_capitalised_hyphen_component_falls_to_the_name_rule() -> None:
+    """'Redshift' is neither a known technology nor identifier-shaped, so the
+    entity rule ignores it -- but it is a capitalised name mid-sentence, so
+    it must be stated by a cited fact, hyphen or no hyphen."""
     f = fact("s8g", entities=["S3"])
     verdict, findings = check_bullet("Built an S3-Redshift sync", [f])
-    assert verdict is Verdict.PASS
-    assert findings == []
+    assert verdict is Verdict.FAIL
+    assert [(x.kind, x.detail) for x in findings] == [
+        (FindingKind.UNSUPPORTED_NAME, "'Redshift' appears in no cited fact")
+    ]
+    stated = fact("s8h", text="Synced S3 into Redshift", entities=["S3"])
+    assert check_bullet("Built an S3-Redshift sync", [stated]) == (Verdict.PASS, [])
 
 
-def test_ordinary_capitalised_company_names_check_nothing() -> None:
+def test_a_company_name_mid_sentence_must_be_stated_by_a_cited_fact() -> None:
     f = fact("s9", entities=[])
     verdict, findings = check_bullet("Coordinated with Northwind Analytics stakeholders", [f])
-    assert verdict is Verdict.PASS
-    assert findings == []
+    assert verdict is Verdict.FAIL
+    assert [x.detail for x in findings] == [
+        "'Northwind' appears in no cited fact",
+        "'Analytics' appears in no cited fact",
+    ]
+    stated = fact("s9b", text="Worked with Northwind Analytics on reporting")
+    assert check_bullet("Coordinated with Northwind Analytics stakeholders", [stated]) == (
+        Verdict.PASS,
+        [],
+    )
 
 
-def test_led_three_separate_teams_checks_nothing() -> None:
+def test_a_spelled_out_number_must_be_sourced() -> None:
     f = fact("s10", entities=[])
     verdict, findings = check_bullet("Led the migration across three separate teams", [f])
-    assert verdict is Verdict.PASS
-    assert findings == []
+    assert verdict is Verdict.FAIL
+    assert [x.kind for x in findings] == [FindingKind.UNRESOLVED_NUMBER]
+    counted = fact("s10b", numbers={"teams": Quantity(value=3)})
+    assert check_bullet("Led the migration across three separate teams", [counted]) == (
+        Verdict.PASS,
+        [],
+    )
 
 
 def test_wrote_python_312_tooling_checks_only_python() -> None:
@@ -472,7 +484,7 @@ def test_since_preposition_accepts_a_year() -> None:
 
 
 def test_leading_range_with_no_preceding_text_accepts_both_endpoints() -> None:
-    f = fact("y8", dates=Dates(start="2018", end="2024"))
+    f = fact("y8", dates=Dates(start="2018", end="2024"), text="three promotions")
     verdict, findings = check_bullet("2018 to 2024, three promotions", [f])
     assert verdict is Verdict.PASS
     assert findings == []
@@ -665,3 +677,71 @@ def test_blank_bullet_fails_even_with_a_valid_source(text: str) -> None:
 def test_one_grounded_bullet_still_passes_after_the_empty_guards() -> None:
     f = fact("a", numbers={"queue": Quantity(value=300)})
     assert check_document([("Cut the review queue to 300 items", [f])]) == (Verdict.PASS, [])
+
+
+# --- fabrications that carry no digit and no acronym -------------------------------
+
+NORTHWIND = fact(
+    "nw",
+    text="Built reporting pipelines at Northwind Analytics in Python; cut latency 42%",
+    entities=["Northwind Analytics", "Python"],
+    numbers={"latency": Quantity(value=42, unit="%")},
+)
+
+
+@pytest.mark.parametrize(
+    ("bullet", "kind"),
+    [
+        ("Spearheaded the Google partnership", FindingKind.UNSUPPORTED_NAME),
+        ("Won the Turing Award for Python pipelines", FindingKind.UNSUPPORTED_NAME),
+        ("Personally closed the JPMorgan Chase account", FindingKind.UNSUPPORTED_NAME),
+        ("Promoted to Principal Engineer", FindingKind.UNSUPPORTED_CLAIM_WORD),
+        ("Doubled revenue across hundreds of clients", FindingKind.UNSUPPORTED_CLAIM_WORD),
+        ("Led a team of twelve engineers", FindingKind.UNRESOLVED_NUMBER),
+        ("Graduated summa cum laude", FindingKind.UNSUPPORTED_CLAIM_WORD),
+        ("Managed 42 direct reports at Northwind Analytics", FindingKind.UNRESOLVED_NUMBER),
+    ],
+)
+def test_an_unstated_name_claim_or_quantity_fails(bullet: str, kind: FindingKind) -> None:
+    verdict, findings = check_bullet(bullet, [NORTHWIND])
+    assert verdict is Verdict.FAIL
+    assert kind in [f.kind for f in findings], findings
+
+
+@pytest.mark.parametrize(
+    "bullet",
+    [
+        "Built reporting pipelines at Northwind Analytics",
+        "Cut latency 42% on the reporting pipelines",
+        "Rewrote the loader in Python. Built reporting pipelines",
+        "Processed 1.2M records in March",
+    ],
+)
+def test_what_the_facts_state_still_passes(bullet: str) -> None:
+    records = fact(
+        "r", numbers={"records": Quantity(value=1_200_000)}, dates=Dates(start="2024-01")
+    )
+    assert check_bullet(bullet, [NORTHWIND, records]) == (Verdict.PASS, [])
+
+
+def test_a_percent_backs_a_percent_but_not_a_count() -> None:
+    """Mutation: match counts against every quantity -- the count case passes."""
+    assert check_bullet("Cut latency 42%", [NORTHWIND])[0] is Verdict.PASS
+    assert check_bullet("Onboarded 42 accounts", [NORTHWIND])[0] is Verdict.FAIL
+
+
+def test_a_claim_word_stated_in_the_fact_passes() -> None:
+    promoted = fact("p", text="Promoted to Senior Analyst in 2024")
+    assert check_bullet("Earned a promotion; promoted to Senior Analyst", [promoted])[0] is (
+        Verdict.FAIL
+    )
+    assert check_bullet("Promoted to Senior Analyst", [promoted]) == (Verdict.PASS, [])
+
+
+def test_a_technology_ending_a_sentence_is_not_misread_as_an_identifier() -> None:
+    """Mutation: keep the trailing full stop on tokens -- this test fails."""
+    f = fact("py", entities=["Python", "Node.js"])
+    assert check_bullet("Rewrote it in Python. Then ported it to Node.js.", [f]) == (
+        Verdict.PASS,
+        [],
+    )
