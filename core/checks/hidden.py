@@ -360,6 +360,19 @@ class HiddenKind(StrEnum):
     UNPAINTED_TEXT = "unpainted_text"
 
 
+# Findings that mean "this page could not be judged", as opposed to "it was
+# judged and something was found". A consumer that trusts text only after a
+# clean screen must treat both as untrusted, but for different reasons.
+CANNOT_JUDGE = frozenset(
+    {
+        HiddenKind.BACKGROUND_UNKNOWN,
+        HiddenKind.FILL_UNKNOWN,
+        HiddenKind.NO_TEXT_LAYER,
+        HiddenKind.NO_PAGES,
+    }
+)
+
+
 @dataclass(frozen=True)
 class HiddenFinding:
     """A single reason a document failed the hidden-channel gate."""

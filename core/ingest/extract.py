@@ -60,6 +60,8 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
+from core.checks.hidden import CANNOT_JUDGE, HiddenFinding, HiddenKind
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 MAGIC: dict[str, bytes] = {".pdf": b"%PDF"}
@@ -101,8 +103,8 @@ with pdfplumber.open(str(path)) as pdf:
     text = "\\n".join(page.extract_text() or "" for page in pdf.pages)
     pages = len(pdf.pages)
 _, findings = check_hidden(path)
-suspicious = [f"{f.kind}: {f.detail}" for f in findings]
-print(json.dumps({"text": text, "pages": pages, "suspicious": suspicious}))
+found = [{"kind": str(f.kind), "detail": f.detail} for f in findings]
+print(json.dumps({"text": text, "pages": pages, "findings": found}))
 """
 
 
@@ -136,8 +138,9 @@ class ExtractionError(ValueError):
 class ExtractResult:
     """What came out of an imported document.
 
-    `suspicious` is exactly what `core.checks.hidden.check_hidden` reported
-    for this file, formatted as `f"{kind}: {detail}"` per finding -- an
+    `findings` is exactly what `core.checks.hidden.check_hidden` reported
+    for this file (`suspicious` is the same list as `"kind: detail"` text,
+    and `unscreened` is the subset meaning a page could not be judged) -- an
     empty list means that gate raised no finding, not that the document is
     proven free of every hidden channel. That gate documents several blind
     spots of its own (zero opacity, clipping, a horizontal-only squash, an
@@ -150,8 +153,19 @@ class ExtractResult:
     """
 
     text: str
-    suspicious: list[str]
+    findings: list[HiddenFinding]
     pages: int
+
+    @property
+    def suspicious(self) -> list[str]:
+        """Every finding as `"kind: detail"` text."""
+        return [f"{f.kind}: {f.detail}" for f in self.findings]
+
+    @property
+    def unscreened(self) -> list[HiddenFinding]:
+        """The findings that mean part of the document could not be screened
+        at all, as distinct from screened and found suspicious."""
+        return [f for f in self.findings if f.kind in CANNOT_JUDGE]
 
 
 def extract_document(path: Path, *, timeout_s: float = 20.0) -> ExtractResult:
@@ -211,11 +225,15 @@ def extract_document(path: Path, *, timeout_s: float = 20.0) -> ExtractResult:
     except json.JSONDecodeError as err:
         raise ExtractionError(f"could not read {path.name}: malformed worker output") from err
 
-    return ExtractResult(
-        text=payload["text"],
-        suspicious=payload["suspicious"],
-        pages=int(payload["pages"]),
-    )
+    try:
+        findings = [
+            HiddenFinding(HiddenKind(f["kind"]), str(f["detail"])) for f in payload["findings"]
+        ]
+    except (KeyError, TypeError, ValueError) as err:
+        # An unrecognised kind is a screen this module cannot interpret, so it
+        # is refused rather than dropped or passed through as plain text.
+        raise ExtractionError(f"could not read {path.name}: unexpected finding {err}") from err
+    return ExtractResult(text=payload["text"], findings=findings, pages=int(payload["pages"]))
 
 
 def gap_audit(text: str) -> list[str]:

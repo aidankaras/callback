@@ -315,3 +315,36 @@ def test_a_failed_worker_says_why(
     pdf.write_bytes(b"%PDF-1.4")
     with pytest.raises(ExtractionError, match=expected):
         extract_document(pdf)
+
+
+@pytest.mark.slow
+def test_a_skipped_screen_is_distinguishable_from_a_finding_by_type(tmp_path: Path) -> None:
+    """A consumer must be able to tell "could not screen this page" from
+    "screened it and found something" without parsing a string."""
+    from core.checks.hidden import CANNOT_JUDGE
+
+    skipped = tmp_path / "gradient.pdf"
+    build(GRADIENT_BACKGROUND, skipped, FONT_DIR)
+    found = tmp_path / "white.pdf"
+    build(WHITE, found, FONT_DIR)
+
+    assert [f.kind for f in extract_document(skipped).findings] == [HiddenKind.BACKGROUND_UNKNOWN]
+    assert extract_document(skipped).unscreened
+    assert [f.kind for f in extract_document(found).findings] == [HiddenKind.INVISIBLE_TEXT]
+    assert not extract_document(found).unscreened
+    assert HiddenKind.INVISIBLE_TEXT not in CANNOT_JUDGE
+
+
+def test_an_unknown_finding_kind_from_the_worker_fails_closed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    payload = '{"text": "", "pages": 1, "findings": [{"kind": "new_kind", "detail": "x"}]}'
+
+    def fake_run(*_args: object, **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess([], 0, stdout=payload, stderr="")
+
+    monkeypatch.setattr("core.ingest.extract.subprocess.run", fake_run)
+    pdf = tmp_path / "x.pdf"
+    pdf.write_bytes(b"%PDF-1.4")
+    with pytest.raises(ExtractionError, match="new_kind"):
+        extract_document(pdf)

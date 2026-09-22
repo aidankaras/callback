@@ -15,15 +15,3 @@ each is the *reproduction*, which is the part a summary loses.
 since percentage comparison is deliberately by absolute value, but the token
 itself is silently changed.
 
-## Important — an import cannot tell a skipped screen from a finding
-
-`core/ingest/extract.py`. `ExtractResult.suspicious` is a flat `list[str]` of
-`f"{kind}: {detail}"`, so `background_unknown` ("the invisible-text screen did not
-run on this page") and `invisible_text` ("it ran and found something") are told apart
-only by parsing a string prefix — while `text` still carries whatever the skipped
-screen would have caught.
-
-A PDF whose page is covered by a shading-pattern fill, with white text on it:
-`suspicious == ['background_unknown: page 0: ...']` and `text` contains the white
-payload. Fix: return structured findings (kind plus detail) and name the pages the
-screen could not run on separately, so a consumer cannot read one as the other.
