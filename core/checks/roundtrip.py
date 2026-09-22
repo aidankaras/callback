@@ -786,6 +786,14 @@ def check_roundtrip(doc: ResumeDoc, pdf_path: Path) -> RoundTripResult:
         # paragraph for where a reader meets this split for the first time.
         if d.is_skill:
             assert d.region_index is not None, "a skill always names its section"
+            # A skill belongs after its own section's title. If that title was
+            # not found, its section cannot be located, and the skill is
+            # reported unrecovered rather than searched for anywhere.
+            title_at = positions.get(f"section_title[{d.region_index}]")
+            if title_at is None:
+                positions[d.field] = None
+                continue
+            start = max(start, title_at + 1)
             if end is None:
                 end = _skills_region_end(doc, d.region_index, positions, anchors)
             positions[d.field] = _find_skill(d.value, flat, start=start, end=end)
@@ -830,13 +838,21 @@ def check_roundtrip(doc: ResumeDoc, pdf_path: Path) -> RoundTripResult:
     if images:
         findings.append(f"document contains {images} image(s); text must be text")
 
-    verdict = "fail" if findings else "pass"
+    skills_unrecovered = [d.value for d in declared if d.is_skill and positions[d.field] is None]
+    # An unrecovered skill is not a critical field, so it cannot fail the
+    # document on its own -- but a keyword filter would miss it, so it is a
+    # `warn` with its own finding rather than a silent dent in `char_ratio`.
+    verdict = "fail" if findings else ("warn" if skills_unrecovered else "pass")
+    if skills_unrecovered:
+        findings.append(
+            f"skills a naive parser could not read from their section: {skills_unrecovered}"
+        )
     return RoundTripResult(
         critical=critical,
         char_ratio=char_ratio,
         order_ok=order_ok,
         out_of_order=out_of_order,
-        skills_unrecovered=[d.value for d in declared if d.is_skill and positions[d.field] is None],
+        skills_unrecovered=skills_unrecovered,
         verdict=verdict,
         findings=findings,
     )

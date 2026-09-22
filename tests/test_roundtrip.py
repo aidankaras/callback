@@ -987,3 +987,80 @@ def test_a_skill_missing_from_its_own_section_is_not_recovered_from_a_later_one(
 
     result = check_roundtrip(declared, out)
     assert result.skills_unrecovered == ["Kafka"]
+
+
+@pytest.mark.slow
+def test_a_skill_missing_from_its_own_section_is_not_recovered_from_an_earlier_one(
+    tmp_path: Path,
+) -> None:
+    """The region's start must be the section's own title, not the end of
+    the previous section's entries. Mutation: drop the own-title start bound
+    in `check_roundtrip` -- this test fails."""
+    identity = Identity(name="Dana Vex", email="d@example.com")
+    languages = Section(title="Languages", skills=["Python", "Kafka"])
+    rendered = ResumeDoc(
+        identity=identity, sections=[languages, Section(title="Tools", skills=["Docker"])]
+    )
+    declared = ResumeDoc(
+        identity=identity, sections=[languages, Section(title="Tools", skills=["Docker", "Kafka"])]
+    )
+    out = tmp_path / "resume.pdf"
+    render(rendered, out)
+
+    flat = [normalize(s) for page in naive_segments(out) for s in page]
+    kafka_rows = [i for i, s in enumerate(flat) if "Kafka" in s]
+    title_row = next(i for i, s in enumerate(flat) if s.casefold() == "tools")
+    assert len(kafka_rows) == 1 and kafka_rows[0] < title_row, flat
+
+    result = check_roundtrip(declared, out)
+    assert result.skills_unrecovered == ["Kafka"]
+
+
+@pytest.mark.slow
+def test_an_unrecovered_skill_is_a_warning_even_when_the_char_ratio_holds(
+    tmp_path: Path,
+) -> None:
+    identity = Identity(name="Dana Vex", email="d@example.com")
+    body = Section(
+        title="Experience",
+        entries=[
+            Entry(
+                heading="Northwind",
+                bullets=[
+                    Bullet(text=f"Shipped release {n} of the reporting service", sources=["a"])
+                    for n in range(1, 13)
+                ],
+            )
+        ],
+    )
+    rendered = ResumeDoc(identity=identity, sections=[body, Section(title="Skills", skills=["Go"])])
+    declared = ResumeDoc(
+        identity=identity, sections=[body, Section(title="Skills", skills=["Go", "Kafka"])]
+    )
+    out = tmp_path / "resume.pdf"
+    render(rendered, out)
+
+    result = check_roundtrip(declared, out)
+    assert result.char_ratio >= 0.98, result.char_ratio
+    assert result.skills_unrecovered == ["Kafka"]
+    assert result.verdict == "warn"
+    assert any("Kafka" in f for f in result.findings), result.findings
+
+
+@pytest.mark.slow
+def test_a_skill_whose_section_title_is_not_found_is_unrecovered(tmp_path: Path) -> None:
+    """Without its own title there is no region to search, so the skill is
+    reported unrecovered rather than matched wherever it happens to appear.
+    Mutation: remove the missing-title branch -- this test fails."""
+    identity = Identity(name="Dana Vex", email="d@example.com")
+    out = tmp_path / "resume.pdf"
+    render(ResumeDoc(identity=identity, sections=[Section(title="Tools", skills=["Python"])]), out)
+    flat = [normalize(s).casefold() for page in naive_segments(out) for s in page]
+    assert "languages" not in flat and "python" in flat, flat
+
+    declared = ResumeDoc(
+        identity=identity, sections=[Section(title="Languages", skills=["Python"])]
+    )
+    result = check_roundtrip(declared, out)
+    assert result.skills_unrecovered == ["Python"]
+    assert result.verdict == "fail"
