@@ -217,6 +217,13 @@ uv run --project <repo root> callback apply <job-id> --company "<company>" --tit
   within 90 days, or 10 in the last 24 hours. Report it; don't route around it.
 - If the draft improves after the packet was built, rerun the same command
   with `--refresh`. It rebuilds the packet without counting a new application.
+- Once the user has actually submitted, seal what they sent:
+  `uv run --project <repo root> callback finalize <job-id>` copies the gated
+  draft to `final/` read-only with a signed manifest, and records it in the
+  ledger. `callback verify [<job-id>]` later reports any sealed file that
+  changed and any break in the ledger. Seal after submitting, not before: a
+  sealed document is never rewritten, and a draft improved afterwards needs
+  `apply --refresh` instead.
 - Afterwards, record what happened with
   `uv run --project <repo root> callback outcome <job-id> <kind>`.
 
