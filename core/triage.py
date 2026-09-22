@@ -25,6 +25,7 @@ judgement of fit; the skill weighs the rest.
 
 from __future__ import annotations
 
+import html
 import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
@@ -62,8 +63,9 @@ _OFFERS_SPONSORSHIP = re.compile(
     r"\bwe\s+(?:do|can|will|may|are able to|are happy to)?\s*sponsor", re.IGNORECASE
 )
 _CITIZENSHIP = re.compile(
-    r"\bu\.?s\.? citizen(?:ship)?\b[^.!?]{0,40}\b(?:required|must|only)\b"
-    r"|\bmust be (?:a )?u\.?s\.? citizen\b",
+    r"\bu\.?s\.?\s+citizen(?:s|ship)?\b[^.!?]{0,40}\b(?:required|must|only)\b"
+    r"|\bmust\s+be\s+(?:a\s+)?u\.?s\.?\s+citizens?\b"
+    r"|\bonly\s+u\.?s\.?\s+citizens?\b",
     re.IGNORECASE,
 )
 _CLEARANCE = re.compile(
@@ -148,6 +150,18 @@ def _candidate_grad(graduation: str) -> str | None:
     return f"{year.group(1)}-06" if year else None
 
 
+def _refuses(sentence: str) -> bool:
+    """Whether `sentence` refuses sponsorship somewhere an offer does not cover.
+    Judged by span, not by sentence: in a posting with no sentence breaks the
+    whole text is one sentence, and "we sponsor some roles" early on must not
+    erase "we cannot sponsor this one" later."""
+    offers = [m.span() for m in _OFFERS_SPONSORSHIP.finditer(sentence)]
+    return any(
+        not any(a < end and start < b for a, b in offers)
+        for start, end in (m.span() for m in _REFUSES_SPONSORSHIP.finditer(sentence))
+    )
+
+
 def check_eligibility(text: str, profile: Profile) -> Eligibility:
     """Every eligibility requirement `text` states, judged against `profile`."""
     findings: list[Finding] = []
@@ -157,12 +171,15 @@ def check_eligibility(text: str, profile: Profile) -> Eligibility:
         if not any(f.rule == rule for f in findings):
             findings.append(Finding(rule, level, quote.strip(), reason))
 
-    normalised = re.sub(r"\bU\.S\.(?=\s|$)", "US", text)
+    # Board content arrives as HTML more often than not: "&nbsp;" and tags would
+    # otherwise sit between the words every rule below expects to be adjacent.
+    plain = re.sub(r"<[^>]+>", " ", html.unescape(text))
+    normalised = re.sub(r"\bU\.S\.(?=\s|$)", "US", plain)
     # A posting that says it sponsors and also that it cannot always is a
     # question for someone who needs sponsorship, not a refusal.
     offers = _OFFERS_SPONSORSHIP.search(normalised) is not None
     for sentence in (s for s in _SENTENCE_BREAK.split(normalised) if s.strip()):
-        if _REFUSES_SPONSORSHIP.search(sentence) and not _OFFERS_SPONSORSHIP.search(sentence):
+        if _refuses(sentence):
             needs = auth is not None and _NEEDS_SPONSORSHIP.search(auth) and not _is_citizen(auth)
             if offers and needs:
                 add("sponsorship", "unknown", sentence, "sponsors some roles; ask whether this one")

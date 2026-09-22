@@ -65,11 +65,26 @@ def prepare(job_id: str) -> Path:
             "the packet's resume.pdf has changed since you applied, or is missing; "
             "the pack must describe what the interviewer has"
         )
-    letter_pdf = packet / "cover-letter.pdf"
-    if application.letter_sha256 is not None and (
-        not letter_pdf.is_file() or _sha256(letter_pdf) != application.letter_sha256
+    # Every other file the pack quotes must match the hash recorded when the
+    # application was made; a file with no recorded hash was never sent.
+    sent: dict[str, Path] = {}
+    for name, recorded in (
+        ("cover-letter.pdf", application.letter_sha256),
+        ("answers.md", application.answers_sha256),
+        ("resume.txt", application.resume_txt_sha256),
     ):
-        raise InterviewError("the packet's cover-letter.pdf has changed since you applied")
+        path = packet / name
+        if recorded is None:
+            if path.exists():
+                raise InterviewError(
+                    f"the packet holds {name}, but the application never recorded sending it"
+                )
+            continue
+        if not path.is_file() or _sha256(path) != recorded:
+            raise InterviewError(
+                f"the packet's {name} has changed since you applied, or is missing"
+            )
+        sent[name] = path
 
     try:
         report = json.loads((draft / "report.json").read_text(encoding="utf-8"))
@@ -108,18 +123,29 @@ def prepare(job_id: str) -> Path:
                 lines.append(f"- **{bullet.text}** ({entry.heading})")
                 for fid in bullet.sources:
                     fact = facts.get(fid)
-                    if fact is not None:
+                    if fact is None:
+                        lines.append(f"  - (fact {fid!r} is no longer stored)")
+                    elif not fact.selectable():
+                        lines.append(f"  - (fact {fid!r} is no longer confirmed; not shown)")
+                    else:
                         lines.append(f"  - {fact.text}")
     # The packet's plain-text resume is the gated document's own text, so it is
     # used rather than a re-extraction of the PDF.
-    sent_text = packet / "resume.txt"
-    resume_text = sent_text.read_text(encoding="utf-8") if sent_text.is_file() else ""
-    lines += ["", "## What you sent", "", "### Resume", "", resume_text.strip(), ""]
-    if letter_pdf.is_file():
-        lines += ["### Cover letter", "", _pdf_text(letter_pdf).strip(), ""]
-    answers = packet / "answers.md"
-    if answers.is_file():
-        lines += ["### Form answers", "", answers.read_text(encoding="utf-8").strip(), ""]
+    lines += ["", "## What you sent", "", "### Resume", ""]
+    if "resume.txt" in sent:
+        lines.append(sent["resume.txt"].read_text(encoding="utf-8").strip())
+    else:
+        lines.append(_pdf_text(resume_pdf).strip())
+    lines.append("")
+    if "cover-letter.pdf" in sent:
+        lines += ["### Cover letter", "", _pdf_text(sent["cover-letter.pdf"]).strip(), ""]
+    if "answers.md" in sent:
+        lines += [
+            "### Form answers",
+            "",
+            sent["answers.md"].read_text(encoding="utf-8").strip(),
+            "",
+        ]
     out = private_dir(f"outputs/{job_id}/interview") / "prep.md"
     write_private(out, "\n".join(lines) + "\n")
     return out

@@ -327,3 +327,14 @@ def test_form_answers_join_the_packet_only_when_checked_and_unchanged(
     else:
         with pytest.raises(ApplyError, match="answers"):
             apply(_target(), now=NOW)
+
+
+def test_an_application_the_ledger_cannot_record_is_not_saved(home: Path) -> None:
+    """The ledger is written before the record, so a saved application always
+    has its entry. Mutation: save first -- the record survives the failure."""
+    _built(home, "acme-ml")
+    (home / "ledger.log").write_text("not json\n", encoding="utf-8")
+    with pytest.raises(ApplyError, match="ledger"):
+        apply(_target(), now=NOW)
+    assert load_applications() == []
+    assert not (home / "outputs" / "acme-ml" / "packet").exists()

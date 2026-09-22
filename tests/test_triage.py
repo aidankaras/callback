@@ -27,7 +27,10 @@ def test_a_sponsorship_offer_is_not_a_knockout() -> None:
     text = "Visa sponsorship: We do sponsor visas! However, we aren't able to sponsor every role."
     candidate = Profile(work_authorization="F-1 student, will need sponsorship")
     assert kinds(text, candidate) == [("sponsorship", "unknown")]
-    assert kinds("We do sponsor visas, but are unable to sponsor every role.", candidate) == []
+    # The same two statements in one sentence read the same way.
+    one_sentence = "We do sponsor visas, but are unable to sponsor every role."
+    assert kinds(one_sentence, candidate) == [("sponsorship", "unknown")]
+    assert kinds("We do sponsor visas.", candidate) == []
 
 
 @pytest.mark.parametrize(
@@ -191,3 +194,23 @@ def test_gaps_count_the_technologies_eligible_postings_ask_for_that_facts_do_not
         _posting("c", "ML Intern", "Kubernetes. Class of 2027 only.", days_old=0),
     ]
     assert gaps(postings, US_JUNIOR, FACTS) == [("PyTorch", 2), ("Kubernetes", 1)]
+
+
+@pytest.mark.parametrize(
+    "text",
+    ["U.S. Citizens only.", "Only US citizens are eligible.", "Must be a U.S.&nbsp;citizen."],
+)
+def test_plural_and_html_citizenship_requirements_are_read(text: str) -> None:
+    assert kinds(text, Profile(work_authorization="F-1 student")) == [("citizenship", "knockout")]
+
+
+def test_a_posting_without_sentence_breaks_is_read_in_windows() -> None:
+    """With no breaks the whole posting is one sentence: an offer elsewhere
+    must not erase a refusal, and unrelated years must not widen a window."""
+    needs = Profile(work_authorization="F-1, will need sponsorship", graduation="May 2028")
+    run_on = "we sponsor some roles but we cannot sponsor this one and we care about growth"
+    assert kinds(run_on, needs) == [("sponsorship", "unknown")]
+    window = (
+        "open to students graduating between December 2026 and June 2027 founded in 2031 at scale"
+    )
+    assert kinds(window, needs) == [("graduation", "knockout")]

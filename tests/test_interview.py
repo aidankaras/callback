@@ -91,3 +91,33 @@ def test_a_draft_that_no_longer_matches_what_was_sent_is_not_used_for_stories(
 def test_a_job_never_applied_to_has_no_pack(applied: Path) -> None:
     with pytest.raises(InterviewError, match="no application"):
         prepare("never")
+
+
+@pytest.mark.parametrize("name", ["resume.txt", "answers.md"])
+def test_a_quoted_packet_file_must_match_what_was_recorded(applied: Path, name: str) -> None:
+    """The pack quotes resume.txt and answers.md under "What you sent", so each
+    must still be the file the application recorded. Mutation: skip the loop
+    over recorded hashes -- the edited resume.txt is quoted; an answers.md the
+    application never sent is quoted."""
+    path = applied / "outputs" / "acme-ml" / "packet" / name
+    assert (name == "resume.txt") == path.exists()  # premise: no answers were sent
+    path.write_text("PhD, MIT. Staff Engineer at Google\n", encoding="utf-8")
+    with pytest.raises(InterviewError, match=name.replace(".", r"\.")):
+        prepare("acme-ml")
+
+
+def test_a_story_is_told_only_from_a_fact_still_confirmed(applied: Path) -> None:
+    """Mutation: drop the selectable() check -- the unconfirmed text is printed."""
+    save_facts(
+        {
+            "queue": Fact(
+                id="queue",
+                kind=FactKind.EXPERIENCE_DETAIL,
+                text="UNCONFIRMED: also won a Turing Award",
+                provenance=Provenance(source="import:x.pdf", trust=Trust.IMPORT_UNCONFIRMED),
+            )
+        }
+    )
+    text = prepare("acme-ml").read_text(encoding="utf-8")
+    assert "Turing" not in text
+    assert "no longer confirmed" in text

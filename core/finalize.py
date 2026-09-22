@@ -45,16 +45,33 @@ def _sha256(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
-def _key() -> bytes:
+def _key(*, create: bool = False) -> bytes | None:
+    """The signing key, created only when sealing -- never by a verification,
+    which would replace a lost key and make every seal read as altered."""
     path = resolve_inside(KEY_FILE)
     if not path.exists():
+        if not create:
+            return None
         write_private_bytes(path, secrets.token_bytes(32))
     return path.read_bytes()
 
 
-def _sign(body: dict[str, object]) -> str:
+def _mac(key: bytes, body: dict[str, object]) -> str:
     canonical = json.dumps(body, sort_keys=True, separators=(",", ":")).encode()
-    return hmac.new(_key(), canonical, hashlib.sha256).hexdigest()
+    return hmac.new(key, canonical, hashlib.sha256).hexdigest()
+
+
+def _sign(body: dict[str, object]) -> str:
+    key = _key(create=True)
+    assert key is not None
+    return _mac(key, body)
+
+
+def _sealed_jobs() -> list[str]:
+    outputs = resolve_inside("outputs")
+    if not outputs.is_dir():
+        return []
+    return sorted(d.parent.name for d in outputs.glob("*/final") if (d / "manifest.json").exists())
 
 
 def record_event(event: dict[str, object]) -> None:
@@ -68,6 +85,9 @@ def _append_ledger(event: dict[str, object]) -> None:
     previous = json.loads(lines[-1])["entry_sha256"] if lines else _GENESIS
     entry: dict[str, object] = {**event, "previous_sha256": previous}
     entry["entry_sha256"] = _sha256(json.dumps(entry, sort_keys=True).encode())
+    # Keyed, so a chain rewritten from scratch -- every entry self-consistent --
+    # still fails: only a holder of the key can produce a valid entry.
+    entry["entry_mac"] = _sign(entry)
     if path.exists():
         path.chmod(0o600)
     write_private(path, "\n".join([*lines, json.dumps(entry, sort_keys=True)]) + "\n")
@@ -108,11 +128,20 @@ def finalize(job_id: str, *, now: datetime, accept_warnings: bool = False) -> Pa
     ) != report.get("doc_sha256"):
         raise FinalizeError("the draft has changed since it was gated: run `callback build` again")
     facts = resolve_inside("facts.yaml")
+    judged = report.get("facts_sha256")
+    if not isinstance(judged, str):
+        raise FinalizeError(
+            "the build report does not name the facts it was judged against: rebuild"
+        )
+    if not facts.exists() or _sha256(facts.read_bytes()) != judged:
+        raise FinalizeError(
+            "the facts have changed since this draft was built: rebuild before sealing"
+        )
     body: dict[str, object] = {
         "job_id": job_id,
         "sealed_at": now.isoformat(),
         "files": {name: _sha256(b) for name, b in data.items()},
-        "facts_sha256": _sha256(facts.read_bytes()) if facts.exists() else None,
+        "facts_sha256": judged,
         "verdicts": _verdicts(report),
     }
     manifest = {**body, "signature": _sign(body)}
@@ -137,38 +166,71 @@ def finalize(job_id: str, *, now: datetime, accept_warnings: bool = False) -> Pa
 def verify(job_id: str) -> list[str]:
     """Every way the sealed document for `job_id` differs from what was sealed."""
     final = resolve_inside(f"outputs/{job_id}/final")
+    key = _key()
+    if key is None:
+        return ["the signing key is missing; nothing can be verified"]
     try:
         manifest = json.loads((final / "manifest.json").read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
         return [f"no readable manifest: {exc}"]
     signature = manifest.pop("signature", "")
-    if not hmac.compare_digest(str(signature), _sign(manifest)):
+    if not hmac.compare_digest(str(signature), _mac(key, manifest)):
         return ["the manifest's signature does not match; it was altered"]
     problems: list[str] = []
-    for name, expected in dict(manifest.get("files", {})).items():
+    files = dict(manifest.get("files", {}))
+    for name, expected in files.items():
         path = final / str(name)
         if not path.is_file() or _sha256(path.read_bytes()) != expected:
             problems.append(f"{name} does not match its sealed hash")
+    for item in sorted(final.iterdir()):
+        if item.name != "manifest.json" and item.name not in files:
+            problems.append(f"{item.name} is in final/ but was not sealed")
+    if not any(e.get("manifest") == signature for e in _ledger_entries(key)[0]):
+        problems.append("the ledger has no entry for this seal")
     return problems
 
 
-def verify_ledger() -> list[str]:
-    """Where, if anywhere, the ledger's hash chain breaks."""
+def _ledger_entries(key: bytes) -> tuple[list[dict[str, object]], list[str]]:
+    """The ledger's entries, and where its chain or keyed entries break."""
     path = resolve_inside(LEDGER_FILE)
-    if not path.exists():
-        return []
+    lines = path.read_text(encoding="utf-8").splitlines() if path.exists() else []
+    entries: list[dict[str, object]] = []
     previous = _GENESIS
-    for n, line in enumerate(path.read_text(encoding="utf-8").splitlines()):
+    for n, line in enumerate(lines):
         try:
-            entry = json.loads(line)
+            parsed: object = json.loads(line)
         except json.JSONDecodeError:
-            return [f"entry {n} is not readable"]
+            return entries, [f"entry {n} is not readable"]
+        if not isinstance(parsed, dict):
+            return entries, [f"entry {n} is not readable"]
+        entry = dict(cast("dict[str, object]", parsed))
+        mac = entry.pop("entry_mac", None)
+        if not isinstance(mac, str) or not hmac.compare_digest(mac, _mac(key, entry)):
+            return entries, [f"entry {n} was not written with this data home's key"]
         claimed = entry.pop("entry_sha256", None)
         if entry.get("previous_sha256") != previous:
-            return [
+            return entries, [
                 f"entry {n} does not follow the entry before it: an entry was removed or reordered"
             ]
         if _sha256(json.dumps(entry, sort_keys=True).encode()) != claimed:
-            return [f"entry {n} was altered after it was written"]
+            return entries, [f"entry {n} was altered after it was written"]
         previous = str(claimed)
-    return []
+        entries.append(entry)
+    return entries, []
+
+
+def verify_ledger() -> list[str]:
+    """Where, if anywhere, the ledger's chain breaks, and any sealed document it
+    does not record. A missing or empty ledger is intact only when nothing has
+    been sealed."""
+    sealed = _sealed_jobs()
+    key = _key()
+    if key is None:
+        return ["the signing key is missing; nothing can be verified"] if sealed else []
+    entries, problems = _ledger_entries(key)
+    if problems:
+        return problems
+    if sealed and not entries:
+        return [f"the ledger is missing or empty, but {len(sealed)} document(s) are sealed"]
+    recorded = {str(e.get("job_id")) for e in entries if e.get("event") == "finalize"}
+    return [f"sealed document {job!r} has no ledger entry" for job in sealed if job not in recorded]

@@ -127,6 +127,8 @@ class Application(Target):
     submitted_at: datetime
     resume_sha256: str
     letter_sha256: str | None = None
+    answers_sha256: str | None = None
+    resume_txt_sha256: str | None = None
     outcomes: list[Outcome] = Field(default_factory=list[Outcome])
 
     _aware = field_validator("submitted_at")(_aware)
@@ -298,29 +300,32 @@ def apply(
             "links": identity.links,
         }
         write_private(staging / "fields.json", json.dumps(fields, indent=2) + "\n")
-        resume_sha256 = _sha256(resume)
-        letter_sha256 = _sha256(letter) if letter is not None else None
+        hashes: dict[str, str | None] = {
+            "resume_sha256": _sha256(resume),
+            "letter_sha256": _sha256(letter) if letter is not None else None,
+            "answers_sha256": _sha256(staging / "answers.md") if answers is not None else None,
+            "resume_txt_sha256": _sha256(staging / "resume.txt"),
+        }
         if refresh and prior is not None:
-            record = prior.model_copy(
-                update={"resume_sha256": resume_sha256, "letter_sha256": letter_sha256}
-            )
+            record = prior.model_copy(update=hashes)
         else:
-            record = Application(
-                **target.model_dump(),
-                submitted_at=now,
-                resume_sha256=resume_sha256,
-                letter_sha256=letter_sha256,
+            record = Application.model_validate(
+                {**target.model_dump(), "submitted_at": now, **hashes}
             )
+        # The ledger first: an entry for an application whose record then failed
+        # to save is visible, where a saved record with no entry would not be.
+        try:
+            record_event(
+                {
+                    "event": "refresh" if refresh else "apply",
+                    "job_id": target.job_id,
+                    "at": now.isoformat(),
+                    **hashes,
+                }
+            )
+        except (OSError, ValueError, KeyError) as exc:
+            raise ApplyError(f"cannot record the application in the ledger: {exc}") from exc
         _save([*existing, record])
-        record_event(
-            {
-                "event": "refresh" if refresh else "apply",
-                "job_id": target.job_id,
-                "at": now.isoformat(),
-                "resume_sha256": resume_sha256,
-                "letter_sha256": letter_sha256,
-            }
-        )
     except BaseException:
         shutil.rmtree(staging, ignore_errors=True)
         raise
