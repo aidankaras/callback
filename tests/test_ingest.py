@@ -335,6 +335,30 @@ def test_a_skipped_screen_is_distinguishable_from_a_finding_by_type(tmp_path: Pa
     assert HiddenKind.INVISIBLE_TEXT not in CANNOT_JUDGE
 
 
+@pytest.mark.parametrize(
+    "payload",
+    [
+        '{"findings": []}',
+        '{"text": "hi", "findings": []}',
+        '{"text": "hi", "pages": "x", "findings": []}',
+    ],
+)
+def test_a_worker_payload_missing_a_field_raises_this_modules_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, payload: str
+) -> None:
+    """The module declares one exception type for every stage. Mutation: read
+    text and pages outside the guard -- a bare KeyError escapes instead."""
+
+    def fake_run(*_args: object, **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess([], 0, stdout=payload, stderr="")
+
+    monkeypatch.setattr("core.ingest.extract.subprocess.run", fake_run)
+    pdf = tmp_path / "x.pdf"
+    pdf.write_bytes(b"%PDF-1.4")
+    with pytest.raises(ExtractionError, match="unexpected worker output"):
+        extract_document(pdf)
+
+
 def test_an_unknown_finding_kind_from_the_worker_fails_closed(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

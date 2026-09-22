@@ -1,10 +1,16 @@
-# 02 — Why the gates do not share a result type yet
+# 02 — Why the gates did not share a result type
 
-**Decision.** `GateResult` exists and only the grounding gate returns one. The
-round-trip and hidden-channel gates deliberately return their own shapes, and
-unifying them is left to the code that first has to aggregate several gates.
+**What this note is.** A decision taken mid-build and the outcome that
+overturned it. Everything until "Outcome" describes the code *as it was then*:
+`GateResult` and `core/checks/result.py` no longer exist, and looking for them
+is not the point -- why they were introduced early, and what that cost, is.
 
-## The state a reader will find
+**The decision, at the time.** `GateResult` existed and only the grounding gate
+returned one. The round-trip and hidden-channel gates deliberately returned
+their own shapes, and unifying them was left to the code that would first have
+to aggregate several gates.
+
+## The state a reader found then
 
 Three gates, three return types:
 
@@ -81,23 +87,24 @@ is actually being avoided is a false conformance: a `GateResult` whose
 signature carries less information than the shape the gate already returns, and
 it reads as conforming while telling a reader less.
 
-## Implemented by
+## Implemented by, at the time
 
 - `core/checks/result.py` — `GateResult`, and the docstring arguing for early
-  introduction.
+  introduction. Removed; see below.
 - `core/checks/grounding.py` — the only producer, plus the two local imports
-  that mark the cycle.
+  that marked the cycle.
 - `core/checks/roundtrip.py`, `core/checks/hidden.py` — the two gates that
-  return their own shapes.
+  returned their own shapes.
 
-## Outcome (recorded later)
+## Outcome, and the code today
 
 The prediction did not hold. When the remaining gates were built, they were
 composed by `core/gates.py`, which adapts each gate's own result into a
 `GateOutcome` and folds them into a `GateReport`, rather than having every gate
 return `GateResult`. `GateResult` and `check_document_gate` were left with no
 production caller, reached only by their own tests, and carrying a load-order
-workaround for an import nothing used. Both were removed. The lesson survives the
-code: a shared shape introduced ahead of its consumers is a guess about how they
+workaround for an import nothing used. Both were removed, so nothing named in the sections above is in
+the tree now: `core/gates.py` composes the gates, and each gate keeps its own
+result type. The lesson survives the code: a shared shape introduced ahead of its consumers is a guess about how they
 will be composed, and here the composition layer, once it existed, wanted a
 different shape.

@@ -231,11 +231,19 @@ def extract_document(path: Path, *, timeout_s: float = 20.0) -> ExtractResult:
         findings = [
             HiddenFinding(HiddenKind(f["kind"]), str(f["detail"])) for f in payload["findings"]
         ]
+        # Every field the result is built from is read in here: the boundary
+        # this module declares is about what the function can raise, not about
+        # what today's worker happens to always send.
+        result = ExtractResult(
+            text=str(payload["text"]), findings=findings, pages=int(payload["pages"])
+        )
     except (KeyError, TypeError, ValueError) as err:
         # An unrecognised kind is a screen this module cannot interpret, so it
         # is refused rather than dropped or passed through as plain text.
-        raise ExtractionError(f"could not read {path.name}: unexpected finding {err}") from err
-    return ExtractResult(text=payload["text"], findings=findings, pages=int(payload["pages"]))
+        raise ExtractionError(
+            f"could not read {path.name}: unexpected worker output {err}"
+        ) from err
+    return result
 
 
 def gap_audit(text: str) -> list[str]:
