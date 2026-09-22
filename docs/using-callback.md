@@ -50,7 +50,7 @@ postings anyway.
 | `callback criteria --include "…" --exclude "…"` | Title terms a watch keeps: whole words, with a trailing `*` for a prefix | 0, 3 |
 | `callback watch` | Polls every target and stores new matching postings with when they were first seen | 0, 1 if a board could not be read, 3 |
 | `callback postings list [--days N]` | Stored postings, newest first | 0, 3 |
-| `callback postings resolve <url> --company "<company>"` | The canonical posting behind a Greenhouse, Lever or Ashby URL | 0, 3 |
+| `callback postings resolve <url> --company "<company>"` | The canonical posting behind a Greenhouse, Lever or Ashby URL, or an employer careers page's `schema.org/JobPosting` data | 0, 3 |
 | `callback postings take <id> --job <job-id>` | Saves the posting's own text to `inbox/<job-id>.md` | 0, 3 |
 | `callback profile --work-authorization … --graduation … --degree …` | What eligibility is judged against | 0, 3 |
 | `callback eligibility <job-id>` | Knockout requirements in a saved posting, each quoted | 0 eligible or stretch, 1 a question, 2 knockout, 3 |

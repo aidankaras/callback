@@ -61,7 +61,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_list.set_defaults(handler=_cmd_postings_list)
     p_resolve = postings_sub.add_parser(
-        "resolve", help="fetch the canonical posting behind a Greenhouse, Lever or Ashby URL"
+        "resolve",
+        help="fetch the posting behind a Greenhouse, Lever or Ashby URL, or an employer's "
+        "careers page that publishes schema.org JobPosting data",
     )
     p_resolve.add_argument("url")
     p_resolve.add_argument("--company", required=True)
@@ -200,6 +202,13 @@ def _fetcher() -> object:
     return HttpFetcher()
 
 
+def _page_fetcher() -> object:
+    """The careers-page fetcher; a single place tests replace."""
+    from core.discovery.page import PageFetcher
+
+    return PageFetcher()
+
+
 def _discovery_errors() -> tuple[type[Exception], ...]:
     from pydantic import ValidationError
 
@@ -293,13 +302,17 @@ def _cmd_postings_resolve(args: argparse.Namespace) -> int:
     from datetime import UTC, datetime
 
     from core.discovery.fetch import Fetcher
-    from core.discovery.store import resolve
+    from core.discovery.store import PageSource, resolve
     from core.paths import ensure_home
 
     ensure_home()
     try:
         found = resolve(
-            args.url, args.company, cast("Fetcher", _fetcher()), now=datetime.now(tz=UTC)
+            args.url,
+            args.company,
+            cast("Fetcher", _fetcher()),
+            now=datetime.now(tz=UTC),
+            pages=cast("PageSource", _page_fetcher()),
         )
     except _discovery_errors() as exc:
         print(f"callback postings resolve: {exc}", file=sys.stderr)

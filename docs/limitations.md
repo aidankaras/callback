@@ -31,6 +31,11 @@ by design rather than merely unimplemented.
   `pushd` and `-C`, and with `~`, `$HOME` and `$CALLBACK_HOME` expanded. It does not catch a path a
   command builds at run time: from another variable, `find`, an encoded string, or a script it runs.
   It guards against accidental writes, not a determined process.
+- **The careers-page reader** refuses a host that resolves to a private, loopback or link-local
+  address, but checks the address before connecting and the connection resolves the name again, so
+  a host whose DNS answer changes in between (DNS rebinding) is not caught. It reads only the
+  page's JSON-LD, which the employer can make say anything; `validThrough` catches a posting the
+  employer has closed, not one it has simply left up.
 - **Confirmation needs a terminal.** `callback facts confirm` reads from `/dev/tty`, so a process
   without one cannot confirm a fact. Anyone at the candidate's own terminal can.
 - **The hidden-content screen** reads colour, size, position, rendering mode and Unicode from the PDF
@@ -41,9 +46,9 @@ by design rather than merely unimplemented.
 
 ## Not built yet
 
-- **Job boards other than Greenhouse, Lever and Ashby.** Workday forbids
-  automated access; generic careers pages (via `schema.org/JobPosting`) and
-  aggregator APIs are not read yet.
+- **Watching boards other than Greenhouse, Lever and Ashby.** A careers page can be resolved one
+  URL at a time from its `schema.org/JobPosting` data, but not watched for new postings. Workday
+  forbids automated access; aggregator APIs are not read.
 - **Research about an employer.** A cover letter may say about the company only what the posting
   says.
 

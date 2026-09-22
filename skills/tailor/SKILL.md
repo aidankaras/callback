@@ -109,9 +109,12 @@ Postings come from the employer's own board, never from a scraper.
   freshness. Applying in a posting's first days matters, so suggest the
   freshest eligible ones first.
 - **Web search** (Firecrawl or other search) for roles at companies not
-  watched, restricted to the ATS domains above. Then
-  `callback postings resolve <url> --company "<company>"` fetches the
-  canonical posting.
+  watched, on the ATS domains above or the employer's own careers site.
+  Then `callback postings resolve <url> --company "<company>"` fetches the
+  canonical posting: from the ATS API, or from the careers page's own
+  `schema.org/JobPosting` data. A page without that data, or whose
+  `robots.txt` disallows it, is refused; then ask the user to paste the
+  text. Never fetch the posting page yourself to work around a refusal.
 - **LinkedIn, Indeed, Handshake or Workday.** Never fetch or scrape them;
   they forbid automated access, and callback refuses them. If the user
   shares one, ask for the company, find the same role on its own board,

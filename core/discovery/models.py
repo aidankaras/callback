@@ -8,6 +8,8 @@ from typing import Literal
 from pydantic import BaseModel
 
 Ats = Literal["greenhouse", "lever", "ashby", "hn"]
+# Where a posting was read from: a watchable board, or one careers page.
+Source = Literal["greenhouse", "lever", "ashby", "hn", "page"]
 
 
 class Posting(BaseModel):
@@ -21,7 +23,7 @@ class Posting(BaseModel):
     model_config = {"extra": "forbid", "frozen": True}
 
     id: str
-    ats: Ats
+    ats: Source
     board: str
     company: str
     title: str

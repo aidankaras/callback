@@ -22,7 +22,8 @@ import re
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import cast
+from typing import Protocol, cast
+from urllib.parse import urlsplit
 
 import yaml
 from pydantic import BaseModel, Field, ValidationError
@@ -34,7 +35,7 @@ from core.discovery.ats import (
     posting_url_for,
     resolve_url,
 )
-from core.discovery.fetch import DiscoveryError, Fetcher
+from core.discovery.fetch import DiscoveryError, Fetcher, denied_domain
 from core.discovery.models import Ats, Posting
 from core.paths import resolve_inside, write_private
 
@@ -196,18 +197,64 @@ def watch(fetcher: Fetcher, *, now: datetime) -> WatchResult:
     return result
 
 
-def resolve(url: str, company: str, fetcher: Fetcher, *, now: datetime) -> Found:
-    """Fetch the canonical posting behind a Greenhouse, Lever or Ashby URL and store it."""
-    ats, board, job_id = resolve_url(url)
+class PageSource(Protocol):
+    def get_page(self, url: str) -> str: ...
+
+
+def _store(posting: Posting, now: datetime) -> Found:
+    stored = load_postings()
+    found = stored.get(posting.id) or Found(**posting.model_dump(), first_seen=now)
+    stored[posting.id] = found
+    _save_postings(stored)
+    return found
+
+
+def _norm_company(name: str) -> str:
+    return " ".join(re.sub(r"[^a-z0-9]+", " ", name.casefold()).split())
+
+
+def resolve_page(url: str, company: str, pages: PageSource, *, now: datetime) -> Found:
+    """Read the `schema.org/JobPosting` data on an employer's careers page and store it.
+
+    The page must name `company` as the hiring organisation (either name may
+    contain the other, so "Acme" matches "Acme Robotics, Inc."): a page that
+    names someone else is not the posting the candidate meant.
+    """
+    from core.discovery.page import parse_job_postings
+
+    postings = parse_job_postings(pages.get_page(url), url, now=now)
+    if len(postings) > 1:
+        postings = [p for p in postings if p.url.rstrip("/") == url.strip().rstrip("/")]
+        if len(postings) != 1:
+            raise DiscoveryError(
+                f"{url} lists several postings; resolve the URL of the one you want"
+            )
+    posting = postings[0]
+    wanted, stated = _norm_company(company), _norm_company(posting.company)
+    if not wanted or not (wanted in stated or stated in wanted):
+        raise DiscoveryError(f"{url} names {posting.company!r} as the employer, not {company!r}")
+    return _store(posting.model_copy(update={"company": company.strip()}), now)
+
+
+def resolve(
+    url: str, company: str, fetcher: Fetcher, *, now: datetime, pages: PageSource | None = None
+) -> Found:
+    """Fetch the canonical posting behind `url` and store it.
+
+    A Greenhouse, Lever or Ashby URL is read from that system's API; any
+    other URL, given `pages`, from the careers page's own structured data.
+    """
+    try:
+        ats, board, job_id = resolve_url(url)
+    except DiscoveryError:
+        if pages is None or denied_domain((urlsplit(url).hostname or "").lower()):
+            raise
+        return resolve_page(url, company, pages, now=now)
     payload = fetcher.get_json(posting_url_for(ats, board))
     wanted = f"{ats}:{board}:{job_id}"
     for posting in parse_board(ats, board, company, payload):
         if posting.id == wanted:
-            stored = load_postings()
-            found = stored.get(wanted) or Found(**posting.model_dump(), first_seen=now)
-            stored[wanted] = found
-            _save_postings(stored)
-            return found
+            return _store(posting, now)
     raise DiscoveryError(f"{url} is not on {company}'s {ats} board any more")
 
 

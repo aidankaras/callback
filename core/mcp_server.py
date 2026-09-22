@@ -176,12 +176,14 @@ def postings_take(posting_id: str, job_id: str) -> dict[str, object]:
 
 @server.tool()
 def postings_resolve(url: str, company: str) -> dict[str, object]:
-    """Fetch the canonical posting behind a Greenhouse, Lever or Ashby URL."""
+    """Fetch the posting behind a Greenhouse, Lever or Ashby URL, or a careers
+    page's schema.org JobPosting data."""
     from core.discovery.fetch import HttpFetcher
+    from core.discovery.page import PageFetcher
     from core.discovery.store import resolve
 
     ensure_home()
-    found = resolve(url, company, HttpFetcher(), now=_now())
+    found = resolve(url, company, HttpFetcher(), now=_now(), pages=PageFetcher())
     return {"id": found.id, "company": found.company, "title": found.title}
 
 
