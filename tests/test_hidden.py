@@ -7,6 +7,7 @@ import pytest
 from pypdf import PdfReader
 
 from core.checks.hidden import (
+    CANNOT_JUDGE,
     MIN_CONTRAST_RATIO,
     MIN_FONT_SIZE,
     HiddenKind,
@@ -836,3 +837,51 @@ def test_an_unpainted_mode_with_no_text_shown_in_it_is_not_flagged(
     out = tmp_path / "tr.pdf"
     make(out, stream)
     assert check_hidden(out) == ("pass", [])
+
+
+@pytest.mark.parametrize(
+    ("page", "form"),
+    [
+        # The form sets the unpainted mode itself.
+        (b"/X1 Do", b"BT 3 Tr /F1 12 Tf 72 600 Td (Kubernetes TensorFlow) Tj ET"),
+        # The page sets it and the form inherits it: a form XObject runs in
+        # the graphics state in force at `Do`.
+        (b"3 Tr /X1 Do", b"BT /F1 12 Tf 72 600 Td (Kubernetes TensorFlow) Tj ET"),
+    ],
+)
+def test_unpainted_text_inside_a_form_xobject_is_reported(
+    tmp_path: Path, page: bytes, form: bytes
+) -> None:
+    """Mutation: stop recursing into form XObjects -- both cases fail."""
+    out = tmp_path / "form.pdf"
+    make(out, b"BT /F1 12 Tf 72 700 Td (Visible line) Tj ET " + page, form=form)
+    with pdfplumber.open(str(out)) as pdf:
+        assert "Kubernetes" in (pdf.pages[0].extract_text() or "")
+
+    _, findings = check_hidden(out)
+    assert [f.kind for f in findings] == [HiddenKind.UNPAINTED_TEXT], findings
+
+
+def test_a_form_restores_the_mode_it_changed(tmp_path: Path) -> None:
+    """A form's own mode change ends with the form. Mutation: let it leak out."""
+    out = tmp_path / "form.pdf"
+    make(
+        out,
+        b"/X1 Do BT /F1 12 Tf 72 700 Td (Visible line) Tj ET",
+        form=b"3 Tr",
+    )
+    assert check_hidden(out) == ("pass", [])
+
+
+def test_forms_nested_past_the_limit_are_reported_not_skipped(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Lowering the limit sends an ordinary one-level form past it, which is
+    the same path a self-drawing form takes. Mutation: return None instead of
+    raising at the limit -- this test fails."""
+    monkeypatch.setattr("core.checks.hidden._MAX_FORM_DEPTH", 0)
+    out = tmp_path / "deep.pdf"
+    make(out, b"/X1 Do", form=b"BT /F1 12 Tf 72 600 Td (Visible line) Tj ET")
+    _, findings = check_hidden(out)
+    assert [f.kind for f in findings] == [HiddenKind.FORM_TOO_DEEP], findings
+    assert HiddenKind.FORM_TOO_DEEP in CANNOT_JUDGE

@@ -202,7 +202,7 @@ from typing import Any, cast
 
 import pdfplumber
 from pypdf import PdfReader
-from pypdf.generic import ContentStream
+from pypdf.generic import ContentStream, DictionaryObject
 
 # Measured against this project's own template (see `test_hidden.py`): real
 # body text renders at 9pt, 10pt, 11pt and 16pt, so 6.0 leaves 3pt of
@@ -358,6 +358,7 @@ class HiddenKind(StrEnum):
     NO_TEXT_LAYER = "no_text_layer"
     NO_PAGES = "no_pages"
     UNPAINTED_TEXT = "unpainted_text"
+    FORM_TOO_DEEP = "form_too_deep"
 
 
 # Findings that mean "this page could not be judged", as opposed to "it was
@@ -369,6 +370,7 @@ CANNOT_JUDGE = frozenset(
         HiddenKind.FILL_UNKNOWN,
         HiddenKind.NO_TEXT_LAYER,
         HiddenKind.NO_PAGES,
+        HiddenKind.FORM_TOO_DEEP,
     }
 )
 
@@ -656,21 +658,79 @@ _UNPAINTED_MODES = {3, 7}
 _SHOW_TEXT = {b"Tj", b"TJ", b"'", b'"'}
 
 
+# How deep form XObjects may nest before the scan gives up on a page. Real
+# documents nest one or two levels; this only exists to stop a cycle.
+_MAX_FORM_DEPTH = 8
+
+
+class _FormTooDeepError(Exception):
+    pass
+
+
+def _form(resources: DictionaryObject | None, name: object) -> DictionaryObject | None:
+    """The form XObject `name` refers to in `resources`, or `None` if it is not one."""
+    if resources is None:
+        return None
+    xobjects = resources.get("/XObject")
+    if xobjects is None:
+        return None
+    target = cast("DictionaryObject", xobjects.get_object()).get(str(name))
+    if target is None:
+        return None
+    form = cast("DictionaryObject", target.get_object())
+    return form if form.get("/Subtype") == "/Form" else None
+
+
+def _shows_unpainted(
+    stream: object, resources: DictionaryObject | None, reader: PdfReader, mode: int, depth: int
+) -> int | None:
+    """The rendering mode of the first text shown unpainted in `stream`, or `None`.
+
+    Follows `Do` into form XObjects. A form runs in the graphics state in
+    force when it is drawn -- so it inherits the current mode -- and the
+    state is restored when it ends, so a mode it sets does not leak out.
+    """
+    if depth > _MAX_FORM_DEPTH:
+        raise _FormTooDeepError
+    saved: list[int] = []
+    operations = cast("list[tuple[list[object], bytes]]", ContentStream(stream, reader).operations)
+    for operands, operator in operations:
+        if operator == b"q":
+            saved.append(mode)
+        elif operator == b"Q":
+            mode = saved.pop() if saved else 0
+        elif operator == b"Tr" and operands:
+            mode = int(cast("int", operands[0]))
+        elif operator in _SHOW_TEXT and mode in _UNPAINTED_MODES:
+            return mode
+        elif operator == b"Do" and operands:
+            form = _form(resources, operands[0])
+            if form is not None:
+                inner = form.get("/Resources")
+                inner_resources = (
+                    cast("DictionaryObject", inner.get_object()) if inner is not None else resources
+                )
+                found = _shows_unpainted(form, inner_resources, reader, mode, depth + 1)
+                if found is not None:
+                    return found
+    return None
+
+
 def _unpainted_text(pdf_path: Path) -> list[HiddenFinding]:
     """Flag a page that shows text while the rendering mode paints no ink.
 
     Such text draws nothing and extracts in full, so every colour and size
     check above passes it: its fill is ordinary black. The mode is not in
     `pdfplumber`'s per-character data, so this reads each page's content
-    stream directly, tracking the mode across `q`/`Q` (which save and
-    restore it) and flagging only text actually shown while it is 3 or 7.
+    stream directly -- following form XObjects it draws -- tracking the mode
+    across `q`/`Q` (which save and restore it) and flagging only text
+    actually shown while it is 3 or 7.
 
     Mode 3 is also how an OCR'd scan stores its text layer over the page
     image, so on an imported resume this finding often means "this text
     came from OCR", not "this text was hidden" -- it is reported either way,
-    because nothing here can tell the two apart.
-
-    Blind spot: content drawn from a form XObject is not scanned.
+    because nothing here can tell the two apart. Forms nested deeper than
+    `_MAX_FORM_DEPTH` are reported as `form_too_deep`, not skipped.
     """
     findings: list[HiddenFinding] = []
     reader = PdfReader(str(pdf_path))
@@ -678,24 +738,31 @@ def _unpainted_text(pdf_path: Path) -> list[HiddenFinding]:
         contents = page.get_contents()
         if contents is None:
             continue
-        mode = 0
-        saved: list[int] = []
-        for operands, operator in ContentStream(contents, reader).operations:
-            if operator == b"q":
-                saved.append(mode)
-            elif operator == b"Q":
-                mode = saved.pop() if saved else 0
-            elif operator == b"Tr" and operands:
-                mode = int(operands[0])
-            elif operator in _SHOW_TEXT and mode in _UNPAINTED_MODES:
-                findings.append(
-                    HiddenFinding(
-                        HiddenKind.UNPAINTED_TEXT,
-                        f"page {page_number}: text is drawn in rendering mode {mode}, which "
-                        "paints no ink -- either hidden text or an OCR text layer",
-                    )
+        try:
+            page_resources = page.get("/Resources")
+            resources = (
+                cast("DictionaryObject", page_resources.get_object())
+                if page_resources is not None
+                else None
+            )
+            mode = _shows_unpainted(contents, resources, reader, 0, 0)
+        except _FormTooDeepError:
+            findings.append(
+                HiddenFinding(
+                    HiddenKind.FORM_TOO_DEEP,
+                    f"page {page_number}: form XObjects nest past {_MAX_FORM_DEPTH} levels; "
+                    "unpainted-text screening could not finish",
                 )
-                break
+            )
+            continue
+        if mode is not None:
+            findings.append(
+                HiddenFinding(
+                    HiddenKind.UNPAINTED_TEXT,
+                    f"page {page_number}: text is drawn in rendering mode {mode}, which "
+                    "paints no ink -- either hidden text or an OCR text layer",
+                )
+            )
     return findings
 
 
