@@ -122,6 +122,10 @@ def _free_text_fields(fact: Fact) -> Iterator[tuple[str, str]]:
     `Dates` is excluded because it never carries free text.
     """
     yield "text", fact.text
+    for name in ("organization", "title", "location"):
+        value = getattr(fact, name)
+        if value is not None:
+            yield name, value
     for index, entity in enumerate(fact.entities):
         yield f"entities[{index}]", entity
     for index, derivation in enumerate(fact.derived):

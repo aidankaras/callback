@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import UTC, date, datetime
 from enum import StrEnum
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 class Identity(BaseModel):
@@ -24,6 +24,20 @@ class Identity(BaseModel):
     links: list[str] = Field(default_factory=list)
     work_authorization: str | None = None
     graduation: str | None = None
+
+    @field_validator("links")
+    @classmethod
+    def _links_are_addresses(cls, links: list[str]) -> list[str]:
+        """A link is an address (`github.com/dv`, a URL, a handle), never prose.
+
+        The contact line renders links verbatim beside the email, so a "link"
+        reading "US Citizen, TS/SCI clearance" would print a claim no gate
+        compares to anything. An address never contains whitespace.
+        """
+        for link in links:
+            if not link or any(c.isspace() for c in link):
+                raise ValueError(f"link {link!r} must be an address with no spaces")
+        return links
 
 
 class Trust(StrEnum):
@@ -128,6 +142,14 @@ class Fact(BaseModel):
     kind: FactKind
     parent: str | None = None
     text: str
+    # Structured header fields for an experience, education or project fact.
+    # A resume entry's employer, title and location are checked for equality
+    # against these, not for a match somewhere in `text`: free text that says
+    # "reported to the Chief Technology Officer" or "consulting for Goldman
+    # Sachs" must not let either become the candidate's own title or employer.
+    organization: str | None = None
+    title: str | None = None
+    location: str | None = None
     numbers: dict[str, Quantity] = Field(default_factory=dict)
     dates: Dates | None = None
     # `default_factory=list[Derivation]`, not bare `list`: pyright strict cannot
