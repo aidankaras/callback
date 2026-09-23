@@ -22,8 +22,9 @@ import json
 import re
 from dataclasses import dataclass
 from pathlib import Path
+from typing import cast
 
-from core.buildcmd import ARTIFACTS
+from core.draft import GATE_RECORDS
 from core.paths import private_dir, resolve_inside, write_private
 
 TEMPLATE_DIR = "templates"
@@ -55,13 +56,22 @@ def save(job_id: str, name: str) -> Path:
         document = (draft / "resume.yaml").read_bytes()
     except (OSError, json.JSONDecodeError) as exc:
         raise TemplateError(f"no gated draft for {job_id!r}: {exc}") from exc
-    if report.get("verdict") not in {"pass", "warn"}:
+    if not isinstance(report, dict):
+        raise TemplateError(f"the report for {job_id!r} is not readable: rebuild the draft")
+    record = cast("dict[str, object]", report)
+    if record.get("verdict") not in {"pass", "warn"}:
         raise TemplateError(
             f"the draft for {job_id!r} did not pass its gates, so it is not a shape to reuse"
         )
     # The verdict describes the bytes the build judged. A document edited since
     # then has not passed anything, whatever the report beside it says.
-    if hashlib.sha256(document).hexdigest() != report.get("doc_sha256"):
+    recorded = record.get("doc_sha256")
+    if not isinstance(recorded, str):
+        raise TemplateError(
+            f"the report for {job_id!r} records no document hash, so its verdict cannot be tied "
+            "to these bytes: build the draft again"
+        )
+    if hashlib.sha256(document).hexdigest() != recorded:
         raise TemplateError(
             f"the document for {job_id!r} has changed since it was gated: build it again first"
         )
@@ -95,8 +105,9 @@ def use(name: str, job_id: str, *, overwrite: bool = False) -> Path:
             f"{job_id!r} already has a draft document; pass --overwrite to replace it"
         )
     write_private(target, source.read_text(encoding="utf-8"))
-    # The previous build's PDF and report judged a different document; left
-    # here they would read as this one's, and `apply` reads them.
-    for name in ARTIFACTS:
-        (target.parent / name).unlink(missing_ok=True)
+    # Every record in the draft judged a different document -- the letter and
+    # the form answers are checked against `resume.yaml` too -- and left here
+    # they would read as this document's, which `apply` believes.
+    for record in GATE_RECORDS:
+        (target.parent / record).unlink(missing_ok=True)
     return target

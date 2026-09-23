@@ -14,10 +14,12 @@ waiting on. It never acts: every item names the command that would.
 
 from __future__ import annotations
 
+import hashlib
 import json
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+from typing import cast
 
 from core.apply import MAX_PER_DAY, Application
 from core.discovery.store import Found
@@ -53,21 +55,50 @@ class Agenda:
         return max(0, MAX_PER_DAY - self.applied_today)
 
 
-def _drafted_jobs() -> set[str]:
+def _drafted_jobs() -> tuple[set[str], set[str]]:
+    """`(ready, unreadable)`: the jobs whose draft is work ready to send, and
+    those whose report could not be read.
+
+    A rendered PDF is not a passed document -- `build` writes one whatever the
+    gates said -- and a verdict is about the bytes it names, so a document
+    edited since the build is not ready either: every consumer (`apply`,
+    `finalize`, `template save`) checks that hash and would refuse it.
+
+    A report that is missing is simply a job never built. A report that exists
+    and cannot be read is a different thing, and this command's whole job is
+    not to forget work already done, so it is returned rather than dropped.
+    """
     outputs = resolve_inside("outputs")
     if not outputs.is_dir():
-        return set()
-    built: set[str] = set()
-    for draft in outputs.glob("*/draft"):
-        # A rendered PDF is not a passed document: `build` writes one whatever
-        # the gates said, and a draft that failed is not work ready to send.
+        return set(), set()
+    ready: set[str] = set()
+    unreadable: set[str] = set()
+    for draft in sorted(outputs.glob("*/draft")):
+        job = draft.parent.name
         try:
-            report = json.loads((draft / "report.json").read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
+            parsed: object = json.loads((draft / "report.json").read_text(encoding="utf-8"))
+        except FileNotFoundError:
             continue
-        if report.get("verdict") in {"pass", "warn"} and (draft / "resume.pdf").is_file():
-            built.add(draft.parent.name)
-    return built
+        except (OSError, json.JSONDecodeError):
+            unreadable.add(job)
+            continue
+        if not isinstance(parsed, dict):
+            unreadable.add(job)
+            continue
+        report = cast("dict[str, object]", parsed)
+        document = draft / "resume.yaml"
+        if report.get("verdict") not in {"pass", "warn"} or not (draft / "resume.pdf").is_file():
+            continue
+        try:
+            current = hashlib.sha256(document.read_bytes()).hexdigest()
+        except OSError:
+            unreadable.add(job)
+            continue
+        if current == report.get("doc_sha256"):
+            ready.add(job)
+        else:
+            unreadable.add(job)
+    return ready, unreadable
 
 
 def _packet_jobs() -> set[str]:
@@ -112,12 +143,22 @@ def agenda(
             )
 
     # A draft that passed but was never sent is work already done.
-    for job in sorted(_drafted_jobs() - applied_to - _packet_jobs()):
+    ready, unreadable = _drafted_jobs()
+    packets = _packet_jobs()
+    for job in sorted(ready - applied_to - packets):
         items.append(
             Item(
                 "unsent",
                 f"{job}: a built draft that was never applied with",
                 f"callback apply {job} --company '<company>' --title '<title>' --source <source>",
+            )
+        )
+    for job in sorted(unreadable - applied_to - packets):
+        items.append(
+            Item(
+                "rebuild",
+                f"{job}: a draft whose gates cannot be read, or whose document changed since",
+                f"callback build $CALLBACK_HOME/outputs/{job}/draft/resume.yaml --job {job}",
             )
         )
 

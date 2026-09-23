@@ -70,9 +70,9 @@ jobs:
           # also meant this job could never start.
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           # Write is allowed without a path: a path-scoped Write rule refused the
-          # report twice, and what reaches the repository is decided by the pull
-          # request step, which commits reports/standards-audit.md and nothing
-          # else, from a runner that is then discarded. Subagents are disallowed:
+          # report twice, and nothing written here reaches the repository -- the
+          # job's token is `contents: read`, the report leaves only as an
+          # artifact, and the runner is discarded. Subagents are disallowed:
           # one run delegated its reading to background agents and ended its turn
           # waiting for them, which in an unattended run ends the audit unwritten.
           # Printed so a failed run says why; the repository is private and
@@ -176,7 +176,6 @@ jobs:
           test -f "$report" || { echo "::error::$report was not written"; exit 1; }
           bytes=$(wc -c < "$report")
           echo "report is $bytes bytes"
-          echo "tree state:"; git status --porcelain
           if [ "$bytes" -lt 500 ]; then
             echo "::error::$report is $bytes bytes, too small to be a real audit"
             exit 1

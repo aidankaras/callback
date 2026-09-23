@@ -18,6 +18,7 @@ from pathlib import Path
 
 from core.buildcmd import BuildError
 from core.checks.hidden import check_hidden
+from core.draft import LETTER_ARTIFACTS
 from core.letter.checks import check_letter
 from core.letter.io import parse_letter
 from core.letter.render import render_letter
@@ -25,8 +26,6 @@ from core.paths import private_dir, resolve_inside, write_private, write_private
 from core.profile.store import load_facts
 from core.render.typst import RenderError
 from core.resume.io import DocumentError, load_doc
-
-_ARTIFACTS = ("cover-letter.pdf", "letter-report.md", "letter-report.json")
 
 
 @dataclass(frozen=True)
@@ -60,7 +59,7 @@ def build_letter(path: Path) -> LetterBuild:
         except DocumentError as exc:
             raise BuildError(f"cannot read the job's resume to check for reuse: {exc}") from exc
         bullets = [b.text for s in resume.sections for e in s.entries for b in e.bullets]
-    for name in _ARTIFACTS:
+    for name in LETTER_ARTIFACTS:
         (out_dir / name).unlink(missing_ok=True)
 
     result = check_letter(letter, facts, posting, resume_bullets=bullets)

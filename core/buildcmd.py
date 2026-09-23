@@ -19,6 +19,7 @@ import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
+from core.draft import RESUME_ARTIFACTS
 from core.gates import GateOutcome, GateReport, run_gates
 from core.paths import private_dir, resolve_inside, write_private, write_private_bytes
 from core.profile.store import FACTS_FILE, load_facts
@@ -27,10 +28,7 @@ from core.resume.io import parse_doc
 
 _JOB_ID = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
 EXIT_CODES = {"pass": 0, "warn": 1, "fail": 2}
-# What a build writes beside the document it judged. `core.templates` clears
-# these when it replaces that document: a report describes one document's
-# bytes, and left beside another it is a judgement of something else.
-ARTIFACTS = ("resume.pdf", "report.md", "report.json")
+
 _MAX_ACTIONS = 3
 
 
@@ -90,7 +88,7 @@ def build(doc_path: Path, job_id: str) -> BuildResult:
     # A previous build's report must never sit beside a PDF it did not judge,
     # so the draft is cleared before anything else can fail. Unlinking removes
     # a planted symlink itself, never its target.
-    for name in ARTIFACTS:
+    for name in RESUME_ARTIFACTS:
         (out_dir / name).unlink(missing_ok=True)
 
     # Render and gate inside a fresh, unpredictably named directory, then

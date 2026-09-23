@@ -98,3 +98,36 @@ def test_using_a_template_clears_the_previous_build(home: Path) -> None:
     (target / "report.md").write_text("# PASS", encoding="utf-8")
     use("ml-intern", "globex-ml", overwrite=True)
     assert sorted(p.name for p in target.iterdir()) == ["resume.yaml"]
+
+
+def test_using_a_template_clears_the_letter_and_answers_records_too(home: Path) -> None:
+    """The letter and the form answers are checked against resume.yaml as well,
+    and `apply` trusts their verdicts. Mutation: clear only the build's own
+    artifacts -- a letter checked against the previous document survives."""
+    from core.draft import GATE_RECORDS
+
+    _draft(home, "acme-ml")
+    save("acme-ml", "ml-intern")
+    target = _draft(home, "globex-ml", doc="identity: {name: Someone Else}\n")
+    for record in GATE_RECORDS:
+        (target / record).write_bytes(b"old")
+    assert len(list(target.iterdir())) > 3  # premise: the draft holds every record
+    use("ml-intern", "globex-ml", overwrite=True)
+    assert sorted(p.name for p in target.iterdir()) == ["resume.yaml"]
+
+
+def test_a_report_without_a_document_hash_says_so(home: Path) -> None:
+    """An older report is not an edited document, and telling the candidate to
+    look for an edit that never happened wastes their time. Mutation: treat a
+    missing hash as a mismatch -- the message says "has changed"."""
+    draft = _draft(home, "acme-ml")
+    (draft / "report.json").write_text(json.dumps({"verdict": "pass"}), encoding="utf-8")
+    with pytest.raises(TemplateError, match="records no document hash"):
+        save("acme-ml", "ml-intern")
+
+
+def test_a_report_that_is_not_an_object_is_refused(home: Path) -> None:
+    draft = _draft(home, "acme-ml")
+    (draft / "report.json").write_text("null", encoding="utf-8")
+    with pytest.raises(TemplateError, match="not readable"):
+        save("acme-ml", "ml-intern")

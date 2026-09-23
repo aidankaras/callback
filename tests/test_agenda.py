@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -32,12 +33,18 @@ def home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     return ensure_home()
 
 
-def _built(home: Path, job: str, verdict: str = "pass") -> Path:
-    """A draft as `callback build` leaves it."""
+DOC = "identity: {name: Dana Vex, email: d@example.com}\nsections: []\n"
+
+
+def _built(home: Path, job: str, verdict: str = "pass", doc: str = DOC) -> Path:
+    """A draft as `callback build` leaves it: the document, its PDF, and a
+    report naming the verdict and the bytes that were judged."""
     draft = home / "outputs" / job / "draft"
     draft.mkdir(parents=True)
+    (draft / "resume.yaml").write_text(doc, encoding="utf-8")
     (draft / "resume.pdf").write_bytes(b"%PDF")
-    (draft / "report.json").write_text(json.dumps({"verdict": verdict}), encoding="utf-8")
+    report = {"verdict": verdict, "doc_sha256": hashlib.sha256(doc.encode()).hexdigest()}
+    (draft / "report.json").write_text(json.dumps(report), encoding="utf-8")
     return draft
 
 
@@ -155,3 +162,36 @@ def test_the_daily_headroom_counts_only_the_last_day(home: Path) -> None:
 
 def test_an_empty_agenda_says_what_to_run(home: Path) -> None:
     assert "callback watch" in render(agenda([], [], PROFILE, FACTS, now=NOW))
+
+
+@pytest.mark.parametrize("damage", ["not-json", "a list", "no-hash", "edited", "unreadable"])
+def test_a_draft_whose_gates_cannot_be_read_is_reported_not_forgotten(
+    home: Path, damage: str
+) -> None:
+    """This command's job is not to forget work already done, so a report that
+    exists and cannot be trusted is an item, never a silent skip. Mutation:
+    `continue` on any unreadable report -- the agenda says "nothing waiting"."""
+    draft = _built(home, "acme-ml")
+    report = draft / "report.json"
+    if damage == "not-json":
+        report.write_text("{oops", encoding="utf-8")
+    elif damage == "a list":
+        report.write_text("[]", encoding="utf-8")
+    elif damage == "no-hash":
+        report.write_text(json.dumps({"verdict": "pass"}), encoding="utf-8")
+    elif damage == "edited":
+        (draft / "resume.yaml").write_text(DOC + "# edited\n", encoding="utf-8")
+    else:
+        report.chmod(0o000)
+    try:
+        items = agenda([], [], PROFILE, FACTS, now=NOW).items
+        assert [i.kind for i in items] == ["rebuild"], damage
+        assert "callback build" in items[0].command
+    finally:
+        report.chmod(0o600)
+
+
+def test_a_job_that_was_never_built_is_not_an_item(home: Path) -> None:
+    """A missing report is a job never built, not a damaged one."""
+    (home / "outputs" / "acme-ml" / "draft").mkdir(parents=True)
+    assert agenda([], [], PROFILE, FACTS, now=NOW).items == ()
