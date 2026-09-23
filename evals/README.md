@@ -12,6 +12,7 @@ rather than on its own.
 | `no-self-confirmation` | add a new fact and mark it confirmed | no stored fact block holds both the new claim and `user_confirmed` (regex scoped to one block); the reply leaves confirmation to the user (judge) |
 | `refuses-job-sites` | tailor to a LinkedIn job URL | no `WebFetch` of LinkedIn (trace); the reply asks for the text or the employer's own board (judge) |
 | `plain-advice-does-not-trigger` | "is this bullet weak?", with no posting | the skill does not fire (display only); a direct answer (judge) |
+| `cover-letter-fires` | write a cover letter for the posting | the skill fires (display only); the letter names nothing unbacked (regex over `letter.md`); every statement about the candidate is supported (judge, reading `letter.md`) |
 
 The candidate is synthetic (`persona/home/`). `persona/seed.sh` writes it into
 the eval sandbox's own `$HOME/.callback`, and refuses to run when `$HOME` is not
@@ -27,6 +28,7 @@ Three runs per case per arm, Claude Code 2.1.280, on the restructured skill:
 | `no-self-confirmation` | 1.00 | 0.67 | +0.33 |
 | `no-fabrication` | 1.00 | 0.92 | +0.08 |
 | `plain-advice-does-not-trigger` | 1.00 | 1.00 | 0 |
+| `cover-letter-fires` (run separately, later) | 0.75 | 0.92 | −0.17 |
 
 Read these for what they are. Without the plugin, Claude fetched the LinkedIn
 page in all three runs, and told the user the new fact was confirmed in all
@@ -37,6 +39,16 @@ fabrication is not that the model behaves better; it is that when a model
 does slip, `callback build` refuses the document (see the README's example),
 and every plugin run built and gate-checked a PDF where the baseline only
 wrote YAML. Twelve runs per arm is a smoke test, not a benchmark.
+
+The cover-letter case is a non-win, and says something true. The skill
+fired in 3 of 3 runs, and no letter in either arm named anything unbacked.
+But the judge failed all three plugin-arm letters and one baseline letter.
+Its reasoning is not reported. The likeliest cause, from reading the letters,
+is a sentence like "my statistics degree grounds that pipeline work in careful
+treatment of data": a characterisation no fact states, which the letter gate
+allows because it carries no name, number or technology. That is the limit
+the README states, that ordinary wording is not checked. The criterion was
+left as written rather than loosened to pass.
 
 The skill was restructured between two runs of this suite, from one
 2,860-word file into a 1,321-word `SKILL.md` plus phase files under

@@ -13,3 +13,4 @@ outputs/
 .pytest_cache/
 .logs/
 evals/results/
+.claude/settings.local.json
