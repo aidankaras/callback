@@ -205,6 +205,28 @@ def eligibility(job_id: str) -> dict[str, object]:
 
 
 @server.tool()
+def fit(job_id: str) -> dict[str, object]:
+    """A saved posting's knockouts, and which technologies confirmed facts back."""
+    from core.paths import resolve_inside
+    from core.profile.store import load_facts
+    from core.triage import fit as judge_fit
+    from core.triage import load_profile
+
+    text = resolve_inside(f"inbox/{job_id}.md").read_text(encoding="utf-8")
+    result = judge_fit(text, load_profile(), load_facts())
+    return {
+        "verdict": result.eligibility.verdict,
+        "coverage": result.coverage,
+        "evidenced": [{"technology": t, "facts": list(f)} for t, f in result.evidenced],
+        "missing": list(result.missing),
+        "findings": [
+            {"rule": f.rule, "level": f.level, "quote": f.quote, "reason": f.reason}
+            for f in result.eligibility.findings
+        ],
+    }
+
+
+@server.tool()
 def apply(
     job_id: str,
     company: str,
@@ -239,6 +261,28 @@ def interview(job_id: str) -> dict[str, object]:
     from core.interview import prepare
 
     return {"file": str(prepare(job_id))}
+
+
+@server.tool()
+def agenda() -> dict[str, object]:
+    """What to do next, most time-sensitive first; judges nothing new, acts on nothing."""
+    from core.agenda import agenda as build_agenda
+    from core.apply import load_applications
+    from core.discovery.store import load_postings
+    from core.profile.store import load_facts
+    from core.triage import load_profile
+
+    result = build_agenda(
+        list(load_postings().values()),
+        load_applications(),
+        load_profile(),
+        load_facts(),
+        now=_now(),
+    )
+    return {
+        "items": [{"kind": i.kind, "what": i.what, "command": i.command} for i in result.items],
+        "applications_left_today": result.headroom,
+    }
 
 
 @server.tool()
