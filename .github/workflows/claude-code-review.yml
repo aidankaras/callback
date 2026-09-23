@@ -54,4 +54,11 @@ jobs:
           # longer a reviewer, and this repository's own guidance says an
           # unattended fix to a design decision is the failure mode it exists
           # to catch.
-          claude_args: '--allowedTools "mcp__github_inline_comment__create_inline_comment"'
+          # The inline-comment tool, plus the read-only GitHub queries the review
+          # plugin makes. Without them it stops mid-review to ask permission, and
+          # an unattended run that ends on a question still reports success: one
+          # review ended after 7 turns asking to read the pull request's comments.
+          claude_args: >-
+            --allowedTools "mcp__github_inline_comment__create_inline_comment,Bash(gh api
+            repos/*/issues/*/comments:*),Bash(gh api repos/*/pulls/*/comments:*),Bash(gh pr
+            view:*),Bash(gh pr diff:*)"
