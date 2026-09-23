@@ -15,7 +15,11 @@ worse than the gate occasionally missing a genuine fabrication.
 Entity checking has two tiers. A known technology (matched against the
 alias table case-insensitively) or an "identifier-shaped" token -- one that
 contains a digit, `+`, `#` or `.`, or is 2-6 letters all in capitals --
-must appear among the cited facts' entities, through the alias table.
+must appear among the cited facts' entities, through the alias table. The
+facts' text does not back it: a mention is not use ("migrated off AWS"), and
+a technology name that is also an English word ("R", "Spark") would be backed
+by prose. A token the text does state fails with a message saying to list it
+in the fact's entities.
 
 Every other capitalised word that does not begin a sentence -- a company, a
 client, an award, a title -- must appear as a whole word somewhere in what
@@ -228,7 +232,32 @@ def checkable_entity_tokens(text: str) -> list[str]:
     # Python, and would otherwise look identifier-shaped for its "." and
     # match no entity. Internal dots ("3.12", "Node.js") are kept.
     tokens = (t.rstrip(".") for t in _TOKEN.findall(text))
-    return [t for t in tokens if t and (t.lower() in ALIAS_TABLE or _SHAPED.match(t))]
+    return [
+        t
+        for t in tokens
+        if t and (t.lower() in ALIAS_TABLE or _SHAPED.match(t) or _names_a_technology(t))
+    ]
+
+
+def _names_a_technology(token: str) -> bool:
+    # "AWS-hosted" is neither a table entry nor identifier-shaped as a whole,
+    # so without this a suffix would hide an uncited technology. Only a
+    # component that is itself a table entry of two or more letters counts:
+    # the shape rule would also catch "US-based", and the one-letter entry
+    # "R" would catch "R-squared", both ordinary English.
+    return any(len(p) >= 2 and p.lower() in ALIAS_TABLE for p in token.split("-"))
+
+
+def _miss_detail(label: str, part: str, corpus: str) -> str:
+    # A token the cited fact's own text states is usually a drafting gap in
+    # the fact, not an invention in the bullet. It still fails -- a mention
+    # is not use ("migrated off AWS") -- but the message names the fix.
+    if _has_words(part, corpus):
+        return (
+            f"{label} is in a cited fact's text but not its entities; add it there "
+            "if that fact shows it in use"
+        )
+    return f"{label} appears in no cited fact"
 
 
 _PERCENT_UNITS = frozenset({"%", "percent", "pct", "percentage"})
@@ -532,6 +561,7 @@ def check_bullet(
         )
 
     cited_entities = {canonicalize(e) for f in sources for e in f.entities}
+    corpus = _support_corpus(sources)
     for token in checkable_entity_tokens(text):
         canonical = canonicalize(token)
         if canonical in cited_entities:
@@ -569,7 +599,7 @@ def check_bullet(
                         Finding(
                             index,
                             FindingKind.UNKNOWN_ENTITY,
-                            f"{part!r} (component of {token!r}) appears in no cited fact",
+                            _miss_detail(f"{part!r} (component of {token!r})", part, corpus),
                         )
                     )
                 continue
@@ -583,11 +613,10 @@ def check_bullet(
             Finding(
                 index,
                 FindingKind.UNKNOWN_ENTITY,
-                f"{token!r} (canonical form {canonical!r}) appears in no cited fact",
+                _miss_detail(f"{token!r} (canonical form {canonical!r})", token, corpus),
             )
         )
 
-    corpus = _support_corpus(sources)
     for word in _unsupported_names(text, corpus, cited_entities):
         findings.append(
             Finding(index, FindingKind.UNSUPPORTED_NAME, f"{word!r} appears in no cited fact")
