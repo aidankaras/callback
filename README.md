@@ -117,13 +117,15 @@ conversational:
 
 ## Evaluating the skill
 
-The tests check `core`. `evals/` checks the half that runs in Claude: four
+The tests check `core`. `evals/` checks the half that runs in Claude: five
 cases run with and without the plugin through `claude plugin eval`. Without
 it, Claude fetched a LinkedIn job page in 3 of 3 runs and told the user an
 unconfirmed fact was confirmed in 3 of 3; with it, neither happened. On
 fabrication both arms were clean when handed an explicit facts file, which is
 why the gates exist: they catch the model that slips rather than trusting the
-one that doesn't. `evals/README.md` has the table, the caveats and how to run it.
+one that doesn't. On cover letters the plugin did no better than the baseline:
+a judge faulted characterising sentences that no fact states and the letter
+gate cannot check. `evals/README.md` has the table, the caveats and how to run it.
 
 ## Development
 
