@@ -1,8 +1,9 @@
 # callback
 
 Tailoring a resume or cover letter for a specific role is high-effort, low-feedback work, and
-generic language-model assistance tends to make it worse: it invents accomplishments, inflates
-titles, and produces documents nobody has checked an applicant-tracking system can read.
+generic language-model assistance leaves the dangerous part unchecked: nothing stops it inventing
+an accomplishment or inflating a title, and nobody has checked that an applicant-tracking system
+can read what it produces.
 
 `callback` is a Claude Code plugin built the other way round. The candidate's facts live in a local,
 provenance-tracked store; Claude arranges them for a posting; and a deterministic Python package
@@ -29,7 +30,56 @@ It does **not** check ordinary wording: "led the migration" and "helped with the
 indistinguishable to it. And it cannot know whether a fact the candidate confirmed is true. See
 `docs/limitations.md` for the full list.
 
+## What it looks like
+
+A synthetic candidate, Dana Vex, has seven confirmed facts
+(`evals/persona/home/facts.yaml`). The posting asks for Kubernetes and "measurable
+impact". Here is a draft that gives it both, with one invented bullet:
+
+```yaml
+    bullets:
+    - {text: Cut the review queue to 300 items using Python, sources: [queue]}
+    - {text: Built nightly ETL jobs in Python and SQL feeding the finance dashboards, sources: [etl]}
+    - {text: Cut model-serving latency 40% by migrating the ETL jobs to Kubernetes, sources: [etl]}
+```
+
+`callback build` renders it, runs every gate, and refuses it:
+
+```text
+$ callback build docs/example/resume.yaml --job acme-ml
+FAIL  ~/.callback/outputs/acme-ml/draft/resume.pdf
+  grounding  fail
+  claims     fail
+  roundtrip  pass
+  hidden     pass
+  skills     warn
+  lints      pass
+report: ~/.callback/outputs/acme-ml/draft/report.md
+```
+
+and the report it names opens with what to fix:
+
+```text
+## Fix first
+- grounding: bullet 2: unresolved_number: '40%' is not derivable from the cited facts
+- grounding: bullet 2: unknown_entity: 'Kubernetes' (canonical form 'Kubernetes') appears in no cited fact
+- claims: skill 'Kubernetes' is backed by no confirmed fact
+```
+
+The PDF still exists, watermarked, in `draft/`: a document is always delivered, and
+provenance decides where it lands. With the invented bullet and skill removed, the
+same facts build to this, with one warning (two bullets under a role, where three
+are expected):
+
+![A one-page resume for the synthetic candidate Dana Vex](docs/images/example-resume.png)
+
+To reproduce it, copy `evals/persona/home/` to a scratch directory, point
+`CALLBACK_HOME` at it, and run the command above.
+
 ## Using it
+
+Requires Python 3.12, [`uv`](https://docs.astral.sh/uv/) on your `PATH` (the MCP server
+starts through it; without it the tools silently never appear) and Claude Code.
 
 ```bash
 uv sync
@@ -64,6 +114,16 @@ conversational:
 | `callback interview <id>` | an interview pack built from exactly the documents that were sent |
 
 `docs/using-callback.md` has the fact format, the document format and every rule.
+
+## Evaluating the skill
+
+The tests check `core`. `evals/` checks the half that runs in Claude: four
+cases run with and without the plugin through `claude plugin eval`. Without
+it, Claude fetched a LinkedIn job page in 3 of 3 runs and told the user an
+unconfirmed fact was confirmed in 3 of 3; with it, neither happened. On
+fabrication both arms were clean when handed an explicit facts file, which is
+why the gates exist: they catch the model that slips rather than trusting the
+one that doesn't. `evals/README.md` has the table, the caveats and how to run it.
 
 ## Development
 

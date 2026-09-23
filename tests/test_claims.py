@@ -51,10 +51,10 @@ CURRENT = fact(
 )
 DEGREE = fact(
     "degree",
-    "BS Data Science, Boston University",
+    "BS Statistics, Lakeshore State University",
     kind=FactKind.EDUCATION,
-    organization="Boston University",
-    title="BS Data Science",
+    organization="Lakeshore State University",
+    title="BS Statistics",
     dates=Dates(start="2019-09", end="2023-05"),
 )
 SKILLS = fact("skills", "Kubernetes", kind=FactKind.SKILL)
