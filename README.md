@@ -33,12 +33,18 @@ indistinguishable to it. And it cannot know whether a fact the candidate confirm
 
 ```bash
 uv sync
-claude --plugin-dir .      # loads the `tailor` skill and the write guard
+claude --plugin-dir .      # loads the tailor skill, the MCP tools and the write guard
 ```
 
-Then ask Claude to tailor your resume to a posting. The plugin also serves these checks over MCP,
-so a session can call them directly; confirming a fact and erasing the data home are deliberately
-not tools. The underlying commands:
+Then talk to Claude: *"find me ML internships"*, *"tailor my resume to this posting"*, *"what
+should I do next?"*. The session calls the checks as MCP tools and reports what they said; the
+command line below is the same code with an argv front end, used by the tests, by CI, and
+whenever you want to run something yourself.
+
+**One command is yours alone.** `callback facts confirm` reads your controlling terminal, which
+an assistant's shell does not have, so only you can make a fact usable — and a bullet may rest
+only on a confirmed fact. Erasing the data home is likewise not a tool. Everything else is
+conversational:
 
 | Command | Does |
 |---|---|
