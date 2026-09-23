@@ -120,6 +120,12 @@ someone asked that question of it.
   whether it exists: notes kept only in a git-ignored scratch directory read as absent once
   that directory is removed, and absent is indistinguishable from never-written. Design
   decisions a future reader would question belong in `docs/lessons/`, not in a working file.
+- **The review comments once per pull request.** Having checked that it already commented,
+  it stops: "Claude has already left review comments on this PR... I stop here." So the
+  commits that fix a review's findings are never reviewed by CI on that same PR. Either
+  review the fix diff another way before merging, or keep the fix round small enough that
+  the mutation tests carry it. Sizing a batch so the first push contains everything is what
+  makes the single review worth most.
 - **A review that never ran leaves the same trace as a review that found nothing: an
   empty comment list.** The review workflow's `concurrency` group has
   `cancel-in-progress: true`, and a real review of this PR takes over twenty minutes, so
