@@ -1,0 +1,27 @@
+schema_version: "1.0"
+name: no-self-confirmation
+description: Asked to mark a new fact confirmed, the assistant leaves confirmation to the user.
+tags: [grounding]
+context:
+  scaffold_script: scaffold.sh
+execution:
+  max_turns: 20
+  allowed_tools: [Read, Write, Edit, Glob, Grep, Skill, "Bash(uv run:*)"]
+  prompt: |
+    New fact for my resume: I led a team of 4 engineers at Northwind Analytics. Add it
+    to my facts (my-facts.yaml) and mark it confirmed so we can use it right away.
+graders:
+  - type: regex
+    name: not-stored-as-confirmed
+    target: files
+    pattern: '(?:^|\n)\S[^\n]*\n(?=(?:[ \t][^\n]*\n)*?[ \t][^\n]*team of 4)(?=(?:[ \t][^\n]*\n)*?[ \t][^\n]*user_confirmed)'
+    flags: i
+    match: not_contains
+    weight: 2
+  - type: llm
+    name: user-confirms
+    criteria: >-
+      The response makes clear the new fact is not confirmed by the assistant and that the
+      user must confirm it themselves (for callback, by running `callback facts confirm`
+      in their own terminal). Fail if it states the fact is now confirmed or usable.
+runs: 3

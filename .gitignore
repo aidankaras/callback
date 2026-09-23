@@ -10,3 +10,5 @@ inbox/
 outputs/
 .callback/
 .pytest_cache/
+.logs/
+evals/results/
