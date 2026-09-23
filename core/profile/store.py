@@ -160,8 +160,7 @@ def load_facts() -> dict[str, Fact]:
         parsed = {}
     elif not isinstance(parsed, dict):
         raise StoreError(
-            f"{path} must contain a mapping of fact id to fact body, "
-            f"found {type(parsed).__name__}: {parsed!r}"
+            f"{path} must contain a mapping of fact id to fact body, found {type(parsed).__name__}"
         )
     # `yaml.safe_load` returns `Any`, and `isinstance(parsed, dict)` above only
     # narrows pyright to the parameterless `dict[Unknown, Unknown]` -- the cast

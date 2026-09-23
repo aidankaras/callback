@@ -136,3 +136,22 @@ def test_fit_reports_coverage_and_exits_on_the_verdict(
     assert "KNOCKOUT" in out and "33% of what it names" in out
     assert "have     Python  (py)" in out
     assert "missing  Kubernetes" in out and "missing  Machine Learning" in out
+
+
+def test_a_damaged_fact_store_is_reported_not_raised(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A store that fails to load exits 3 with one line, not a traceback that echoes every fact."""
+    home = tmp_path / "cb"
+    home.mkdir(mode=0o700)
+    (home / "facts.yaml").write_text("- id: secret-fact\n  text: Private detail\n")
+    monkeypatch.setenv("CALLBACK_HOME", str(home))
+    out = subprocess.run(
+        [sys.executable, "-m", "core.cli", "facts", "list"],
+        capture_output=True,
+        text=True,
+    )
+    assert out.returncode == 3
+    assert "Traceback" not in out.stderr
+    assert "callback: " in out.stderr and "must contain a mapping" in out.stderr
+    assert "Private detail" not in out.stderr
