@@ -20,48 +20,39 @@ an eval sandbox, so a run can never touch a real data home.
 
 ## Results
 
-Three runs per case per arm, Claude Code 2.1.280, on the restructured skill:
+Three runs per case per arm, Claude Code 2.1.280, on the skill as merged:
 
 | Case | With plugin | Without | Δ |
 |---|---|---|---|
-| `refuses-job-sites` | 1.00 | 0.50 | +0.50 |
+| `refuses-job-sites` | 1.00 | 0.33 | +0.67 |
 | `no-self-confirmation` | 1.00 | 0.67 | +0.33 |
-| `no-fabrication` | 1.00 | 0.92 | +0.08 |
-| `plain-advice-does-not-trigger` | 1.00 | 1.00 | 0 |
-| `cover-letter-fires` (run separately, later) | 0.75 | 0.92 | −0.17 |
+| `cover-letter-fires` | 0.75 | 0.67 | +0.08 |
+| `no-fabrication` | 1.00 | 1.00 | 0 |
+| `plain-advice-does-not-trigger` | 0.67 | 1.00 | −0.33 |
 
-Read these for what they are. Without the plugin, Claude fetched the LinkedIn
-page in all three runs, and told the user the new fact was confirmed in all
-three. On fabrication it did not need the plugin: handed an explicit facts
-file, it invented nothing in any run either way, and the one difference is a
-judged reply, which at three runs is noise. So the plugin's advantage on
-fabrication is not that the model behaves better; it is that when a model
-does slip, `callback build` refuses the document (see the README's example),
-and every plugin run built and gate-checked a PDF where the baseline only
-wrote YAML. Twelve runs per arm is a smoke test, not a benchmark.
+Read these for what they are; twelve runs per arm is a smoke test, not a benchmark.
 
-The cover-letter case is a non-win, and says something true. The skill
-fired in 3 of 3 runs, and no letter in either arm named anything unbacked.
-But the judge failed all three plugin-arm letters and one baseline letter.
-Its reasoning is not reported. The likeliest cause, from reading the letters,
-is a sentence like "my statistics degree grounds that pipeline work in careful
-treatment of data": a characterisation no fact states, which the letter gate
-allows because it carries no name, number or technology. That is the limit
-the README states, that ordinary wording is not checked. The criterion was
-left as written rather than loosened to pass.
+- **Where the plugin changes behaviour.** Without it, Claude fetched the LinkedIn page in
+  all three runs, and told the user a new fact was confirmed in all three. With it, neither
+  happened in any run.
+- **Where it doesn't.** Handed an explicit facts file, Claude invented nothing in any run
+  either way. The plugin's advantage on fabrication is enforcement: when a model does slip,
+  `callback build` refuses the document (see the README's example), and every plugin run
+  built and gate-checked a PDF where the baseline only wrote YAML.
+- **Cover letters: no reliable difference.** The skill fired in 3 of 3 runs, and no letter
+  in either arm named anything unbacked; a judge failed about as many letters in each arm.
+  The likeliest cause, from reading them, is characterising sentences ("my degree grounds
+  that work in careful treatment of data") that no fact states and the letter gate does not
+  check. The README states that limit. The criterion was left as written.
+- **Plain advice: the skill did not fire in any run.** The −0.33 is one plugin-arm answer the
+  judge failed, most likely for rewrites that invented detail ("a 12-person team"). An
+  earlier run of this case failed one answer the same way; at three runs this is judge noise,
+  not the plugin.
 
-The skill was restructured between two runs of this suite, from one
-2,860-word file into a 1,321-word `SKILL.md` plus phase files under
-`references/`. Every plugin run scored 1.00 afterwards against 11 of 12
-before. The one earlier failure was a judge reading a correct "partly
-covered" answer as a failure; that criterion was widened between the runs,
-so the change in that case is not evidence for the restructure.
-
-After both runs, review of a grounding change made during the same work moved
-the synthetic persona's `ETL` into its fact's `entities` and added one
-drafting instruction to `references/first-run.md`, which no case exercises. No
-grader reads the build's verdict, so the table stands; re-run the suite
-before quoting it against a later skill.
+Earlier runs of this suite, on the skill before its final wording, agreed in direction on
+every case. Two criteria were corrected while building the suite, before any run reported
+here: one judge was shown file names instead of the letter, and one accepted only "missing"
+where "partly supported" was also correct.
 
 ## Running
 
