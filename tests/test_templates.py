@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import stat
 from pathlib import Path
@@ -18,11 +19,15 @@ def home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     return ensure_home()
 
 
-def _draft(home: Path, job: str, verdict: str = "pass") -> Path:
+def _draft(home: Path, job: str, verdict: str = "pass", doc: str = DOC) -> Path:
+    """A draft as `callback build` leaves it: the document, and a report whose
+    hash names the bytes it judged."""
     draft = home / "outputs" / job / "draft"
     draft.mkdir(parents=True)
-    (draft / "resume.yaml").write_text(DOC, encoding="utf-8")
-    (draft / "report.json").write_text(json.dumps({"verdict": verdict}), encoding="utf-8")
+    (draft / "resume.yaml").write_text(doc, encoding="utf-8")
+    (draft / "resume.pdf").write_bytes(b"%PDF gated")
+    report = {"verdict": verdict, "doc_sha256": hashlib.sha256(doc.encode()).hexdigest()}
+    (draft / "report.json").write_text(json.dumps(report), encoding="utf-8")
     return draft
 
 
@@ -71,3 +76,25 @@ def test_a_template_name_that_is_not_one_is_refused(home: Path, name: str) -> No
 def test_an_unknown_template_says_how_to_list_them(home: Path) -> None:
     with pytest.raises(TemplateError, match="callback template list"):
         use("missing", "acme-ml")
+
+
+def test_a_document_edited_since_its_build_is_not_a_template(home: Path) -> None:
+    """The verdict describes the bytes the build judged. Mutation: trust the
+    verdict without comparing the hash -- an ungated document is saved."""
+    draft = _draft(home, "acme-ml")
+    (draft / "resume.yaml").write_text(DOC + "sections: []\n", encoding="utf-8")
+    with pytest.raises(TemplateError, match="changed since it was gated"):
+        save("acme-ml", "ml-intern")
+    assert listing() == []
+
+
+def test_using_a_template_clears_the_previous_build(home: Path) -> None:
+    """A report describes one document; left beside another it is a judgement
+    of something else, and `apply` reads it. Mutation: keep the artifacts --
+    the old report.json and resume.pdf survive beside the new document."""
+    _draft(home, "acme-ml")
+    save("acme-ml", "ml-intern")
+    target = _draft(home, "globex-ml", doc="identity: {name: Someone Else}\n")
+    (target / "report.md").write_text("# PASS", encoding="utf-8")
+    use("ml-intern", "globex-ml", overwrite=True)
+    assert sorted(p.name for p in target.iterdir()) == ["resume.yaml"]

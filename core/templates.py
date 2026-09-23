@@ -17,11 +17,13 @@ accepted) can be saved, so a template is never a shape that failed.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from dataclasses import dataclass
 from pathlib import Path
 
+from core.buildcmd import ARTIFACTS
 from core.paths import private_dir, resolve_inside, write_private
 
 TEMPLATE_DIR = "templates"
@@ -57,6 +59,12 @@ def save(job_id: str, name: str) -> Path:
         raise TemplateError(
             f"the draft for {job_id!r} did not pass its gates, so it is not a shape to reuse"
         )
+    # The verdict describes the bytes the build judged. A document edited since
+    # then has not passed anything, whatever the report beside it says.
+    if hashlib.sha256(document).hexdigest() != report.get("doc_sha256"):
+        raise TemplateError(
+            f"the document for {job_id!r} has changed since it was gated: build it again first"
+        )
     out = private_dir(TEMPLATE_DIR) / f"{_named(name)}.yaml"
     write_private(out, document.decode("utf-8"))
     return out
@@ -87,4 +95,8 @@ def use(name: str, job_id: str, *, overwrite: bool = False) -> Path:
             f"{job_id!r} already has a draft document; pass --overwrite to replace it"
         )
     write_private(target, source.read_text(encoding="utf-8"))
+    # The previous build's PDF and report judged a different document; left
+    # here they would read as this one's, and `apply` reads them.
+    for name in ARTIFACTS:
+        (target.parent / name).unlink(missing_ok=True)
     return target

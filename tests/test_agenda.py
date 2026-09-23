@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -29,6 +30,15 @@ FACTS = {
 def home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     monkeypatch.setenv("CALLBACK_HOME", str(tmp_path / "cb"))
     return ensure_home()
+
+
+def _built(home: Path, job: str, verdict: str = "pass") -> Path:
+    """A draft as `callback build` leaves it."""
+    draft = home / "outputs" / job / "draft"
+    draft.mkdir(parents=True)
+    (draft / "resume.pdf").write_bytes(b"%PDF")
+    (draft / "report.json").write_text(json.dumps({"verdict": verdict}), encoding="utf-8")
+    return draft
 
 
 def _posting(pid: str, company: str, days_old: int = 1, text: str = "We use Python.") -> Found:
@@ -85,12 +95,25 @@ def test_an_interview_already_prepared_is_not_suggested_again(home: Path) -> Non
 def test_a_built_draft_that_was_never_sent_is_named(home: Path) -> None:
     """Work already done is worth more than a new posting. Mutation: ignore
     drafts -- this fails."""
-    draft = home / "outputs" / "acme-ml" / "draft"
-    draft.mkdir(parents=True)
-    (draft / "resume.pdf").write_bytes(b"%PDF")
+    _built(home, "acme-ml")
     result = agenda([], [], PROFILE, FACTS, now=NOW)
     assert [i.kind for i in result.items] == ["unsent"]
     assert "acme-ml" in result.items[0].what
+
+
+def test_a_draft_that_failed_its_gates_is_not_work_ready_to_send(home: Path) -> None:
+    """`build` writes a PDF whatever the gates said. Mutation: look only for
+    resume.pdf -- a failed draft is offered as work already done."""
+    _built(home, "bad-ml", verdict="fail")
+    assert agenda([], [], PROFILE, FACTS, now=NOW).items == ()
+
+
+def test_an_application_the_candidate_closed_is_not_waiting_on_them(home: Path) -> None:
+    """Mutation: treat only a reply as closing it -- a withdrawn application is
+    reported as silent, and the agenda suggests marking it ghosted."""
+    for kind in ("withdrew", "ghosted"):
+        closed = agenda([], [_application("w", "Acme", 30, kind)], PROFILE, FACTS, now=NOW)
+        assert closed.items == (), kind
 
 
 def test_postings_are_shortlisted_skipping_companies_already_applied_to(home: Path) -> None:

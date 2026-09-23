@@ -1,8 +1,9 @@
 name: Standards audit
 
 # Reads the whole repository against the properties this project claims for
-# itself (see the prompt below) and opens a pull request with the findings
-# in reports/standards-audit.md. It changes nothing else: an unattended fix
+# itself (see the prompt below) and writes its findings to
+# reports/standards-audit.md, which leaves as a run artifact rather than a
+# commit. It changes nothing else: an unattended fix
 # to a design decision is exactly the confident, plausible, wrong change the
 # gates in this project exist to catch, so the audit is instructed to report
 # only, never to edit core/, tests/, docs/ or its own workflow.
@@ -18,13 +19,6 @@ name: Standards audit
 # union (OR) of the two, not their intersection -- so day-of-month "1,15"
 # combined with a restricted day-of-week would fire far more often than the
 # 1st/15th intended.
-#
-# The PR below is opened with the default GITHUB_TOKEN, which GitHub
-# deliberately does not let trigger other workflows (this stops an
-# unattended workflow from recursively spawning more workflow runs). CI and
-# any review automation configured on pull_request will NOT run against this
-# PR automatically; a human has to open it (push an empty commit, or use
-# `gh pr checks --watch` / re-run) to get those signals before merging.
 
 on:
   schedule:
@@ -174,15 +168,10 @@ jobs:
 
       - name: Fail if the audit produced no report
         run: |
-          # A run that writes nothing must not go green. The pull-request action
-          # below opens no PR when it finds no change, so without this check a
-          # silently empty audit is indistinguishable from an audit that found
-          # nothing worth saying -- and both look like success.
-          #
-          # `git status --porcelain` rather than `git diff`: this file is untracked
-          # until the first audit commits it, and `git diff` does not report
-          # untracked files, so it would answer "no change" no matter what was
-          # written.
+          # A run that writes nothing must not go green: a silently empty audit
+          # is indistinguishable from an audit that found nothing worth saying,
+          # and both look like success. The report is never committed, so its
+          # absence is the only signal there is.
           report=reports/standards-audit.md
           test -f "$report" || { echo "::error::$report was not written"; exit 1; }
           bytes=$(wc -c < "$report")

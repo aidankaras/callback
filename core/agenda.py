@@ -14,6 +14,7 @@ waiting on. It never acts: every item names the command that would.
 
 from __future__ import annotations
 
+import json
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -28,6 +29,9 @@ from core.triage import Profile, rank
 # How many postings to suggest at once: a shortlist a person will actually
 # read, not the whole ranked list, which `callback triage` already prints.
 SHORTLIST = 5
+# An application is waiting on nobody once it has a reply or the candidate has
+# closed it themselves.
+_CLOSED = REPLIES | POSITIVE | {"ghosted", "withdrew"}
 
 
 @dataclass(frozen=True)
@@ -53,7 +57,17 @@ def _drafted_jobs() -> set[str]:
     outputs = resolve_inside("outputs")
     if not outputs.is_dir():
         return set()
-    return {d.parent.name for d in outputs.glob("*/draft") if (d / "resume.pdf").is_file()}
+    built: set[str] = set()
+    for draft in outputs.glob("*/draft"):
+        # A rendered PDF is not a passed document: `build` writes one whatever
+        # the gates said, and a draft that failed is not work ready to send.
+        try:
+            report = json.loads((draft / "report.json").read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if report.get("verdict") in {"pass", "warn"} and (draft / "resume.pdf").is_file():
+            built.add(draft.parent.name)
+    return built
 
 
 def _packet_jobs() -> set[str]:
@@ -132,10 +146,12 @@ def agenda(
 
     # Last, the applications that have gone quiet.
     for application in applications:
-        if any(o.kind in REPLIES or o.kind in POSITIVE for o in application.outcomes):
+        # Anything the candidate has already closed -- a reply, a withdrawal,
+        # a ghosting they recorded -- is not waiting on them.
+        if any(o.kind in _CLOSED for o in application.outcomes):
             continue
         waited = (now - application.submitted_at) / timedelta(days=1)
-        if waited >= STALE_DAYS and not any(o.kind == "ghosted" for o in application.outcomes):
+        if waited >= STALE_DAYS:
             items.append(
                 Item(
                     "silent",
