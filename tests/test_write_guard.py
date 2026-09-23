@@ -238,3 +238,25 @@ def test_a_wildcard_inside_the_data_home_is_refused(home: Path, command: str) ->
 def test_a_wildcard_outside_the_data_home_is_allowed(home: Path, tmp_path: Path) -> None:
     result = run_guard(_bash(f"rm {tmp_path}/scratch/*.pdf"), home)
     assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        'script -qec "uv run callback facts confirm probe" /dev/null',
+        "timeout 30 script -qc 'callback facts confirm' /dev/null",
+        'bash -c "callback facts confirm"',
+        "python3 -c \"import pty; pty.spawn(['callback', 'facts', 'confirm'])\"",
+        'tmux send-keys "callback facts confirm" Enter',
+        'unbuffer sh -c "uv run --project /repo callback facts confirm"',
+    ],
+)
+def test_confirm_run_through_a_pseudo_terminal_wrapper_is_denied(home: Path, command: str) -> None:
+    """`script` gives a child a terminal, so `/dev/tty` opens and confirm succeeds without the user.
+
+    Each command hides `facts confirm` inside one quoted word, where the
+    command-position check cannot see it.
+    """
+    result = run_guard(_bash(command), home, cwd=home)
+    assert denied(result), (command, result.stderr)
+    assert "facts confirm" in result.stderr

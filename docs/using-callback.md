@@ -124,10 +124,11 @@ A fact is one thing that is true about you, stated once:
 - `dates` use `YYYY-MM`. Leave out `end` for a role that has not ended; that is
   what lets a resume say "Present".
 - A fact is usable only after `callback facts confirm`. That command reads your
-  answers from the terminal itself (`/dev/tty`), so no script or assistant can
-  confirm on your behalf, even by piping in "y". It guards against accidental
-  confirmation. It is not a lock against a process that edits the store file
-  directly.
+  answers from the terminal itself (`/dev/tty`), so piping in "y" does not work,
+  and the write guard refuses it when an assistant runs it through a wrapper
+  that fakes a terminal. It guards against accidental confirmation, and against
+  an assistant being talked into it. It is not a lock against a program built to
+  get round it, or one that edits the store file directly.
 
 ## The resume document
 

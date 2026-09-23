@@ -50,8 +50,9 @@ to run it.
 4. **Only the user confirms facts.** You may draft facts with
    `provenance: {source: "import:<file>" | "assistant:<topic>", trust: import_unconfirmed}`
    and add them with `callback facts add`. `callback facts confirm` must be
-   typed by the user in their own terminal: it reads `/dev/tty`, which your
-   shell doesn't have, and the write guard refuses it from you. Never edit
+   typed by the user in their own terminal: it reads `/dev/tty`, and the write
+   guard refuses it from you, including through `script`, `bash -c` or any
+   other wrapper. Never try to obtain a terminal to run it. Never edit
    `~/.callback/facts.yaml` directly; a refusal is not an obstacle to work
    around. `delete-all` erases the data home, and is likewise only theirs.
 5. **Never change a gate, a fact, `core/`, or the template to make a build

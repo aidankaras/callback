@@ -31,7 +31,8 @@ it reads or writes it -- telling the two apart in an arbitrary command is not
 reliable (`cat x | tee x`, `sed -n` against `sed -i`) and nothing needs the
 raw store, which `callback facts list` reads -- except `ls`, `stat` and `du`,
 which only look, and the argument of a `-m` commit message. `callback facts
-confirm` is refused in command position. Any payload this script cannot read
+confirm` is refused in command position, and inside the text a command runner
+such as `script` or `bash -c` is handed. Any payload this script cannot read
 is denied: a guard that fails open would imply a guarantee it does not give.
 
 Bash guarding is defence in depth, not containment. A shell is a general
@@ -183,6 +184,44 @@ def _runs(words: list[str], wanted: list[str]) -> bool:
     return any(words[i : i + len(wanted)] == wanted for i in range(len(words) - len(wanted) + 1))
 
 
+# Commands that run another command they are handed as text. `script` and
+# `unbuffer` also give it a pseudo-terminal, under which `/dev/tty` opens and
+# `callback facts confirm` succeeds with no one at the keyboard. The inner
+# command arrives as one quoted word the command-position check cannot see.
+# A plain mention stays allowed: `grep "facts confirm" docs/` runs nothing.
+_RUNNERS = frozenset(
+    {
+        "script",
+        "unbuffer",
+        "expect",
+        "socat",
+        "tmux",
+        "screen",
+        "sh",
+        "bash",
+        "zsh",
+        "dash",
+        "python",
+        "python3",
+        "perl",
+        "ruby",
+        "node",
+        "env",
+        "timeout",
+        "nohup",
+        "setsid",
+        "xargs",
+        "eval",
+        "exec",
+        "sudo",
+        "su",
+        "stdbuf",
+        "nice",
+    }
+)
+_CONFIRM_TEXT = re.compile(r"facts\W{1,6}confirm", re.IGNORECASE)
+
+
 def check_bash(command: str, cwd: Path) -> None:
     bases = [cwd]
     for segment in _segments(command):
@@ -193,6 +232,11 @@ def check_bash(command: str, cwd: Path) -> None:
             words, ["-m", "core.cli", "facts", "confirm"]
         ):
             deny("`callback facts confirm` must be typed by the candidate in their own terminal")
+        if words[0] in _RUNNERS and any(_CONFIRM_TEXT.search(w) for w in words[1:]):
+            deny(
+                "`callback facts confirm` must be typed by the candidate in their own "
+                "terminal, not run through another command"
+            )
         # A redirect turns any command into a write, so a segment with one is
         # never exempt: `ls > facts.yaml` truncates the file as surely as `echo`.
         redirects = any(">" in w for w in words)

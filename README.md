@@ -15,7 +15,7 @@ something you can re-run, not something the model reports about itself. There is
 
 | Property | Mechanism |
 |---|---|
-| Only facts the candidate confirmed can back a document | `callback facts confirm` reads its answers from the controlling terminal, which an assistant's shell does not have; a write-guard hook refuses an assistant's edits to the fact store |
+| Only facts the candidate confirmed can back a document | `callback facts confirm` reads its answers from the controlling terminal, not from input a program can pipe in; a write-guard hook refuses an assistant's edits to the fact store and its attempts to run confirm through a wrapper that fakes a terminal. This stops accidents and a model steered by a posting; it is not a boundary against a program built to get round it (`docs/limitations.md`) |
 | Bullets make no claim their facts do not state | every number (including spelled-out ones), date, technology, mid-sentence name and claim word (award, promoted, doubled, …) must appear in the cited facts; a count cannot rest on a percentage |
 | Entry headers are not inflated | every header field an entry prints (employer, title, location, dates) must equal the same cited fact's; a bullet may cite only its own entry's facts |
 | Nothing is added around the content | the identity block must match a confirmed contact fact; section titles come from a fixed list; every listed skill needs confirmed backing |
@@ -91,10 +91,10 @@ should I do next?"*. The session calls the checks as MCP tools and reports what 
 command line below is the same code with an argv front end, used by the tests, by CI, and
 whenever you want to run something yourself.
 
-**One command is yours alone.** `callback facts confirm` reads your controlling terminal, which
-an assistant's shell does not have, so only you can make a fact usable — and a bullet may rest
-only on a confirmed fact. Erasing the data home is likewise not a tool. Everything else is
-conversational:
+**One command is yours alone.** `callback facts confirm` reads your controlling terminal rather
+than piped input, and the write guard refuses the assistant's attempts to run it, so making a fact
+usable is your step — and a bullet may rest only on a confirmed fact. Erasing the data home is
+likewise not a tool. Everything else is conversational:
 
 | Command | Does |
 |---|---|
