@@ -944,3 +944,17 @@ def test_cited_technology_in_a_hyphenated_compound_passes() -> None:
 def test_ordinary_hyphenated_english_is_not_read_as_a_technology(bullet: str, text: str) -> None:
     verdict, findings = check_bullet(bullet, [fact("e", text=text, entities=[])])
     assert verdict is Verdict.PASS, findings
+
+
+def test_the_fix_message_names_text_only_when_the_text_states_the_token() -> None:
+    """A token found only in a structured field ('Boston, MA') is not reported as in the text."""
+    f = fact(
+        "r",
+        kind=FactKind.EXPERIENCE,
+        text="Data Engineer at Northwind",
+        organization="Northwind",
+        title="Data Engineer",
+        location="Boston, MA",
+    )
+    _, findings = check_bullet("Ran pipelines across MA sites", [f])
+    assert findings[0].detail.endswith("appears in no cited fact")

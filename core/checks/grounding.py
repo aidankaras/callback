@@ -248,11 +248,11 @@ def _names_a_technology(token: str) -> bool:
     return any(len(p) >= 2 and p.lower() in ALIAS_TABLE for p in token.split("-"))
 
 
-def _miss_detail(label: str, part: str, corpus: str) -> str:
+def _miss_detail(label: str, part: str, fact_text: str) -> str:
     # A token the cited fact's own text states is usually a drafting gap in
     # the fact, not an invention in the bullet. It still fails -- a mention
     # is not use ("migrated off AWS") -- but the message names the fix.
-    if _has_words(part, corpus):
+    if _has_words(part, fact_text):
         return (
             f"{label} is in a cited fact's text but not its entities; add it there "
             "if that fact shows it in use"
@@ -561,7 +561,9 @@ def check_bullet(
         )
 
     cited_entities = {canonicalize(e) for f in sources for e in f.entities}
-    corpus = _support_corpus(sources)
+    # The facts' prose alone, not their structured fields: the fix a miss
+    # message names is only right when the prose states the token.
+    fact_text = " ".join(" ".join(f.text for f in sources).casefold().split())
     for token in checkable_entity_tokens(text):
         canonical = canonicalize(token)
         if canonical in cited_entities:
@@ -599,7 +601,7 @@ def check_bullet(
                         Finding(
                             index,
                             FindingKind.UNKNOWN_ENTITY,
-                            _miss_detail(f"{part!r} (component of {token!r})", part, corpus),
+                            _miss_detail(f"{part!r} (component of {token!r})", part, fact_text),
                         )
                     )
                 continue
@@ -613,10 +615,11 @@ def check_bullet(
             Finding(
                 index,
                 FindingKind.UNKNOWN_ENTITY,
-                _miss_detail(f"{token!r} (canonical form {canonical!r})", token, corpus),
+                _miss_detail(f"{token!r} (canonical form {canonical!r})", token, fact_text),
             )
         )
 
+    corpus = _support_corpus(sources)
     for word in _unsupported_names(text, corpus, cited_entities):
         findings.append(
             Finding(index, FindingKind.UNSUPPORTED_NAME, f"{word!r} appears in no cited fact")

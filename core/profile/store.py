@@ -20,7 +20,7 @@ from pydantic import ValidationError
 
 from core.aliases import canonicalize
 from core.paths import OutsideHomeError, resolve_inside, write_private
-from core.profile.models import Fact
+from core.profile.models import Dates, Derivation, Fact, Provenance, Quantity
 
 FACTS_FILE = "facts.yaml"
 
@@ -155,7 +155,7 @@ def load_facts() -> dict[str, Fact]:
     try:
         parsed = yaml.safe_load(text)
     except yaml.YAMLError as exc:
-        raise StoreError(f"{path} is not valid YAML: {exc}") from exc
+        raise StoreError(f"{path} is not valid YAML{_yaml_problem(exc)}") from exc
     if parsed is None:
         parsed = {}
     elif not isinstance(parsed, dict):
@@ -167,14 +167,52 @@ def load_facts() -> dict[str, Fact]:
     # is the documented boundary where this module starts trusting the file's
     # shape; `Fact.model_validate` is what actually checks it, just below.
     raw = cast("dict[str, dict[str, object]]", parsed)
-    try:
+    facts: dict[str, Fact] = {}
+    for fid, body in raw.items():
         # `body | {"id": fid}` raises a bare `TypeError` when a fact's own
         # body isn't a mapping either (e.g. a bare string under its id) --
         # the top-level check above only establishes that `raw` itself is a
         # mapping, not that every value in it is.
-        return {fid: Fact.model_validate(body | {"id": fid}) for fid, body in raw.items()}
-    except (ValidationError, TypeError) as exc:
-        raise StoreError(f"{path} contains a fact that no longer validates: {exc}") from exc
+        try:
+            facts[fid] = Fact.model_validate(body | {"id": fid})
+        except ValidationError as exc:
+            raise StoreError(
+                f"{path}: fact {fid!r} no longer validates: {_validation_problems(exc)}"
+            ) from exc
+        except TypeError as exc:
+            raise StoreError(f"{path}: fact {fid!r} has a body that is not a mapping") from exc
+    return facts
+
+
+# A store error is printed to the terminal, so it may name where a fact is
+# broken but never quote what it holds. Pydantic's text quotes each failing
+# input, and its error paths include dictionary keys the user wrote (a
+# metric's label under `numbers`); only schema field names are kept.
+_SCHEMA_FIELDS = frozenset(
+    name for model in (Fact, Provenance, Dates, Quantity, Derivation) for name in model.model_fields
+)
+
+
+def _validation_problems(exc: ValidationError) -> str:
+    def part(p: int | str) -> str:
+        return str(p) if isinstance(p, int) or p in _SCHEMA_FIELDS else "<key>"
+
+    return "; ".join(
+        f"{'.'.join(part(p) for p in error['loc'])}: {error['msg']}"
+        for error in exc.errors(include_input=False, include_url=False)
+    )
+
+
+def _yaml_problem(exc: yaml.YAMLError) -> str:
+    # PyYAML's text reprints the offending line, and its `problem` can quote
+    # a name from the file ("found undefined alias 'x'"), so quoted parts go.
+    if not isinstance(exc, yaml.MarkedYAMLError):
+        return ""
+    where = ""
+    if exc.problem_mark is not None:
+        where = f" at line {exc.problem_mark.line + 1}, column {exc.problem_mark.column + 1}"
+    problem = re.sub(r"'[^']*'", "'...'", exc.problem or "")
+    return f"{where}: {problem}" if problem else where
 
 
 def save_facts(facts: dict[str, Fact]) -> None:
