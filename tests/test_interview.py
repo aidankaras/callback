@@ -121,3 +121,45 @@ def test_a_story_is_told_only_from_a_fact_still_confirmed(applied: Path) -> None
     text = prepare("acme-ml").read_text(encoding="utf-8")
     assert "Turing" not in text
     assert "no longer confirmed" in text
+
+
+def test_a_story_from_interview_practice_is_a_draft_fact_until_confirmed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The skill drafts a practice answer as a fact under this provenance; it
+    backs nothing until the candidate confirms it, and then backs the bullet."""
+    import io
+
+    from core.checks.grounding import FindingKind, Verdict, check_bullet
+    from core.factscmd import add_from_file, confirm
+    from core.profile.store import load_facts
+
+    monkeypatch.setenv("CALLBACK_HOME", str(tmp_path / "cb"))
+    ensure_home()
+    drafted = tmp_path / "story.yaml"
+    drafted.write_text(
+        "- id: outage\n"
+        "  kind: experience_detail\n"
+        "  text: Led the rollback during the March ingestion outage\n"
+        "  provenance: {source: 'assistant:interview:acme-ml', trust: import_unconfirmed}\n",
+        encoding="utf-8",
+    )
+    assert add_from_file(drafted) == (["outage"], [])
+    fact = load_facts()["outage"]
+    assert not fact.selectable()
+    verdict, findings = check_bullet("Led the rollback during the ingestion outage", [fact])
+    assert verdict is Verdict.FAIL
+    assert FindingKind.UNSELECTABLE_FACT in {f.kind for f in findings}
+
+    class _Yes(io.TextIOBase):
+        def readline(self, size: int = -1, /) -> str:
+            return "y\n"
+
+        def write(self, s: str, /) -> int:
+            return len(s)
+
+    assert confirm(["outage"], open_tty=_Yes) == ["outage"]
+    verdict, _ = check_bullet(
+        "Led the rollback during the ingestion outage", [load_facts()["outage"]]
+    )
+    assert verdict is not Verdict.FAIL

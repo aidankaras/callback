@@ -43,10 +43,20 @@ uv run --project <repo root> callback apply <job-id> --company "<company>" --tit
   - Propose each status change with the sender, date and one quoted line.
   - Record only the ones the user approves, with
     `callback outcome <job-id> <kind>`.
-- **Which channel is working.** `callback funnel` shows reply and
-  callback rates by where the user applied, and lists applications silent
-  for three weeks. Suggest recording those as `ghosted` only with the
-  user's agreement.
+- **Which channel is working.** `callback funnel` shows replies and
+  callbacks, as counts, by where the user applied, and lists applications
+  silent for three weeks. Suggest recording those as `ghosted` only with
+  the user's agreement.
+- **What was sent, and what happened.** `apply` records the template the
+  draft began as (when `callback template use` seeded it), every fact the
+  resume cites and, if the user sorts applications that way, a role family
+  from `callback notes families`; pass `role_family` to `apply`. `insights`
+  groups outcomes by those. Report only counts, and say "too few to
+  compare" for any group under 5.
+- **What to learn next.** `gaps` lists technologies eligible postings want
+  that no confirmed fact backs, with how many rejected applications'
+  postings named each. A gap is a question for the user, never a line to
+  add.
 
 ## When an interview is scheduled
 
@@ -64,3 +74,11 @@ From it, prepare the user:
 
 Anything a story needs that no fact states is a question for the user,
 never a detail to fill in.
+
+**A story told once becomes a fact.** When the user answers a practice
+question with something no fact records yet, draft it as a fact in their
+words, with
+`provenance: {source: "assistant:interview:<job-id>", trust: import_unconfirmed}`,
+add it with `facts_add`, and tell them to confirm it with
+`callback facts confirm` in their own terminal. Until they do, it backs
+nothing.
