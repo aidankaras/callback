@@ -35,7 +35,10 @@ confirm` is refused in command position, and anywhere else in a command
 except as the text a search or `git` is given. Any payload this script cannot read
 is denied: a guard that fails open would imply a guarantee it does not give.
 
-Bash guarding is defence in depth, not containment. A shell is a general
+Bash guarding is defence in depth, not containment. For `facts confirm` in
+particular, a phrase split across words (`conf''irm`, a variable holding only
+`confirm`) or a script written to a file and then run is not caught; the
+guard stops an assistant steered into running confirm, not one set on it. A shell is a general
 tool, and a command that builds a path at run time -- from a variable other
 than `CALLBACK_HOME`, from `find`, from an encoded string -- is not caught.
 It stops an assistant *accidentally* writing a protected file, which is the
@@ -52,6 +55,7 @@ import os
 import re
 import shlex
 import sys
+from itertools import pairwise
 from pathlib import Path
 
 WRITE_TOOLS = {"Write", "Edit", "MultiEdit", "NotebookEdit"}
@@ -197,24 +201,39 @@ _MENTION_ONLY = frozenset({"grep", "egrep", "fgrep", "rg", "git"})
 _CONFIRM_TEXT = re.compile(r"facts\W{1,6}confirm", re.IGNORECASE)
 
 
+def _git_config_runs(words: list[str]) -> bool:
+    """Whether a `git` command sets config that names confirm (`-c alias.x=!...`)."""
+    return Path(words[0]).name == "git" and any(
+        w in {"-c", "--config-env"} and _CONFIRM_TEXT.search(nxt) for w, nxt in pairwise(words)
+    )
+
+
 def check_bash(command: str, cwd: Path) -> None:
     bases = [cwd]
     for segment in _segments(command):
         words = _command_words(segment)
+        # The raw segment, assignments included: `C='callback facts confirm';
+        # script -qc "$C"` carries the command in a variable, and a leading
+        # `GIT_EDITOR=...` runs it. `git` is exempt as a place to mention the
+        # text (a commit message, a log search) but not through `-c`, whose
+        # aliases, editor and pager run commands.
+        leading = segment[: len(segment) - len(words)] if words else segment
+        if any(_CONFIRM_TEXT.search(w) for w in segment) and (
+            not words
+            or Path(words[0]).name not in _MENTION_ONLY
+            or _git_config_runs(words)
+            or any(_CONFIRM_TEXT.search(w) for w in leading)
+        ):
+            deny(
+                "`callback facts confirm` must be typed by the candidate in their own "
+                "terminal, not run through another command"
+            )
         if not words:
             continue
         if _runs(words, ["callback", "facts", "confirm"]) or _runs(
             words, ["-m", "core.cli", "facts", "confirm"]
         ):
             deny("`callback facts confirm` must be typed by the candidate in their own terminal")
-        # By basename: `/usr/bin/grep` is still only a search.
-        if Path(words[0]).name not in _MENTION_ONLY and any(
-            _CONFIRM_TEXT.search(w) for w in words[1:]
-        ):
-            deny(
-                "`callback facts confirm` must be typed by the candidate in their own "
-                "terminal, not run through another command"
-            )
         # A redirect turns any command into a write, so a segment with one is
         # never exempt: `ls > facts.yaml` truncates the file as surely as `echo`.
         redirects = any(">" in w for w in words)

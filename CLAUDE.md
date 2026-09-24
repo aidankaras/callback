@@ -306,5 +306,9 @@ uv run pyright                    # strict; never `.venv/bin/pyright`, which res
 uv run callback --help            # the console entry point
 ```
 
+With the plugin loaded, the write guard refuses any Bash command naming `facts confirm`
+other than a search or `git`, including `gh pr create --body "..."` and `echo`. Write the
+text to a file and pass it with `--body-file`, or run the command without the plugin.
+
 All four gates pass before any commit. Run them as `uv run <tool>`, the way CI does, rather
 than by invoking a binary path directly.

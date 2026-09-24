@@ -40,7 +40,8 @@ by design rather than merely unimplemented.
   from `/dev/tty`, so a process without one cannot confirm a fact; but `script` or `unbuffer` gives
   a child process a pseudo-terminal, under which it can. The write guard refuses any Bash command
   that names `facts confirm` other than a search or `git` (so `script -qc`, `bash -c`, `watch`,
-  `find -exec` and the rest are all refused, at the cost of a harmless `timeout grep`). That stops an
+  `find -exec` and the rest are all refused, at the cost of a harmless `timeout grep`). A phrase
+  split across words, or a script written to a file and then run, is not caught. That stops an
   assistant confirming by accident or on a posting's instruction. It does not stop a program
   written to get round it, and anyone at the candidate's own terminal can confirm.
 - **The hidden-content screen** reads colour, size, position, rendering mode and Unicode from the PDF

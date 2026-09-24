@@ -257,6 +257,11 @@ def test_a_wildcard_outside_the_data_home_is_allowed(home: Path, tmp_path: Path)
         'find . -exec bash -c "callback facts confirm" \\;',
         "awk 'BEGIN{system(\"callback facts confirm\")}'",
         'uv run --locked bash -c "callback facts confirm"',
+        "C='callback facts confirm'; script -qc \"$C\" /dev/null",
+        "C='callback facts confirm' script -qc '$C' /dev/null",
+        "GIT_EDITOR='script -qc \"callback facts confirm\" /dev/null' git commit",
+        "git -c core.editor='script -qc \"callback facts confirm\" /dev/null' commit",
+        "git -c alias.x='!callback facts confirm' x",
     ],
 )
 def test_confirm_run_through_a_pseudo_terminal_wrapper_is_denied(home: Path, command: str) -> None:
@@ -267,7 +272,7 @@ def test_confirm_run_through_a_pseudo_terminal_wrapper_is_denied(home: Path, com
     """
     result = run_guard(_bash(command), home, cwd=home)
     assert denied(result), (command, result.stderr)
-    assert "facts confirm" in result.stderr
+    assert "not run through another command" in result.stderr
 
 
 @pytest.mark.parametrize(
@@ -275,6 +280,7 @@ def test_confirm_run_through_a_pseudo_terminal_wrapper_is_denied(home: Path, com
     [
         'rg -n "facts confirm" docs/',
         'git log --grep "facts confirm"',
+        'git commit -m "docs: explain facts confirm"',
     ],
 )
 def test_a_search_or_commit_may_mention_confirm(home: Path, command: str) -> None:
