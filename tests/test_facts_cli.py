@@ -176,7 +176,7 @@ def test_facts_confirm_without_a_terminal_exits_3(
         # taking effect from a machine that genuinely has no terminal.
         raise OSError(6, "patched-no-terminal")
 
-    monkeypatch.setattr("core.factscmd._open_terminal", no_tty)
+    monkeypatch.setattr("core.terminal._open_tty", no_tty)
     add_from_file(_facts_file(tmp_path, [_imported("a", "one")]))
     assert main(["facts", "confirm"]) == 3
     assert "patched-no-terminal" in capsys.readouterr().err
