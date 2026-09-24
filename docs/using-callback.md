@@ -151,7 +151,10 @@ deadline Nov 14"). They live in `notes.yaml`, at most 200 characters each.
 - A note cannot make a claim pass the gates: grounding reads facts and nothing
   else. It can change everything the gates do not check -- which facts are
   chosen, what is left out, the wording, letters and answers -- which is why
-  activating one is yours alone.
+  activating one is yours alone. As with `facts confirm`, the write guard
+  refuses `notes activate` when an assistant runs it, however it is wrapped,
+  and any tool's edit of `notes.yaml`. It guards against accidental or
+  steered activation, not against a program built to get round it.
 - Sessions receive notes as quoted data, never as instructions.
 
 ## The resume document

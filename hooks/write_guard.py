@@ -11,6 +11,9 @@ What is protected, under `$CALLBACK_HOME` (default `~/.callback`):
   `callback facts add`, which marks them unconfirmed, and become usable only
   through `callback facts confirm`, which only the candidate can answer. A
   tool that could write the store directly could skip both.
+- `notes.yaml`, the candidate's standing preferences. An assistant may
+  propose or retire a note through `callback`; only the candidate activates
+  one, with `callback notes activate` at their own terminal.
 - anything under an `outputs/<job>/final/` or `released/` directory.
 - `applications.yaml`, the application record the volume limits read.
 - key, ledger and database files.
@@ -30,17 +33,19 @@ session's working directory, every `cd` or `pushd` target, and any `-C` or
 it reads or writes it -- telling the two apart in an arbitrary command is not
 reliable (`cat x | tee x`, `sed -n` against `sed -i`) and nothing needs the
 raw store, which `callback facts list` reads -- except `ls`, `stat` and `du`,
-which only look, and the argument of a `-m` commit message. `callback facts
-confirm` is refused in command position, and anywhere else in a command
-except as the text a search or `git` is given. Any payload this script cannot read
+which only look, and the argument of a `-m` commit message. The commands only
+the candidate may run, `callback facts confirm` and `callback notes activate`,
+are refused in command position, and anywhere else in a command except as the
+text a search or `git` is given. Any payload this script cannot read
 is denied: a guard that fails open would imply a guarantee it does not give.
 
-Bash guarding is defence in depth, not containment. For `facts confirm` in
-particular, a phrase split across words (`conf''irm`, a variable holding only
-`confirm`) or a script written to a file and then run is not caught; the
-guard stops an assistant steered into running confirm, not one set on it. A shell is a general
-tool, and a command that builds a path at run time -- from a variable other
-than `CALLBACK_HOME`, from `find`, from an encoded string -- is not caught.
+Bash guarding is defence in depth, not containment. For the candidate-only
+commands in particular, a phrase split across words (`conf''irm`, a variable
+holding only `activate`) or a script written to a file and then run is not
+caught; the guard stops an assistant steered into running them, not one set
+on it. A shell is a general tool, and a command that builds a path at run
+time -- from a variable other than `CALLBACK_HOME`, from `find`, from an
+encoded string -- is not caught.
 It stops an assistant *accidentally* writing a protected file, which is the
 failure that matters in normal use; it does not stop one determined to.
 
@@ -61,6 +66,7 @@ from pathlib import Path
 WRITE_TOOLS = {"Write", "Edit", "MultiEdit", "NotebookEdit"}
 PROTECTED_NAMES = {
     "facts.yaml",
+    "notes.yaml",
     "applications.yaml",
     "ledger.log",
     ".key",
@@ -131,6 +137,8 @@ def protected(path: Path) -> str | None:
         return (
             "the fact store changes only through `callback facts add` and `callback facts confirm`"
         )
+    if inside == ("notes.yaml",):
+        return "notes change only through `callback notes`, and only the candidate activates one"
     if target.name in PROTECTED_NAMES:
         return f"{target.name} is written only by callback itself"
     if SEALED_DIRS & set(inside):
@@ -188,7 +196,9 @@ def _runs(words: list[str], wanted: list[str]) -> bool:
     return any(words[i : i + len(wanted)] == wanted for i in range(len(words) - len(wanted) + 1))
 
 
-# `callback facts confirm` can also run as text another command is handed:
+# The commands only the candidate may run, as the words after `callback`. Each
+# reads its answer from `/dev/tty`. Either can also run as text another
+# command is handed, as `callback facts confirm` can:
 # `script -qc "..."` gives it a pseudo-terminal, under which `/dev/tty` opens
 # and confirmation succeeds with no one at the keyboard, and `bash -c`,
 # `watch`, `flock`, `find -exec` or `awk`'s `system()` run it the same way.
@@ -198,13 +208,21 @@ def _runs(words: list[str], wanted: list[str]) -> bool:
 # `timeout 10 grep "facts confirm"`; the guard does not model what a runner
 # runs.
 _MENTION_ONLY = frozenset({"grep", "egrep", "fgrep", "rg", "git"})
-_CONFIRM_TEXT = re.compile(r"facts\W{1,6}confirm", re.IGNORECASE)
+_CANDIDATE_ONLY = (("facts", "confirm"), ("notes", "activate"))
+_CANDIDATE_TEXT = re.compile(r"facts\W{1,6}confirm|notes\W{1,6}activate", re.IGNORECASE)
+
+
+def _named(text: str) -> str:
+    """The candidate-only command `text` names, as its words after `callback`."""
+    found = _CANDIDATE_TEXT.search(text)
+    return " ".join(re.findall(r"[a-z]+", found.group(0).casefold())) if found else "facts confirm"
 
 
 def _git_config_runs(words: list[str]) -> bool:
-    """Whether a `git` command sets config that names confirm (`-c alias.x=!...`)."""
+    """Whether a `git` command sets config that names a candidate-only command
+    (`-c alias.x=!...`)."""
     return Path(words[0]).name == "git" and any(
-        w in {"-c", "--config-env"} and _CONFIRM_TEXT.search(nxt) for w, nxt in pairwise(words)
+        w in {"-c", "--config-env"} and _CANDIDATE_TEXT.search(nxt) for w, nxt in pairwise(words)
     )
 
 
@@ -218,22 +236,23 @@ def check_bash(command: str, cwd: Path) -> None:
         # text (a commit message, a log search) but not through `-c`, whose
         # aliases, editor and pager run commands.
         leading = segment[: len(segment) - len(words)] if words else segment
-        if any(_CONFIRM_TEXT.search(w) for w in segment) and (
+        named = next((w for w in segment if _CANDIDATE_TEXT.search(w)), None)
+        if named is not None and (
             not words
             or Path(words[0]).name not in _MENTION_ONLY
             or _git_config_runs(words)
-            or any(_CONFIRM_TEXT.search(w) for w in leading)
+            or any(_CANDIDATE_TEXT.search(w) for w in leading)
         ):
             deny(
-                "`callback facts confirm` must be typed by the candidate in their own "
+                f"`callback {_named(named)}` must be typed by the candidate in their own "
                 "terminal, not run through another command"
             )
         if not words:
             continue
-        if _runs(words, ["callback", "facts", "confirm"]) or _runs(
-            words, ["-m", "core.cli", "facts", "confirm"]
-        ):
-            deny("`callback facts confirm` must be typed by the candidate in their own terminal")
+        for sub in _CANDIDATE_ONLY:
+            if _runs(words, ["callback", *sub]) or _runs(words, ["-m", "core.cli", *sub]):
+                named = " ".join(sub)
+                deny(f"`callback {named}` must be typed by the candidate in their own terminal")
         # A redirect turns any command into a write, so a segment with one is
         # never exempt: `ls > facts.yaml` truncates the file as surely as `echo`.
         redirects = any(">" in w for w in words)

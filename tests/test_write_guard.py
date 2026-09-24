@@ -292,3 +292,57 @@ def test_a_mention_passed_through_a_runner_is_refused_by_design(home: Path) -> N
     """The guard does not model what a runner runs, so it refuses the mention too."""
     result = run_guard(_bash('timeout 10 grep -rn "facts confirm" docs/'), home, cwd=home)
     assert denied(result)
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "callback notes activate n1",
+        "uv run --locked callback notes activate n1",
+        "uv run --no-project python -m core.cli notes activate n1",
+        'script -qec "callback notes activate n1" /dev/null',
+        '/bin/bash -c "callback notes activate n1"',
+        'watch -n 1 "callback notes activate n1"',
+        "C='callback notes activate n1'; script -qc \"$C\" /dev/null",
+        "git -c alias.x='!callback notes activate n1' x",
+    ],
+)
+def test_only_the_candidate_activates_a_note(home: Path, command: str) -> None:
+    """Refused wherever `facts confirm` is. Mutation: drop `notes activate`
+    from `_CANDIDATE_TEXT` -- every case but the command-position ones fails."""
+    result = run_guard(_bash(command), home, cwd=home)
+    assert denied(result), (command, result.stderr)
+    assert "notes activate" in result.stderr
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "sed -i s/proposed/active/ {home}/notes.yaml",
+        "cd {home} && python3 -c \"open('notes.yaml','a').write('x')\"",
+    ],
+)
+def test_the_notebook_is_not_edited_by_a_tool(home: Path, command: str) -> None:
+    (home / "notes.yaml").write_text("notes: []\n")
+    assert denied(run_guard(_bash(command.format(home=home)), home, cwd=home)), command
+
+
+def test_a_write_to_the_notebook_is_denied(home: Path) -> None:
+    (home / "notes.yaml").write_text("notes: []\n")
+    result = run_guard(_write(str(home / "notes.yaml")), home)
+    assert denied(result)
+    assert "only the candidate activates" in result.stderr
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "uv run callback notes retire n1",
+        "uv run callback notes list --all",
+        'grep -rn "notes activate" docs/',
+        'git commit -m "docs: explain notes activate"',
+    ],
+)
+def test_retiring_listing_and_mentioning_notes_is_allowed(home: Path, command: str) -> None:
+    result = run_guard(_bash(command), home, cwd=home)
+    assert result.returncode == 0, (command, result.stderr)
