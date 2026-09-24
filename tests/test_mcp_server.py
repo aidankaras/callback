@@ -174,3 +174,63 @@ def test_a_session_can_retire_a_note(tmp_path: Path, monkeypatch: pytest.MonkeyP
     call("notes_propose", {"kind": "preference", "text": "One page always"})
     retired = call("notes_retire", {"note_id": "n1"})
     assert retired.structured_content == {"id": "n1", "status": "retired"}  # type: ignore[attr-defined]
+
+
+PLANTED = "zqxplantedzqx"
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        f"db:\n  password: {PLANTED}\n",
+        f"token: {PLANTED}\nkey: [unclosed\n",
+        f"- {PLANTED}\n",
+    ],
+)
+def test_a_refusal_names_the_problem_without_quoting_the_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, body: str
+) -> None:
+    """A tool pointed at a file that is not a callback document refuses it with
+    the reason, never with its contents: otherwise `build(doc_path=<any file>)`
+    reads files the session's own permissions would not let it open."""
+    from mcp.server.mcpserver.exceptions import ToolError
+
+    monkeypatch.setenv("CALLBACK_HOME", str(tmp_path / "cb"))
+    ensure_home()
+    secret_file = tmp_path / "hosts.yml"
+    secret_file.write_text(body, encoding="utf-8")
+    assert PLANTED in secret_file.read_text()  # premise: the file holds it
+    calls: tuple[tuple[str, dict[str, object]], ...] = (
+        ("build", {"doc_path": str(secret_file), "job_id": "x"}),
+        ("letter", {"doc_path": str(secret_file)}),
+        ("answers", {"doc_path": str(secret_file)}),
+        ("outreach", {"doc_path": str(secret_file)}),
+    )
+    for tool, args in calls:
+        with pytest.raises(ToolError) as raised:
+            call(tool, args)
+        assert PLANTED not in str(raised.value), (tool, str(raised.value))
+        assert "zqxpl" not in str(raised.value), tool  # nor a truncated head of it
+    # `facts_add` refuses a file that is not a list, and reports each bad entry
+    # of one that is; neither may quote the file.
+    try:
+        text = str(call("facts_add", {"path": str(secret_file)}).structured_content)  # type: ignore[attr-defined]
+    except ToolError as exc:
+        text = str(exc)
+    assert PLANTED not in text and "zqxpl" not in text, text
+
+
+def test_a_corrupt_notebook_is_refused_without_quoting_a_note(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from mcp.server.mcpserver.exceptions import ToolError
+
+    monkeypatch.setenv("CALLBACK_HOME", str(tmp_path / "cb"))
+    ensure_home()
+    (tmp_path / "cb" / "notes.yaml").write_text(
+        f"notes:\n- {{id: n1, kind: nonsense, text: {PLANTED}}}\n", encoding="utf-8"
+    )
+    with pytest.raises(ToolError) as raised:
+        call("notes_list", {})
+    assert "kind" in str(raised.value)  # the reason survives
+    assert PLANTED not in str(raised.value) and "zqxpl" not in str(raised.value)

@@ -18,6 +18,7 @@ from typing import cast
 import yaml
 from pydantic import ValidationError
 
+from core.errors import validation_problems, yaml_problem
 from core.profile.models import Fact, Provenance, Trust
 from core.profile.store import StoreError, add_fact, load_facts, save_facts
 from core.terminal import NoTerminalError, Terminal, ask, connect
@@ -36,7 +37,7 @@ def add_from_file(path: Path) -> tuple[list[str], list[tuple[str, str]]]:
     try:
         parsed: object = yaml.safe_load(path.read_text(encoding="utf-8"))
     except yaml.YAMLError as exc:
-        raise StoreError(f"{path} is not valid YAML: {exc}") from exc
+        raise StoreError(f"{path} is {yaml_problem(exc)}") from exc
     if not isinstance(parsed, list):
         raise StoreError(f"{path} must contain a list of facts")
     # The boundary where this starts trusting the file's shape;
@@ -61,7 +62,11 @@ def add_from_file(path: Path) -> tuple[list[str], list[tuple[str, str]]]:
                 )
                 continue
             add_fact(fact)
-        except (ValidationError, StoreError) as exc:
+        except ValidationError as exc:
+            # The reason, not the entry: the file may be any file on the machine.
+            rejected.append((label, validation_problems(exc)))
+            continue
+        except StoreError as exc:
             rejected.append((label, str(exc)))
             continue
         added.append(fact.id)

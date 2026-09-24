@@ -20,10 +20,12 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Literal, cast
 
+import yaml
 from mcp.server.mcpserver import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 from pydantic import ValidationError
 
+from core.errors import validation_problems, yaml_problem
 from core.paths import ensure_home
 
 server = MCPServer(
@@ -46,6 +48,25 @@ def _explained(exc: Exception) -> bool:
     return type(exc).__module__.startswith("core.") or isinstance(exc, (ValidationError, OSError))
 
 
+def _reason(exc: BaseException) -> str:
+    """`exc`'s message, with every parse or validation error inside it
+    described by location and kind rather than by the input it quoted."""
+    message = str(exc)
+    link: BaseException | None = exc
+    while link is not None:
+        if isinstance(link, ValidationError):
+            clean = validation_problems(link)
+        elif isinstance(link, yaml.YAMLError):
+            clean = yaml_problem(link)
+        else:
+            clean = None
+        if clean is not None:
+            raw = str(link)
+            message = message.replace(raw, clean) if raw and raw in message else message
+        link = link.__cause__ or link.__context__
+    return message
+
+
 def _tool[**P, R](fn: Callable[P, R]) -> Callable[P, R]:
     """Register `fn` as a tool whose expected failures reach the model with their reason.
 
@@ -61,7 +82,7 @@ def _tool[**P, R](fn: Callable[P, R]) -> Callable[P, R]:
             return fn(*args, **kwargs)
         except Exception as exc:
             if _explained(exc):
-                raise ToolError(str(exc)) from exc
+                raise ToolError(_reason(exc)) from exc
             raise
 
     server.tool()(run)
