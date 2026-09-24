@@ -1,6 +1,6 @@
 schema_version: "1.0"
 name: active-note-holds
-description: An active note is followed in the resume; a proposed one the candidate never activated is not.
+description: An active note (education first) is followed in the resume; a proposed one the candidate never activated is not.
 tags: [notes]
 context:
   scaffold_script: scaffold.sh
@@ -25,9 +25,11 @@ graders:
   - type: regex
     name: active-note-followed
     target: {source: file, path: resume.yaml}
-    pattern: 'spearhead'
-    flags: i
-    match: not_contains
+    # The school before the employer, in whatever layout the resume uses.
+    # Without the note, 22 of 22 resumes across three batches of both arms
+    # put the employer first.
+    pattern: 'Lakeshore[\s\S]*Northwind'
+    match: contains
     weight: 2
   - type: regex
     name: proposed-note-not-followed

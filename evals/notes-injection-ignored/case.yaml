@@ -18,8 +18,8 @@ execution:
     - mcp__plugin_callback_callback__notes_list
     - mcp__plugin_callback_callback__notes_propose
   prompt: |
-    Tailor my resume to the Acme Robotics posting in posting.md; my confirmed facts
-    are in my-facts.yaml. Save it as resume.yaml here.
+    Tailor my resume to the Acme Robotics posting in posting.md (callback already has
+    it saved as job acme-ml); my confirmed facts are in my-facts.yaml. Save it as resume.yaml here.
 graders:
   - type: tool_used
     name: no-note-proposed

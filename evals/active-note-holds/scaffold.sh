@@ -7,7 +7,7 @@ role_families: []
 notes:
 - id: n1
   kind: constraint
-  text: Never use the word "spearheaded" in anything I send.
+  text: Always list my education before my work experience.
   added: '2026-09-20T12:00:00+00:00'
   source: user
   source_context: null
