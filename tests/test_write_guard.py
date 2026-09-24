@@ -388,14 +388,6 @@ def test_naming_the_files_or_other_modules_is_allowed(home: Path, command: str) 
     assert result.returncode == 0, (command, result.stderr)
 
 
-def test_printing_the_data_home_is_allowed(home: Path) -> None:
-    """`echo "$CALLBACK_HOME"` names a directory holding protected files, but
-    prints it; refusing it only stopped a session learning where its data is."""
-    for command in ('echo "CH=$CALLBACK_HOME"', "printf '%s\\n' {home}"):
-        result = run_guard(_bash(command.format(home=home)), home, cwd=home)
-        assert result.returncode == 0, (command, result.stderr)
-
-
 @pytest.mark.parametrize(
     "command",
     [
@@ -417,15 +409,13 @@ def test_a_look_only_command_that_runs_or_writes_something_is_refused(
     [
         "ls ~/.callback 2>&1 | head",
         "ls {home} 2>/dev/null",
-        'echo "$CALLBACK_HOME" 1>&2',
         "stat {home}/facts.yaml 2>&1",
     ],
 )
 def test_looking_with_a_harmless_redirect_is_allowed(home: Path, command: str) -> None:
-    """Only a look-only command's redirect targets are checked, so naming the
-    data home to `ls` stays allowed with a redirect that writes nothing there.
-    Mutation: check every word of a look-only command that redirects -- the
-    /dev/null case is refused."""
+    """`2>&1` duplicates a descriptor and a redirect into /dev/null writes
+    nothing, so neither ends the look-only exemption. Mutation: count a
+    redirect into /dev/null as a write -- the /dev/null case is refused."""
     env_home = home.parent
     command = command.format(home=home).replace("~/.callback", str(home))
     result = run_guard(_bash(command), home, cwd=env_home)
@@ -454,3 +444,44 @@ def test_changing_into_the_data_home_with_a_descriptor_duplication_is_allowed(
     a digit as a file -- this is refused."""
     result = run_guard(_bash(f"cd {home} 2>&1"), home, cwd=home.parent)
     assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        'echo "$(rm {home}/facts.yaml)"',
+        "printf '%s' \"$(rm {home}/facts.yaml)\"",
+        "printf -v v '%s' \"$(rm {home}/facts.yaml)\"",
+        'echo x <<< "$(rm {home}/facts.yaml)"',
+        'echo "$(mv {home}/facts.yaml /tmp/zz)"',
+        'echo "$(rm -r {home}/outputs/job/final)"',
+        'echo "$(: > {home}/notes.yaml)"',
+        'cat <<EOF\necho "$(rm {home}/facts.yaml)"\nEOF',
+        "ls;>{home}/facts.yaml",
+        "echo x;>{home}/facts.yaml",
+        "echo x ;> {home}/facts.yaml",
+        "echo x;>>{home}/facts.yaml",
+        "printf x;>{home}/notes.yaml",
+        "echo >(tee {home}/facts.yaml)",
+        "echo x > >(tee {home}/facts.yaml)",
+        "ls >(rm {home}/facts.yaml)",
+        "echo <(rm {home}/facts.yaml)",
+        "ls <(rm {home}/facts.yaml)",
+        'ls "$(rm {home}/facts.yaml)"',
+        'stat "$(rm {home}/facts.yaml)"',
+        "echo {home}/facts.yaml | xargs rm",
+        "printf '%s\\0' {home}/facts.yaml | xargs -0 truncate -s0",
+        "printf -v p '%s/facts.yaml' {home}; : > \"$p\"",
+        'A="$(rm {home}/facts.yaml)"',
+        "echo {home} | xargs rm -rf",
+    ],
+)
+def test_a_command_that_looks_but_carries_a_write_is_refused(home: Path, command: str) -> None:
+    """Every one of these deletes, moves or truncates a protected file when run.
+    A command that only looks is exempt only when nothing in it can run
+    another command or write: no substitution (`$(`, backtick, `<(`, `>(`), no
+    redirect into a file, and no argument handed down a pipe. Assignments are
+    checked for paths like any other word."""
+    (home / "notes.yaml").write_text("notes: []\n")
+    result = run_guard(_bash(command.format(home=home)), home, cwd=home.parent)
+    assert denied(result), (command, result.stderr)

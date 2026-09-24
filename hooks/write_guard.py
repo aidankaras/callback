@@ -32,10 +32,11 @@ session's working directory, every `cd` or `pushd` target, and any `-C` or
 `--directory` argument. A command naming a protected path is refused whether
 it reads or writes it -- telling the two apart in an arbitrary command is not
 reliable (`cat x | tee x`, `sed -n` against `sed -i`) and nothing needs the
-raw store, which `callback facts list` reads -- except `ls`, `stat`, `du`,
-`echo` and `printf`, which only look or print, unless an argument holds a
-backtick command, and the argument of a `-m` commit message. The commands only
-the candidate may run, `callback facts confirm` and `callback notes activate`,
+raw store, which `callback facts list` reads -- except `ls`, `stat` and `du`,
+which only look, unless the command substitutes another (`$(...)`, a
+backtick, `<(...)`) or redirects into a file -- and the argument of a `-m`
+commit message. The commands only the candidate may run, `callback facts
+confirm` and `callback notes activate`,
 are refused in command position, and anywhere else in a command except as the
 text a search or `git` is given. Any payload this script cannot read
 is denied: a guard that fails open would imply a guarantee it does not give.
@@ -79,9 +80,13 @@ SEALED_DIRS = {"final", "released"}
 GUARD_FILES = {Path(__file__).resolve(), Path(__file__).resolve().with_name("hooks.json")}
 
 _OPERATORS = {";", "&&", "||", "|", "&", "(", ")"}
-# Commands that only look or print: naming a protected path to one of these is
-# not a write -- `echo "$CALLBACK_HOME"` prints a directory it does not touch.
-_LOOK_ONLY = {"ls", "stat", "du", "echo", "printf"}
+# Commands that only look: naming a protected path to one of these is not a
+# write. `echo` and `printf` are not among them: what they print can be piped
+# into `xargs rm`.
+_LOOK_ONLY = {"ls", "stat", "du"}
+# Text that runs a command wherever it appears, quoted or not: `$(...)`, a
+# backtick, and process substitution `<(...)` and `>(...)`.
+_SUBSTITUTION = re.compile(r"`|[$<>]\(")
 _MESSAGE_FLAGS = {"-m", "--message"}
 
 
@@ -245,16 +250,49 @@ def _git_config_runs(words: list[str]) -> bool:
     )
 
 
-def _redirect_targets(words: list[str]) -> list[str]:
-    """The files `words` redirect output into. `2>&1` and `>&2` duplicate a
-    descriptor and name no file; `>& file` and `&> file` write one."""
-    return [
-        target
-        for op, target in pairwise(words)
-        if ">" in op
-        and set(op) <= set("<>&|")
-        and not (op == ">&" and (target.isdigit() or target == "-"))
-    ]
+def _writes(words: list[str]) -> bool:
+    """Whether `words` redirect output into a file. Any word holding `>` counts
+    -- `;>` and `>(` included -- except a descriptor duplication (`2>&1`) and a
+    redirect into /dev/null, which write nothing."""
+    for n, word in enumerate(words):
+        if ">" not in word:
+            continue
+        target = words[n + 1] if n + 1 < len(words) else ""
+        if word == ">&" and (target.isdigit() or target == "-"):
+            continue
+        if target == "/dev/null":
+            continue
+        return True
+    return False
+
+
+def _check_paths(words: list[str], bases: list[Path]) -> None:
+    local = list(bases)
+    checked: list[str] = []
+    skip_next = False
+    for n, word in enumerate(words):
+        if skip_next:
+            skip_next = False
+            continue
+        if word in _MESSAGE_FLAGS:
+            skip_next = True
+            continue
+        if word in {"-C", "--directory"} and n + 1 < len(words):
+            local += [base / _expand(words[n + 1]) for base in bases]
+        elif word.startswith("--directory="):
+            local += [base / _expand(word.split("=", 1)[1]) for base in bases]
+        checked.append(word)
+    for word in checked:
+        # A word may carry a path inside quotes or code, e.g. open('<path>','w').
+        candidates = {word, *re.findall(r"[\w~$./@+{}*?-]+", word)}
+        for candidate in candidates:
+            for base in local:
+                reason = protected(base / _expand(candidate))
+                if reason:
+                    deny(
+                        f"command names a protected path ({candidate}): {reason}; "
+                        "read facts with `callback facts list`"
+                    )
 
 
 def check_bash(command: str, cwd: Path) -> None:
@@ -285,6 +323,8 @@ def check_bash(command: str, cwd: Path) -> None:
                 "code that confirms facts or activates notes runs only as `callback`, "
                 "typed by the candidate; read with `callback facts list` or `notes list`"
             )
+        # An assignment runs what it substitutes: `A="$(rm facts.yaml)"`.
+        _check_paths(leading, bases)
         if not words:
             continue
         # By basename: `.venv/bin/callback` is the same command as `callback`.
@@ -296,46 +336,18 @@ def check_bash(command: str, cwd: Path) -> None:
                     "in their own terminal"
                 )
         # A redirect turns any command into a write: `ls > facts.yaml` truncates
-        # the file as surely as `echo`. `2>&1` names no file and writes nothing.
-        targets = _redirect_targets(words)
-        redirects = bool(targets)
+        # the file as surely as `echo`.
+        redirects = _writes(words)
         if words[0] in {"cd", "pushd"} and len(words) > 1:
             bases += [base / _expand(words[1]) for base in bases]
             if not redirects:
                 continue
-        # A backtick in an argument runs a command inside it: `ls \`rm x\``
-        # is an `rm`, whatever runs first.
-        substitutes = any("`" in w for w in words)
-        local = list(bases)
-        checked: list[str] = []
-        skip_next = False
-        # A command that only looks or prints writes only where it redirects,
-        # so only those targets are checked: `ls ~/.callback 2>/dev/null` looks.
-        look_only = words[0] in _LOOK_ONLY and not substitutes
-        scan = targets if look_only else words
-        for n, word in enumerate(scan):
-            if skip_next:
-                skip_next = False
-                continue
-            if word in _MESSAGE_FLAGS:
-                skip_next = True
-                continue
-            if word in {"-C", "--directory"} and n + 1 < len(scan):
-                local += [base / _expand(scan[n + 1]) for base in bases]
-            elif word.startswith("--directory="):
-                local += [base / _expand(word.split("=", 1)[1]) for base in bases]
-            checked.append(word)
-        for word in checked:
-            # A word may carry a path inside quotes or code, e.g. open('<path>','w').
-            candidates = {word, *re.findall(r"[\w~$./@+{}*?-]+", word)}
-            for candidate in candidates:
-                for base in local:
-                    reason = protected(base / _expand(candidate))
-                    if reason:
-                        deny(
-                            f"command names a protected path ({candidate}): {reason}; "
-                            "read facts with `callback facts list`"
-                        )
+        # A substitution runs a command inside the argument: `ls "$(rm x)"` is
+        # an `rm`, whatever runs first.
+        substitutes = any(_SUBSTITUTION.search(w) for w in segment)
+        if words[0] in _LOOK_ONLY and not redirects and not substitutes:
+            continue
+        _check_paths(words, bases)
 
 
 def main() -> int:
