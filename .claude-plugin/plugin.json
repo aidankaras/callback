@@ -11,5 +11,7 @@
     "job-search",
     "verification",
     "ats"
-  ]
+  ],
+  "repository": "https://github.com/aidankaras/callback",
+  "homepage": "https://github.com/aidankaras/callback#readme"
 }

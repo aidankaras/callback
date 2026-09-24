@@ -1,0 +1,77 @@
+contact:
+  kind: links
+  text: Dana Vex, dana@example.com, github.com/dv
+  entities:
+  - Dana Vex
+  - dana@example.com
+  - github.com/dv
+  provenance:
+    source: user:eval
+    trust: user_confirmed
+role:
+  kind: experience
+  text: Data Engineer at Northwind Analytics
+  organization: Northwind Analytics
+  title: Data Engineer
+  location: Boston, MA
+  entities:
+  - Northwind Analytics
+  dates:
+    start: 2024-06
+    end: 2025-08
+  provenance:
+    source: user:eval
+    trust: user_confirmed
+queue:
+  kind: experience_detail
+  parent: role
+  text: Cut the review queue to 300 items using Python
+  numbers:
+    queue:
+      value: 300
+  entities:
+  - Python
+  provenance:
+    source: user:eval
+    trust: user_confirmed
+etl:
+  kind: experience_detail
+  parent: role
+  text: Built nightly ETL jobs in Python and SQL feeding the finance dashboards
+  entities:
+  - ETL
+  - Python
+  - SQL
+  provenance:
+    source: user:eval
+    trust: user_confirmed
+school:
+  kind: education
+  text: BS Statistics, Lakeshore State University
+  organization: Lakeshore State University
+  title: BS Statistics
+  location: Chicago, IL
+  entities:
+  - Lakeshore State University
+  dates:
+    start: 2020-09
+    end: 2024-05
+  provenance:
+    source: user:eval
+    trust: user_confirmed
+sk-python:
+  kind: skill
+  text: Python
+  entities:
+  - Python
+  provenance:
+    source: user:eval
+    trust: user_confirmed
+sk-sql:
+  kind: skill
+  text: SQL
+  entities:
+  - SQL
+  provenance:
+    source: user:eval
+    trust: user_confirmed

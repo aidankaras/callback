@@ -1,0 +1,22 @@
+identity: {name: Dana Vex, email: dana@example.com}
+sections:
+- title: Experience
+  entries:
+  - heading: Northwind Analytics
+    subheading: Data Engineer
+    start: Jun 2024
+    end: Aug 2025
+    sources: [role]
+    bullets:
+    - {text: Cut the review queue to 300 items using Python, sources: [queue]}
+    - {text: Built nightly ETL jobs in Python and SQL feeding the finance dashboards, sources: [etl]}
+    - {text: Cut model-serving latency 40% by migrating the ETL jobs to Kubernetes, sources: [etl]}
+- title: Education
+  entries:
+  - heading: Lakeshore State University
+    subheading: BS Statistics
+    start: Sep 2020
+    end: May 2024
+    sources: [school]
+- title: Skills
+  skills: [Python, SQL, Kubernetes]

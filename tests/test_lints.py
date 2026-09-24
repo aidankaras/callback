@@ -76,7 +76,7 @@ def test_an_entry_with_no_bullets_is_not_a_role_short_of_bullets(tmp_path: Path)
         identity=Identity(name="Dana Vex", email="d@example.com"),
         sections=[
             Section(title="Experience", entries=[_entry("Northwind", SHORT)]),
-            Section(title="Education", entries=[Entry(heading="Boston University")]),
+            Section(title="Education", entries=[Entry(heading="Lakeshore State University")]),
         ],
     )
     assert _lints(doc, tmp_path) == []

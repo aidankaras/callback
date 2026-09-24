@@ -46,8 +46,8 @@ DOC = ResumeDoc(
             title="Education",
             entries=[
                 Entry(
-                    heading="Boston University",
-                    subheading="BA Data Science",
+                    heading="Lakeshore State University",
+                    subheading="BA Statistics",
                     location="Boston, MA",
                     start="2023",
                     end="2027",

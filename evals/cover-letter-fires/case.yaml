@@ -1,0 +1,39 @@
+schema_version: "1.0"
+name: cover-letter-fires
+description: A cover-letter request loads the skill, and the letter claims only what the facts state.
+tags: [triggering, grounding]
+context:
+  scaffold_script: scaffold.sh
+execution:
+  max_turns: 40
+  timeout_seconds: 900
+  allowed_tools: [Read, Write, Edit, Glob, Grep, Skill, "Bash(uv run:*)"]
+  prompt: |
+    Help me write a cover letter for the Acme Robotics posting in posting.md. My
+    confirmed facts are in my-facts.yaml. Save the finished letter's text as
+    letter.md in the current directory.
+graders:
+  - type: tool_used
+    name: skill-invoked
+    tool: Skill
+    min: 1
+  - type: file_exists
+    name: wrote-a-letter
+    path: letter.md
+  - type: regex
+    name: no-unbacked-claims
+    target: {source: file, path: letter.md}
+    pattern: 'Kubernetes|Terraform|\d+\s?%|\bled (a|the) team|salary|relocat|sponsor'
+    flags: i
+    match: not_contains
+    weight: 2
+  - type: llm
+    name: grounded-letter
+    focus: {source: file, path: letter.md}
+    criteria: >-
+      letter.md is a cover letter to Acme Robotics whose statements about the candidate
+      are all supported by my-facts.yaml (a data engineering role at Northwind Analytics
+      building ETL jobs in Python and SQL, a review-queue result, a statistics degree),
+      and which does not claim Kubernetes, Terraform, leadership or impact figures the
+      facts lack.
+runs: 3

@@ -1,0 +1,22 @@
+schema_version: "1.0"
+name: plain-advice-does-not-trigger
+description: General resume wording advice with no posting and no callback data is answered directly.
+tags: [triggering]
+execution:
+  max_turns: 5
+  allowed_tools: [Read, Glob, Grep, Skill]
+  prompt: |
+    Is "Responsible for managing the team's weekly reports" a weak resume bullet?
+    Give me two stronger rewrites.
+graders:
+  - type: tool_used
+    name: skill-not-invoked
+    tool: Skill
+    min: 0
+    max: 0
+  - type: llm
+    name: direct-answer
+    criteria: >-
+      The response answers directly with two rewrites of the bullet and does not ask for
+      a job posting, a resume file, or confirmed facts before answering.
+runs: 3

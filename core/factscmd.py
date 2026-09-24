@@ -8,9 +8,12 @@ unconfirmed, and `confirm` is the only way across that line.
 `confirm` reads its answers from the controlling terminal, `/dev/tty`, not
 from standard input. A process with no terminal -- an agent's shell, a pipe,
 a scheduled job -- cannot open it, so it cannot confirm a fact on the
-candidate's behalf, even by piping "y" into the command. That is a guard
-against *accidental* confirmation. It is not a security boundary against a
-process that can edit the store's file directly.
+candidate's behalf, even by piping "y" into the command. A process can obtain
+one, though: `script` or `unbuffer` hands a child a pseudo-terminal, under which
+`/dev/tty` opens. The plugin's write guard refuses `confirm` run through such a
+wrapper. Together that is a guard against *accidental* confirmation, or
+confirmation an assistant is talked into. It is not a security boundary against
+a process built to get round it, or one that edits the store's file directly.
 """
 
 from __future__ import annotations

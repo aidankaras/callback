@@ -136,3 +136,68 @@ def test_fit_reports_coverage_and_exits_on_the_verdict(
     assert "KNOCKOUT" in out and "33% of what it names" in out
     assert "have     Python  (py)" in out
     assert "missing  Kubernetes" in out and "missing  Machine Learning" in out
+
+
+def test_a_damaged_fact_store_is_reported_not_raised(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A store that fails to load exits 3 with one line, not a traceback that echoes every fact."""
+    home = tmp_path / "cb"
+    home.mkdir(mode=0o700)
+    (home / "facts.yaml").write_text("- id: secret-fact\n  text: Private detail\n")
+    monkeypatch.setenv("CALLBACK_HOME", str(home))
+    out = subprocess.run(
+        [sys.executable, "-m", "core.cli", "facts", "list"],
+        capture_output=True,
+        text=True,
+    )
+    assert out.returncode == 3
+    assert "Traceback" not in out.stderr
+    assert "callback: " in out.stderr and "must contain a mapping" in out.stderr
+    assert "Private detail" not in out.stderr
+
+
+def test_a_fact_that_fails_validation_is_reported_without_its_values(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    home = tmp_path / "cb"
+    home.mkdir(mode=0o700)
+    (home / "facts.yaml").write_text(
+        "x:\n  kind: skill\n  text: Private detail\n"
+        "  provenance: {source: u, trust: user_confirmed}\n  entities: Private list\n"
+    )
+    monkeypatch.setenv("CALLBACK_HOME", str(home))
+    out = subprocess.run(
+        [sys.executable, "-m", "core.cli", "facts", "list"], capture_output=True, text=True
+    )
+    assert out.returncode == 3
+    assert "no longer validates" in out.stderr and "entities" in out.stderr
+    assert "Private" not in out.stderr
+
+
+@pytest.mark.parametrize(
+    "store",
+    [
+        "a:\n  text: Private detail: [unclosed\n",
+        "a: *Private\n",
+        "a:\n\ttext: Private\n",
+        "a:\n  kind: skill\n  text: t\n  provenance: {source: u, trust: user_confirmed}\n"
+        "  numbers: {Private: nope}\n",
+        "a:\n  kind: skill\n  text: t\n  provenance: {source: u, trust: user_confirmed}\n"
+        "  Private: 1\n",
+    ],
+)
+def test_no_damaged_store_echoes_what_it_holds(
+    store: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """YAML errors quote the offending line and pydantic paths carry user-written keys."""
+    home = tmp_path / "cb"
+    home.mkdir(mode=0o700)
+    (home / "facts.yaml").write_text(store)
+    monkeypatch.setenv("CALLBACK_HOME", str(home))
+    out = subprocess.run(
+        [sys.executable, "-m", "core.cli", "facts", "list"], capture_output=True, text=True
+    )
+    assert out.returncode == 3, out.stderr
+    assert out.stderr.startswith("callback: ")
+    assert "Private" not in out.stderr

@@ -17,7 +17,7 @@ def fact(fid: str, **kw: object) -> Fact:
     return Fact.model_validate(body)
 
 
-# --- brief cases -----------------------------------------------------------
+# --- core cases -----------------------------------------------------------
 
 
 def test_literal_number_passes() -> None:
@@ -884,3 +884,77 @@ def test_a_year_precision_date_covers_its_whole_year() -> None:
     f = fact("a", dates=Dates(start="2018", end="2024", precision="year"))
     assert check_bullet("Shipped it in Mar 2024", [f])[1] == []
     assert check_bullet("Shipped it in Mar 2025", [f])[1] != []
+
+
+# --- technologies: mentions, compounds and English collisions --------------
+
+
+def test_identifier_in_fact_text_but_not_entities_fails_with_the_fix_named() -> None:
+    """A verbatim bullet still fails -- a mention is not use -- but says how to fix the fact."""
+    f = fact("etl", text="Built nightly ETL jobs in Python and SQL", entities=["Python", "SQL"])
+    verdict, findings = check_bullet("Built nightly ETL jobs in Python and SQL", [f])
+    assert verdict is Verdict.FAIL
+    assert [x.kind for x in findings] == ["unknown_entity"]
+    assert "'ETL'" in findings[0].detail
+    assert "in a cited fact's text but not its entities" in findings[0].detail
+
+
+def test_absent_identifier_keeps_the_plain_message() -> None:
+    f = fact("etl", text="Built nightly jobs", entities=[])
+    _, findings = check_bullet("Built nightly ETL jobs", [f])
+    assert findings[0].detail.endswith("appears in no cited fact")
+
+
+def test_a_negated_mention_in_fact_text_does_not_back_the_technology() -> None:
+    f = fact("m", text="Migrated services off AWS to GCP", entities=["GCP"])
+    verdict, _ = check_bullet("Deployed services on AWS", [f])
+    assert verdict is Verdict.FAIL
+
+
+def test_a_technology_name_that_is_an_english_fragment_is_not_backed_by_prose() -> None:
+    f = fact("r", text="Built forecasting models for the R&D group", entities=["Python"])
+    verdict, _ = check_bullet("Built forecasting models in R", [f])
+    assert verdict is Verdict.FAIL
+
+
+@pytest.mark.parametrize(
+    "bullet", ["Deployed AWS-hosted services", "Deployed Kubernetes-native services"]
+)
+def test_uncited_technology_hidden_in_a_hyphenated_compound_fails(bullet: str) -> None:
+    """A suffix like '-hosted' must not make an uncited technology invisible to the check."""
+    f = fact("d", text="Deployed services", entities=[])
+    verdict, findings = check_bullet(bullet, [f])
+    assert verdict is Verdict.FAIL
+    assert [x.kind for x in findings] == ["unknown_entity"]
+
+
+def test_cited_technology_in_a_hyphenated_compound_passes() -> None:
+    f = fact("d", text="Deployed services on Kubernetes", entities=["Kubernetes"])
+    verdict, findings = check_bullet("Deployed Kubernetes-native services", [f])
+    assert verdict is Verdict.PASS, findings
+
+
+@pytest.mark.parametrize(
+    ("bullet", "text"),
+    [
+        ("Improved model R-squared on held-out data", "Improved model fit on held-out data"),
+        ("Partnered with US-based clients", "Partnered with clients"),
+    ],
+)
+def test_ordinary_hyphenated_english_is_not_read_as_a_technology(bullet: str, text: str) -> None:
+    verdict, findings = check_bullet(bullet, [fact("e", text=text, entities=[])])
+    assert verdict is Verdict.PASS, findings
+
+
+def test_the_fix_message_names_text_only_when_the_text_states_the_token() -> None:
+    """A token found only in a structured field ('Boston, MA') is not reported as in the text."""
+    f = fact(
+        "r",
+        kind=FactKind.EXPERIENCE,
+        text="Data Engineer at Northwind",
+        organization="Northwind",
+        title="Data Engineer",
+        location="Boston, MA",
+    )
+    _, findings = check_bullet("Ran pipelines across MA sites", [f])
+    assert findings[0].detail.endswith("appears in no cited fact")

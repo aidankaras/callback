@@ -7,6 +7,10 @@ __pycache__/
 *.pdf
 *.txt.out
 inbox/
+!/evals/persona/home/inbox/
 outputs/
 .callback/
 .pytest_cache/
+.logs/
+evals/results/
+.claude/settings.local.json

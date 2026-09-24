@@ -893,7 +893,13 @@ def main(argv: list[str] | None = None) -> int:
     if args.handler is None:
         parser.print_help()
         return 0
-    result: int = args.handler(args)
+    from core.profile.store import StoreError
+
+    try:
+        result: int = args.handler(args)
+    except StoreError as exc:
+        print(f"callback: {exc}", file=sys.stderr)
+        return 3
     return result
 
 

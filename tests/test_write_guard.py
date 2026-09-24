@@ -238,3 +238,57 @@ def test_a_wildcard_inside_the_data_home_is_refused(home: Path, command: str) ->
 def test_a_wildcard_outside_the_data_home_is_allowed(home: Path, tmp_path: Path) -> None:
     result = run_guard(_bash(f"rm {tmp_path}/scratch/*.pdf"), home)
     assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        'script -qec "uv run callback facts confirm probe" /dev/null',
+        "timeout 30 script -qc 'callback facts confirm' /dev/null",
+        'bash -c "callback facts confirm"',
+        "python3 -c \"import pty; pty.spawn(['callback', 'facts', 'confirm'])\"",
+        'tmux send-keys "callback facts confirm" Enter',
+        'unbuffer sh -c "uv run --project /repo callback facts confirm"',
+        '/bin/bash -c "callback facts confirm"',
+        '/usr/bin/env script -qc "callback facts confirm" /dev/null',
+        './script -qc "callback facts confirm" /dev/null',
+        'watch "callback facts confirm"',
+        'flock /tmp/l bash -c "callback facts confirm"',
+        'find . -exec bash -c "callback facts confirm" \\;',
+        "awk 'BEGIN{system(\"callback facts confirm\")}'",
+        'uv run --locked bash -c "callback facts confirm"',
+        "C='callback facts confirm'; script -qc \"$C\" /dev/null",
+        "C='callback facts confirm' script -qc '$C' /dev/null",
+        "GIT_EDITOR='script -qc \"callback facts confirm\" /dev/null' git commit",
+        "git -c core.editor='script -qc \"callback facts confirm\" /dev/null' commit",
+        "git -c alias.x='!callback facts confirm' x",
+    ],
+)
+def test_confirm_run_through_a_pseudo_terminal_wrapper_is_denied(home: Path, command: str) -> None:
+    """`script` gives a child a terminal, so `/dev/tty` opens and confirm succeeds without the user.
+
+    Each command hides `facts confirm` inside one quoted word, where the
+    command-position check cannot see it.
+    """
+    result = run_guard(_bash(command), home, cwd=home)
+    assert denied(result), (command, result.stderr)
+    assert "not run through another command" in result.stderr
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        'rg -n "facts confirm" docs/',
+        'git log --grep "facts confirm"',
+        'git commit -m "docs: explain facts confirm"',
+    ],
+)
+def test_a_search_or_commit_may_mention_confirm(home: Path, command: str) -> None:
+    result = run_guard(_bash(command), home, cwd=home)
+    assert result.returncode == 0, (command, result.stderr)
+
+
+def test_a_mention_passed_through_a_runner_is_refused_by_design(home: Path) -> None:
+    """The guard does not model what a runner runs, so it refuses the mention too."""
+    result = run_guard(_bash('timeout 10 grep -rn "facts confirm" docs/'), home, cwd=home)
+    assert denied(result)

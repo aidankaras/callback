@@ -31,10 +31,14 @@ it reads or writes it -- telling the two apart in an arbitrary command is not
 reliable (`cat x | tee x`, `sed -n` against `sed -i`) and nothing needs the
 raw store, which `callback facts list` reads -- except `ls`, `stat` and `du`,
 which only look, and the argument of a `-m` commit message. `callback facts
-confirm` is refused in command position. Any payload this script cannot read
+confirm` is refused in command position, and anywhere else in a command
+except as the text a search or `git` is given. Any payload this script cannot read
 is denied: a guard that fails open would imply a guarantee it does not give.
 
-Bash guarding is defence in depth, not containment. A shell is a general
+Bash guarding is defence in depth, not containment. For `facts confirm` in
+particular, a phrase split across words (`conf''irm`, a variable holding only
+`confirm`) or a script written to a file and then run is not caught; the
+guard stops an assistant steered into running confirm, not one set on it. A shell is a general
 tool, and a command that builds a path at run time -- from a variable other
 than `CALLBACK_HOME`, from `find`, from an encoded string -- is not caught.
 It stops an assistant *accidentally* writing a protected file, which is the
@@ -51,6 +55,7 @@ import os
 import re
 import shlex
 import sys
+from itertools import pairwise
 from pathlib import Path
 
 WRITE_TOOLS = {"Write", "Edit", "MultiEdit", "NotebookEdit"}
@@ -183,10 +188,46 @@ def _runs(words: list[str], wanted: list[str]) -> bool:
     return any(words[i : i + len(wanted)] == wanted for i in range(len(words) - len(wanted) + 1))
 
 
+# `callback facts confirm` can also run as text another command is handed:
+# `script -qc "..."` gives it a pseudo-terminal, under which `/dev/tty` opens
+# and confirmation succeeds with no one at the keyboard, and `bash -c`,
+# `watch`, `flock`, `find -exec` or `awk`'s `system()` run it the same way.
+# Listing the runners cannot be complete, so the rule is inverted: a word
+# naming `facts confirm` is allowed only in a command that merely mentions
+# text, and refused everywhere else. That also refuses a harmless
+# `timeout 10 grep "facts confirm"`; the guard does not model what a runner
+# runs.
+_MENTION_ONLY = frozenset({"grep", "egrep", "fgrep", "rg", "git"})
+_CONFIRM_TEXT = re.compile(r"facts\W{1,6}confirm", re.IGNORECASE)
+
+
+def _git_config_runs(words: list[str]) -> bool:
+    """Whether a `git` command sets config that names confirm (`-c alias.x=!...`)."""
+    return Path(words[0]).name == "git" and any(
+        w in {"-c", "--config-env"} and _CONFIRM_TEXT.search(nxt) for w, nxt in pairwise(words)
+    )
+
+
 def check_bash(command: str, cwd: Path) -> None:
     bases = [cwd]
     for segment in _segments(command):
         words = _command_words(segment)
+        # The raw segment, assignments included: `C='callback facts confirm';
+        # script -qc "$C"` carries the command in a variable, and a leading
+        # `GIT_EDITOR=...` runs it. `git` is exempt as a place to mention the
+        # text (a commit message, a log search) but not through `-c`, whose
+        # aliases, editor and pager run commands.
+        leading = segment[: len(segment) - len(words)] if words else segment
+        if any(_CONFIRM_TEXT.search(w) for w in segment) and (
+            not words
+            or Path(words[0]).name not in _MENTION_ONLY
+            or _git_config_runs(words)
+            or any(_CONFIRM_TEXT.search(w) for w in leading)
+        ):
+            deny(
+                "`callback facts confirm` must be typed by the candidate in their own "
+                "terminal, not run through another command"
+            )
         if not words:
             continue
         if _runs(words, ["callback", "facts", "confirm"]) or _runs(

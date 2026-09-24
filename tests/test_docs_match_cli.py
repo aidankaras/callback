@@ -16,9 +16,23 @@ from typing import cast
 
 from core.cli import build_parser
 
-DOCS = ("README.md", "docs/using-callback.md", "docs/limitations.md", "skills/tailor/SKILL.md")
-MENTION = re.compile(r"`(?:uv run --project <repo root> )?callback ([a-z-]+)(?: ([a-z-]+))?")
 ROOT = Path(__file__).resolve().parent.parent
+SKILL_REFERENCES = sorted(
+    str(p.relative_to(ROOT)) for p in (ROOT / "skills/tailor/references").glob("*.md")
+)
+DOCS = (
+    "README.md",
+    "docs/using-callback.md",
+    "docs/limitations.md",
+    "skills/tailor/SKILL.md",
+    *SKILL_REFERENCES,
+)
+MENTION = re.compile(r"`(?:uv run --project <repo root> )?callback ([a-z-]+)(?: ([a-z-]+))?")
+
+
+def test_the_skill_reference_files_are_scanned() -> None:
+    """The skill loads these on demand; a command named only there must still exist."""
+    assert len(SKILL_REFERENCES) >= 5, SKILL_REFERENCES
 
 
 def _subcommands(parser: argparse.ArgumentParser) -> dict[str, argparse.ArgumentParser]:

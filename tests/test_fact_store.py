@@ -198,8 +198,8 @@ def test_sensitive_derivation_label_is_rejected() -> None:
 
 
 def test_ordinary_entities_are_not_rejected() -> None:
-    add_fact(_fact(id="ok.1", entities=["Boston University", "Python"]))
-    assert load_facts()["ok.1"].entities == ["Boston University", "Python"]
+    add_fact(_fact(id="ok.1", entities=["Lakeshore State University", "Python"]))
+    assert load_facts()["ok.1"].entities == ["Lakeshore State University", "Python"]
 
 
 def test_absent_fact_records_a_declined_gap() -> None:
