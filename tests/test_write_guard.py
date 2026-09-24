@@ -346,3 +346,43 @@ def test_a_write_to_the_notebook_is_denied(home: Path) -> None:
 def test_retiring_listing_and_mentioning_notes_is_allowed(home: Path, command: str) -> None:
     result = run_guard(_bash(command), home, cwd=home)
     assert result.returncode == 0, (command, result.stderr)
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "uv run python -c \"from core.notes import activate; activate('n1', open_tty=T)\"",
+        "uv run python -c 'import core.notes as m; m._save(m.load())'",
+        'uv run python -c "from core.factscmd import confirm"',
+        'uv run python -c "from core.profile import store; store.save_facts({})"',
+        'uv run python -c "from core import cli, notes"',
+    ],
+)
+def test_code_that_decides_for_the_candidate_is_not_run_by_a_tool(home: Path, command: str) -> None:
+    """`activate` accepts any terminal it is handed, and the stores save whatever
+    they are given: importing them is running `notes activate` or `facts confirm`
+    without the words. Mutation: drop `_CANDIDATE_CODE`'s check -- all fail."""
+    result = run_guard(_bash(command), home, cwd=home)
+    assert denied(result), (command, result.stderr)
+
+
+@pytest.mark.parametrize(
+    "command",
+    [".venv/bin/callback notes activate n1", "/usr/local/bin/callback facts confirm f1"],
+)
+def test_a_candidate_only_command_is_refused_by_any_path(home: Path, command: str) -> None:
+    assert denied(run_guard(_bash(command), home, cwd=home)), command
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "uv run pytest -q tests/test_notes.py",
+        "uv run ruff check core/notes.py",
+        'grep -rn "from core.notes import" core',
+        'uv run python -c "from core.insights import render"',
+    ],
+)
+def test_naming_the_files_or_other_modules_is_allowed(home: Path, command: str) -> None:
+    result = run_guard(_bash(command), home, cwd=home)
+    assert result.returncode == 0, (command, result.stderr)

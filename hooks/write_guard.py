@@ -42,8 +42,9 @@ is denied: a guard that fails open would imply a guarantee it does not give.
 Bash guarding is defence in depth, not containment. For the candidate-only
 commands in particular, a phrase split across words (`conf''irm`, a variable
 holding only `activate`) or a script written to a file and then run is not
-caught; the guard stops an assistant steered into running them, not one set
-on it. A shell is a general tool, and a command that builds a path at run
+caught, and neither is Python that imports the modules behind them under
+another name; the guard stops an assistant steered into running them, not one
+set on it. A shell is a general tool, and a command that builds a path at run
 time -- from a variable other than `CALLBACK_HOME`, from `find`, from an
 encoded string -- is not caught.
 It stops an assistant *accidentally* writing a protected file, which is the
@@ -212,6 +213,17 @@ _CANDIDATE_ONLY = (("facts", "confirm"), ("notes", "activate"))
 _CANDIDATE_TEXT = re.compile(r"facts\W{1,6}confirm|notes\W{1,6}activate", re.IGNORECASE)
 
 
+# The modules that can change what only the candidate decides, named as Python
+# imports them: `python -c "from core.notes import activate; ..."` can hand
+# `activate` a fake terminal, and `core.profile.store` can save a confirmed
+# fact, without the words the pattern above looks for. Refused on the same
+# terms. Paths (`core/notes.py`) are not matched: naming the file runs nothing.
+_CANDIDATE_CODE = re.compile(
+    r"\bcore\.(?:notes|factscmd|profile\.store)\b"
+    r"|\bfrom\s+core(?:\.profile)?\s+import\b[^;]*\b(?:notes|factscmd|store)\b"
+)
+
+
 def _named(text: str) -> str:
     """The candidate-only command `text` names, as its words after `callback`."""
     found = _CANDIDATE_TEXT.search(text)
@@ -220,9 +232,10 @@ def _named(text: str) -> str:
 
 def _git_config_runs(words: list[str]) -> bool:
     """Whether a `git` command sets config that names a candidate-only command
-    (`-c alias.x=!...`)."""
+    or module (`-c alias.x=!...`)."""
     return Path(words[0]).name == "git" and any(
-        w in {"-c", "--config-env"} and _CANDIDATE_TEXT.search(nxt) for w, nxt in pairwise(words)
+        w in {"-c", "--config-env"} and (_CANDIDATE_TEXT.search(nxt) or _CANDIDATE_CODE.search(nxt))
+        for w, nxt in pairwise(words)
     )
 
 
@@ -237,20 +250,29 @@ def check_bash(command: str, cwd: Path) -> None:
         # aliases, editor and pager run commands.
         leading = segment[: len(segment) - len(words)] if words else segment
         named = next((w for w in segment if _CANDIDATE_TEXT.search(w)), None)
-        if named is not None and (
-            not words
-            or Path(words[0]).name not in _MENTION_ONLY
-            or _git_config_runs(words)
-            or any(_CANDIDATE_TEXT.search(w) for w in leading)
-        ):
+        code = next((w for w in segment if _CANDIDATE_CODE.search(w)), None)
+        mention_only = (
+            bool(words)
+            and Path(words[0]).name in _MENTION_ONLY
+            and not _git_config_runs(words)
+            and not any(_CANDIDATE_TEXT.search(w) or _CANDIDATE_CODE.search(w) for w in leading)
+        )
+        if named is not None and not mention_only:
             deny(
                 f"`callback {_named(named)}` must be typed by the candidate in their own "
                 "terminal, not run through another command"
             )
+        if code is not None and not mention_only:
+            deny(
+                "code that confirms facts or activates notes runs only as `callback`, "
+                "typed by the candidate; read with `callback facts list` or `notes list`"
+            )
         if not words:
             continue
+        # By basename: `.venv/bin/callback` is the same command as `callback`.
+        names = [Path(w).name for w in words]
         for sub in _CANDIDATE_ONLY:
-            if _runs(words, ["callback", *sub]) or _runs(words, ["-m", "core.cli", *sub]):
+            if _runs(names, ["callback", *sub]) or _runs(names, ["-m", "core.cli", *sub]):
                 named = " ".join(sub)
                 deny(f"`callback {named}` must be typed by the candidate in their own terminal")
         # A redirect turns any command into a write, so a segment with one is
