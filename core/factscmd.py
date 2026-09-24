@@ -5,38 +5,26 @@ candidate confirmed it (`Fact.selectable`). Everything else -- a fact drafted
 from an imported resume, or by an assistant from an answer -- starts
 unconfirmed, and `confirm` is the only way across that line.
 
-`confirm` reads its answers from the controlling terminal, `/dev/tty`, not
-from standard input. A process with no terminal -- an agent's shell, a pipe,
-a scheduled job -- cannot open it, so it cannot confirm a fact on the
-candidate's behalf, even by piping "y" into the command. A process can obtain
-one, though: `script` or `unbuffer` hands a child a pseudo-terminal, under which
-`/dev/tty` opens. The plugin's write guard refuses `confirm` run through such a
-wrapper. Together that is a guard against *accidental* confirmation, or
-confirmation an assistant is talked into. It is not a security boundary against
-a process built to get round it, or one that edits the store's file directly.
+`confirm` reads its answers from the candidate's own terminal; see
+`core.terminal` for what that does and does not guarantee.
 """
 
 from __future__ import annotations
 
-import errno
+import re
 from collections.abc import Callable
 from pathlib import Path
-from typing import Protocol, cast
+from typing import cast
 
 import yaml
 from pydantic import ValidationError
 
+from core.errors import validation_problems, yaml_problem
 from core.profile.models import Fact, Provenance, Trust
 from core.profile.store import StoreError, add_fact, load_facts, save_facts
+from core.terminal import NoTerminalError, Terminal, ask, connect
 
-
-class Terminal(Protocol):
-    """What confirmation needs from a terminal."""
-
-    def write(self, s: str, /) -> int: ...
-    def readline(self, size: int = -1, /) -> str: ...
-    def flush(self) -> None: ...
-    def close(self) -> None: ...
+_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}")
 
 
 class ConfirmError(RuntimeError):
@@ -52,7 +40,7 @@ def add_from_file(path: Path) -> tuple[list[str], list[tuple[str, str]]]:
     try:
         parsed: object = yaml.safe_load(path.read_text(encoding="utf-8"))
     except yaml.YAMLError as exc:
-        raise StoreError(f"{path} is not valid YAML: {exc}") from exc
+        raise StoreError(f"{path} is {yaml_problem(exc)}") from exc
     if not isinstance(parsed, list):
         raise StoreError(f"{path} must contain a list of facts")
     # The boundary where this starts trusting the file's shape;
@@ -62,7 +50,9 @@ def add_from_file(path: Path) -> tuple[list[str], list[tuple[str, str]]]:
     rejected: list[tuple[str, str]] = []
     for position, body in enumerate(bodies):
         fid = cast("dict[str, object]", body).get("id") if isinstance(body, dict) else None
-        label = str(fid) if fid is not None else f"#{position}"
+        # An entry's own id only when it looks like one: the file may be any
+        # file on the machine, and its "id" any value in it.
+        label = fid if isinstance(fid, str) and _ID.fullmatch(fid) else f"#{position}"
         try:
             fact = Fact.model_validate(body)
             if fact.selectable():
@@ -77,53 +67,15 @@ def add_from_file(path: Path) -> tuple[list[str], list[tuple[str, str]]]:
                 )
                 continue
             add_fact(fact)
-        except (ValidationError, StoreError) as exc:
+        except ValidationError as exc:
+            # The reason, not the entry: the file may be any file on the machine.
+            rejected.append((label, validation_problems(exc)))
+            continue
+        except StoreError as exc:
             rejected.append((label, str(exc)))
             continue
         added.append(fact.id)
     return added, rejected
-
-
-class _Tty:
-    """The controlling terminal, as separate read and write handles.
-
-    A single `"r+"` text handle on `/dev/tty` cannot be opened at all: text
-    mode in read-write requires a seekable stream, and a terminal is not one,
-    so `open` raises `io.UnsupportedOperation` -- which is an `OSError`, and
-    would read as "no terminal" to anything catching that.
-    """
-
-    def __init__(self) -> None:
-        self._read = Path("/dev/tty").open(encoding="utf-8")  # noqa: SIM115 -- closed in close()
-        try:
-            self._write = Path("/dev/tty").open("w", encoding="utf-8")  # noqa: SIM115
-        except BaseException:
-            self._read.close()
-            raise
-
-    def write(self, s: str, /) -> int:
-        return self._write.write(s)
-
-    def readline(self, size: int = -1, /) -> str:
-        return self._read.readline(size)
-
-    def flush(self) -> None:
-        self._write.flush()
-
-    def close(self) -> None:
-        self._write.close()
-        self._read.close()
-
-
-# The errors that mean "this process has no controlling terminal". Anything
-# else opening /dev/tty is a real failure and is raised as itself.
-_NO_TERMINAL = {errno.ENXIO, errno.ENOENT}
-
-
-def _open_terminal() -> Terminal:
-    # Closed by `confirm` in its own `finally`. Looked up at call time, not
-    # bound as a default argument, so replacing it replaces every caller's.
-    return _Tty()
 
 
 def _confirmed(fact: Fact) -> Fact:
@@ -136,22 +88,6 @@ def _confirmed(fact: Fact) -> Fact:
             )
         }
     )
-
-
-def _ask(tty: Terminal) -> str:
-    """One of "y", "n" or "q". An unrecognised answer is asked again rather
-    than read as "no"; end of input is "q", so a closed terminal stops the
-    loop instead of spinning on empty reads."""
-    while True:
-        tty.write("True as written? [y]es / [n]o / [q]uit: ")
-        tty.flush()
-        line = tty.readline()
-        if not line:
-            return "q"
-        answer = line.strip().casefold()
-        if answer in {"y", "n", "q"}:
-            return answer
-        tty.write("Please answer y, n or q.\n")
 
 
 def confirm(ids: list[str], *, open_tty: Callable[[], Terminal] | None = None) -> list[str]:
@@ -185,13 +121,10 @@ def confirm(ids: list[str], *, open_tty: Callable[[], Terminal] | None = None) -
         return []
 
     try:
-        tty = (open_tty or _open_terminal)()
-    except OSError as exc:
-        if exc.errno not in _NO_TERMINAL:
-            raise
+        tty = connect(open_tty)
+    except NoTerminalError as exc:
         raise ConfirmError(
-            "confirmation must be typed by the candidate in a terminal "
-            f"(could not open /dev/tty: {exc.strerror or exc})"
+            f"confirmation must be typed by the candidate in a terminal ({exc})"
         ) from exc
 
     shown: dict[str, Fact] = {}
@@ -202,7 +135,7 @@ def confirm(ids: list[str], *, open_tty: Callable[[], Terminal] | None = None) -
                 tty.write(f"  numbers: {fact.model_dump(mode='json')['numbers']}\n")
             if fact.dates:
                 tty.write(f"  dates: {fact.dates.start} .. {fact.dates.end or 'present'}\n")
-            answer = _ask(tty)
+            answer = ask(tty, "True as written?")
             if answer == "q":
                 break
             if answer == "y":

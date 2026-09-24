@@ -122,6 +122,12 @@ def build(doc_path: Path, job_id: str) -> BuildResult:
             {"gate": o.gate, "verdict": o.verdict, "findings": list(o.findings)}
             for o in report.outcomes
         ],
+        # Per-fact grounding failures, which `core.recurring` reads across jobs.
+        "fact_findings": [
+            {"kind": f.kind, "facts": list(f.facts), "detail": f.detail}
+            for o in report.outcomes
+            for f in o.fact_findings
+        ],
     }
     write_private(out_dir / "report.json", json.dumps(record, indent=2) + "\n")
     write_private(out_dir / "report.md", render_report(report))

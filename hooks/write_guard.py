@@ -11,6 +11,9 @@ What is protected, under `$CALLBACK_HOME` (default `~/.callback`):
   `callback facts add`, which marks them unconfirmed, and become usable only
   through `callback facts confirm`, which only the candidate can answer. A
   tool that could write the store directly could skip both.
+- `notes.yaml`, the candidate's standing preferences. An assistant may
+  propose or retire a note through `callback`; only the candidate activates
+  one, with `callback notes activate` at their own terminal.
 - anything under an `outputs/<job>/final/` or `released/` directory.
 - `applications.yaml`, the application record the volume limits read.
 - key, ledger and database files.
@@ -30,17 +33,22 @@ session's working directory, every `cd` or `pushd` target, and any `-C` or
 it reads or writes it -- telling the two apart in an arbitrary command is not
 reliable (`cat x | tee x`, `sed -n` against `sed -i`) and nothing needs the
 raw store, which `callback facts list` reads -- except `ls`, `stat` and `du`,
-which only look, and the argument of a `-m` commit message. `callback facts
-confirm` is refused in command position, and anywhere else in a command
-except as the text a search or `git` is given. Any payload this script cannot read
+which only look, unless the command substitutes another (`$(...)`, a
+backtick, `<(...)`) or redirects into a file -- and the argument of a `-m`
+commit message. The commands only the candidate may run, `callback facts
+confirm` and `callback notes activate`,
+are refused in command position, and anywhere else in a command except as the
+text a search or `git` is given. Any payload this script cannot read
 is denied: a guard that fails open would imply a guarantee it does not give.
 
-Bash guarding is defence in depth, not containment. For `facts confirm` in
-particular, a phrase split across words (`conf''irm`, a variable holding only
-`confirm`) or a script written to a file and then run is not caught; the
-guard stops an assistant steered into running confirm, not one set on it. A shell is a general
-tool, and a command that builds a path at run time -- from a variable other
-than `CALLBACK_HOME`, from `find`, from an encoded string -- is not caught.
+Bash guarding is defence in depth, not containment. For the candidate-only
+commands in particular, a phrase split across words (`conf''irm`, a variable
+holding only `activate`) or a script written to a file and then run is not
+caught, and neither is Python that imports the modules behind them under
+another name; the guard stops an assistant steered into running them, not one
+set on it. A shell is a general tool, and a command that builds a path at run
+time -- from a variable other than `CALLBACK_HOME`, from `find`, from an
+encoded string -- is not caught.
 It stops an assistant *accidentally* writing a protected file, which is the
 failure that matters in normal use; it does not stop one determined to.
 
@@ -61,6 +69,7 @@ from pathlib import Path
 WRITE_TOOLS = {"Write", "Edit", "MultiEdit", "NotebookEdit"}
 PROTECTED_NAMES = {
     "facts.yaml",
+    "notes.yaml",
     "applications.yaml",
     "ledger.log",
     ".key",
@@ -71,8 +80,13 @@ SEALED_DIRS = {"final", "released"}
 GUARD_FILES = {Path(__file__).resolve(), Path(__file__).resolve().with_name("hooks.json")}
 
 _OPERATORS = {";", "&&", "||", "|", "&", "(", ")"}
-# Commands that only look: naming a protected path to one of these is not a write.
+# Commands that only look: naming a protected path to one of these is not a
+# write. `echo` and `printf` are not among them: what they print can be piped
+# into `xargs rm`.
 _LOOK_ONLY = {"ls", "stat", "du"}
+# Text that runs a command wherever it appears, quoted or not: `$(...)`, a
+# backtick, and process substitution `<(...)` and `>(...)`.
+_SUBSTITUTION = re.compile(r"`|[$<>]\(")
 _MESSAGE_FLAGS = {"-m", "--message"}
 
 
@@ -131,6 +145,8 @@ def protected(path: Path) -> str | None:
         return (
             "the fact store changes only through `callback facts add` and `callback facts confirm`"
         )
+    if inside == ("notes.yaml",):
+        return "notes change only through `callback notes`, and only the candidate activates one"
     if target.name in PROTECTED_NAMES:
         return f"{target.name} is written only by callback itself"
     if SEALED_DIRS & set(inside):
@@ -188,7 +204,9 @@ def _runs(words: list[str], wanted: list[str]) -> bool:
     return any(words[i : i + len(wanted)] == wanted for i in range(len(words) - len(wanted) + 1))
 
 
-# `callback facts confirm` can also run as text another command is handed:
+# The commands only the candidate may run, as the words after `callback`. Each
+# reads its answer from `/dev/tty`. Either can also run as text another
+# command is handed, as `callback facts confirm` can:
 # `script -qc "..."` gives it a pseudo-terminal, under which `/dev/tty` opens
 # and confirmation succeeds with no one at the keyboard, and `bash -c`,
 # `watch`, `flock`, `find -exec` or `awk`'s `system()` run it the same way.
@@ -198,14 +216,83 @@ def _runs(words: list[str], wanted: list[str]) -> bool:
 # `timeout 10 grep "facts confirm"`; the guard does not model what a runner
 # runs.
 _MENTION_ONLY = frozenset({"grep", "egrep", "fgrep", "rg", "git"})
-_CONFIRM_TEXT = re.compile(r"facts\W{1,6}confirm", re.IGNORECASE)
+_CANDIDATE_ONLY = (("facts", "confirm"), ("notes", "activate"))
+_CANDIDATE_TEXT = re.compile(r"facts\W{1,6}confirm|notes\W{1,6}activate", re.IGNORECASE)
+
+
+# The modules that can change what only the candidate decides, named as Python
+# imports them: `python -c "from core.notes import activate; ..."` can hand
+# `activate` a fake terminal, and `core.profile.store` can save a confirmed
+# fact, without the words the pattern above looks for. Refused on the same
+# terms. Paths (`core/notes.py`) are not matched: naming the file runs nothing.
+_CANDIDATE_CODE = re.compile(
+    r"\bcore\.(?:notes|factscmd|profile\.store)\b"
+    r"|\bfrom\s+core(?:\.profile)?\s+import\b[^;]*\b(?:notes|factscmd|store)\b"
+)
+
+
+def _named(text: str) -> str:
+    """The candidate-only command `text` names, as its words after `callback`."""
+    found = _CANDIDATE_TEXT.search(text)
+    return " ".join(re.findall(r"[a-z]+", found.group(0).casefold())) if found else "facts confirm"
+
+
+def _names_candidate_only(text: str) -> bool:
+    """Whether `text` names a candidate-only command or module."""
+    return bool(_CANDIDATE_TEXT.search(text) or _CANDIDATE_CODE.search(text))
 
 
 def _git_config_runs(words: list[str]) -> bool:
-    """Whether a `git` command sets config that names confirm (`-c alias.x=!...`)."""
+    """Whether a `git` command sets config that names a candidate-only command
+    or module (`-c alias.x=!...`)."""
     return Path(words[0]).name == "git" and any(
-        w in {"-c", "--config-env"} and _CONFIRM_TEXT.search(nxt) for w, nxt in pairwise(words)
+        w in {"-c", "--config-env"} and _names_candidate_only(nxt) for w, nxt in pairwise(words)
     )
+
+
+def _writes(words: list[str]) -> bool:
+    """Whether `words` redirect output into a file. Any word holding `>` counts
+    -- `;>` and `>(` included -- except a descriptor duplication (`2>&1`) and a
+    redirect into /dev/null, which write nothing."""
+    for n, word in enumerate(words):
+        if ">" not in word:
+            continue
+        target = words[n + 1] if n + 1 < len(words) else ""
+        if word == ">&" and (target.isdigit() or target == "-"):
+            continue
+        if target == "/dev/null":
+            continue
+        return True
+    return False
+
+
+def _check_paths(words: list[str], bases: list[Path]) -> None:
+    local = list(bases)
+    checked: list[str] = []
+    skip_next = False
+    for n, word in enumerate(words):
+        if skip_next:
+            skip_next = False
+            continue
+        if word in _MESSAGE_FLAGS:
+            skip_next = True
+            continue
+        if word in {"-C", "--directory"} and n + 1 < len(words):
+            local += [base / _expand(words[n + 1]) for base in bases]
+        elif word.startswith("--directory="):
+            local += [base / _expand(word.split("=", 1)[1]) for base in bases]
+        checked.append(word)
+    for word in checked:
+        # A word may carry a path inside quotes or code, e.g. open('<path>','w').
+        candidates = {word, *re.findall(r"[\w~$./@+{}*?-]+", word)}
+        for candidate in candidates:
+            for base in local:
+                reason = protected(base / _expand(candidate))
+                if reason:
+                    deny(
+                        f"command names a protected path ({candidate}): {reason}; "
+                        "read facts with `callback facts list`"
+                    )
 
 
 def check_bash(command: str, cwd: Path) -> None:
@@ -218,57 +305,55 @@ def check_bash(command: str, cwd: Path) -> None:
         # text (a commit message, a log search) but not through `-c`, whose
         # aliases, editor and pager run commands.
         leading = segment[: len(segment) - len(words)] if words else segment
-        if any(_CONFIRM_TEXT.search(w) for w in segment) and (
-            not words
-            or Path(words[0]).name not in _MENTION_ONLY
-            or _git_config_runs(words)
-            or any(_CONFIRM_TEXT.search(w) for w in leading)
-        ):
+        # Searched across the words as well as in each: an unquoted backtick
+        # splits `` `callback facts confirm` `` into three.
+        joined = " ".join(segment)
+        named = joined if _CANDIDATE_TEXT.search(joined) else None
+        code = joined if _CANDIDATE_CODE.search(joined) else None
+        # A search mentions text; a substitution inside its arguments runs it.
+        mention_only = (
+            bool(words)
+            and Path(words[0]).name in _MENTION_ONLY
+            and not _git_config_runs(words)
+            and not any(_names_candidate_only(w) for w in leading)
+            and not any(_SUBSTITUTION.search(w) for w in segment)
+        )
+        if named is not None and not mention_only:
             deny(
-                "`callback facts confirm` must be typed by the candidate in their own "
+                f"`callback {_named(named)}` must be typed by the candidate in their own "
                 "terminal, not run through another command"
             )
+        if code is not None and not mention_only:
+            deny(
+                "code that confirms facts or activates notes runs only as `callback`, "
+                "typed by the candidate; read with `callback facts list` or `notes list`"
+            )
+        # An assignment runs what it substitutes: `A="$(rm facts.yaml)"`. One
+        # that only names a path, `CALLBACK_HOME=~/.callback`, writes nothing.
+        _check_paths([w for w in leading if _SUBSTITUTION.search(w)], bases)
         if not words:
             continue
-        if _runs(words, ["callback", "facts", "confirm"]) or _runs(
-            words, ["-m", "core.cli", "facts", "confirm"]
-        ):
-            deny("`callback facts confirm` must be typed by the candidate in their own terminal")
-        # A redirect turns any command into a write, so a segment with one is
-        # never exempt: `ls > facts.yaml` truncates the file as surely as `echo`.
-        redirects = any(">" in w for w in words)
+        # By basename: `.venv/bin/callback` is the same command as `callback`.
+        names = [Path(w).name for w in words]
+        for sub in _CANDIDATE_ONLY:
+            if _runs(names, ["callback", *sub]) or _runs(names, ["-m", "core.cli", *sub]):
+                deny(
+                    f"`callback {' '.join(sub)}` must be typed by the candidate "
+                    "in their own terminal"
+                )
+        # A redirect turns any command into a write: `ls > facts.yaml` truncates
+        # the file as surely as `echo`.
+        redirects = _writes(words)
+        # A substitution runs a command inside the argument: `ls "$(rm x)"` is
+        # an `rm`, whatever runs first.
+        substitutes = any(_SUBSTITUTION.search(w) for w in segment)
         if words[0] in {"cd", "pushd"} and len(words) > 1:
             bases += [base / _expand(words[1]) for base in bases]
-            if not redirects:
+            if not redirects and not substitutes:
                 continue
-        if words[0] in _LOOK_ONLY and not redirects:
+        if words[0] in _LOOK_ONLY and not redirects and not substitutes:
             continue
-        local = list(bases)
-        checked: list[str] = []
-        skip_next = False
-        for n, word in enumerate(words):
-            if skip_next:
-                skip_next = False
-                continue
-            if word in _MESSAGE_FLAGS:
-                skip_next = True
-                continue
-            if word in {"-C", "--directory"} and n + 1 < len(words):
-                local += [base / _expand(words[n + 1]) for base in bases]
-            elif word.startswith("--directory="):
-                local += [base / _expand(word.split("=", 1)[1]) for base in bases]
-            checked.append(word)
-        for word in checked:
-            # A word may carry a path inside quotes or code, e.g. open('<path>','w').
-            candidates = {word, *re.findall(r"[\w~$./@+{}*?-]+", word)}
-            for candidate in candidates:
-                for base in local:
-                    reason = protected(base / _expand(candidate))
-                    if reason:
-                        deny(
-                            f"command names a protected path ({candidate}): {reason}; "
-                            "read facts with `callback facts list`"
-                        )
+        _check_paths(words, bases)
 
 
 def main() -> int:

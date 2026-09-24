@@ -292,3 +292,244 @@ def test_a_mention_passed_through_a_runner_is_refused_by_design(home: Path) -> N
     """The guard does not model what a runner runs, so it refuses the mention too."""
     result = run_guard(_bash('timeout 10 grep -rn "facts confirm" docs/'), home, cwd=home)
     assert denied(result)
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "callback notes activate n1",
+        "uv run --locked callback notes activate n1",
+        "uv run --no-project python -m core.cli notes activate n1",
+        'script -qec "callback notes activate n1" /dev/null',
+        '/bin/bash -c "callback notes activate n1"',
+        'watch -n 1 "callback notes activate n1"',
+        "C='callback notes activate n1'; script -qc \"$C\" /dev/null",
+        "git -c alias.x='!callback notes activate n1' x",
+    ],
+)
+def test_only_the_candidate_activates_a_note(home: Path, command: str) -> None:
+    """Refused wherever `facts confirm` is. Mutation: drop `notes activate`
+    from `_CANDIDATE_TEXT` -- every case but the command-position ones fails."""
+    result = run_guard(_bash(command), home, cwd=home)
+    assert denied(result), (command, result.stderr)
+    assert "notes activate" in result.stderr
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "sed -i s/proposed/active/ {home}/notes.yaml",
+        "cd {home} && python3 -c \"open('notes.yaml','a').write('x')\"",
+    ],
+)
+def test_the_notebook_is_not_edited_by_a_tool(home: Path, command: str) -> None:
+    (home / "notes.yaml").write_text("notes: []\n")
+    assert denied(run_guard(_bash(command.format(home=home)), home, cwd=home)), command
+
+
+def test_a_write_to_the_notebook_is_denied(home: Path) -> None:
+    (home / "notes.yaml").write_text("notes: []\n")
+    result = run_guard(_write(str(home / "notes.yaml")), home)
+    assert denied(result)
+    assert "only the candidate activates" in result.stderr
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "uv run callback notes retire n1",
+        "uv run callback notes list --all",
+        'grep -rn "notes activate" docs/',
+        'git commit -m "docs: explain notes activate"',
+    ],
+)
+def test_retiring_listing_and_mentioning_notes_is_allowed(home: Path, command: str) -> None:
+    result = run_guard(_bash(command), home, cwd=home)
+    assert result.returncode == 0, (command, result.stderr)
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "uv run python -c \"from core.notes import activate; activate('n1', open_tty=T)\"",
+        "uv run python -c 'import core.notes as m; m._save(m.load())'",
+        'uv run python -c "from core.factscmd import confirm"',
+        'uv run python -c "from core.profile import store; store.save_facts({})"',
+        'uv run python -c "from core import cli, notes"',
+    ],
+)
+def test_code_that_decides_for_the_candidate_is_not_run_by_a_tool(home: Path, command: str) -> None:
+    """`activate` accepts any terminal it is handed, and the stores save whatever
+    they are given: importing them is running `notes activate` or `facts confirm`
+    without the words. Mutation: drop `_CANDIDATE_CODE`'s check -- all fail."""
+    result = run_guard(_bash(command), home, cwd=home)
+    assert denied(result), (command, result.stderr)
+
+
+@pytest.mark.parametrize(
+    "command",
+    [".venv/bin/callback notes activate n1", "/usr/local/bin/callback facts confirm f1"],
+)
+def test_a_candidate_only_command_is_refused_by_any_path(home: Path, command: str) -> None:
+    assert denied(run_guard(_bash(command), home, cwd=home)), command
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "uv run pytest -q tests/test_notes.py",
+        "uv run ruff check core/notes.py",
+        'grep -rn "from core.notes import" core',
+        'uv run python -c "from core.insights import render"',
+    ],
+)
+def test_naming_the_files_or_other_modules_is_allowed(home: Path, command: str) -> None:
+    result = run_guard(_bash(command), home, cwd=home)
+    assert result.returncode == 0, (command, result.stderr)
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "ls `rm {home}/facts.yaml`",
+        "echo `rm {home}/facts.yaml`",
+        "echo hi > {home}/facts.yaml",
+    ],
+)
+def test_a_look_only_command_that_runs_or_writes_something_is_refused(
+    home: Path, command: str
+) -> None:
+    """A backtick in an argument runs a command, and a redirect writes.
+    Mutation: drop the backtick check -- the first two are allowed."""
+    assert denied(run_guard(_bash(command.format(home=home)), home, cwd=home)), command
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "ls ~/.callback 2>&1 | head",
+        "ls {home} 2>/dev/null",
+        "stat {home}/facts.yaml 2>&1",
+    ],
+)
+def test_looking_with_a_harmless_redirect_is_allowed(home: Path, command: str) -> None:
+    """`2>&1` duplicates a descriptor and a redirect into /dev/null writes
+    nothing, so neither ends the look-only exemption. Mutation: count a
+    redirect into /dev/null as a write -- the /dev/null case is refused."""
+    env_home = home.parent
+    command = command.format(home=home).replace("~/.callback", str(home))
+    result = run_guard(_bash(command), home, cwd=env_home)
+    assert result.returncode == 0, (command, result.stderr)
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "ls x > {home}/facts.yaml",
+        "ls x >> {home}/facts.yaml",
+        "echo x &> {home}/facts.yaml",
+        "echo x >& {home}/facts.yaml",
+        "rm {home}/facts.yaml 2>&1",
+    ],
+)
+def test_a_redirect_into_a_protected_file_is_still_refused(home: Path, command: str) -> None:
+    assert denied(run_guard(_bash(command.format(home=home)), home, cwd=home)), command
+
+
+def test_changing_into_the_data_home_with_a_descriptor_duplication_is_allowed(
+    home: Path,
+) -> None:
+    """`cd` is exempt unless the segment redirects into a file, and `2>&1`
+    duplicates a descriptor rather than naming one. Mutation: count `>&` plus
+    a digit as a file -- this is refused."""
+    result = run_guard(_bash(f"cd {home} 2>&1"), home, cwd=home.parent)
+    assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        'echo "$(rm {home}/facts.yaml)"',
+        "printf '%s' \"$(rm {home}/facts.yaml)\"",
+        "printf -v v '%s' \"$(rm {home}/facts.yaml)\"",
+        'echo x <<< "$(rm {home}/facts.yaml)"',
+        'echo "$(mv {home}/facts.yaml /tmp/zz)"',
+        'echo "$(rm -r {home}/outputs/job/final)"',
+        'echo "$(: > {home}/notes.yaml)"',
+        'cat <<EOF\necho "$(rm {home}/facts.yaml)"\nEOF',
+        "ls;>{home}/facts.yaml",
+        "echo x;>{home}/facts.yaml",
+        "echo x ;> {home}/facts.yaml",
+        "echo x;>>{home}/facts.yaml",
+        "printf x;>{home}/notes.yaml",
+        "echo >(tee {home}/facts.yaml)",
+        "echo x > >(tee {home}/facts.yaml)",
+        "ls >(rm {home}/facts.yaml)",
+        "echo <(rm {home}/facts.yaml)",
+        "ls <(rm {home}/facts.yaml)",
+        'ls "$(rm {home}/facts.yaml)"',
+        'stat "$(rm {home}/facts.yaml)"',
+        "echo {home}/facts.yaml | xargs rm",
+        "printf '%s\\0' {home}/facts.yaml | xargs -0 truncate -s0",
+        "printf -v p '%s/facts.yaml' {home}; : > \"$p\"",
+        'A="$(rm {home}/facts.yaml)"',
+        "echo {home} | xargs rm -rf",
+    ],
+)
+def test_a_command_that_looks_but_carries_a_write_is_refused(home: Path, command: str) -> None:
+    """Every one of these deletes, moves or truncates a protected file when run.
+    A command that only looks is exempt only when nothing in it can run
+    another command or write: no substitution (`$(`, backtick, `<(`, `>(`), no
+    redirect into a file, and no argument handed down a pipe. Assignments are
+    checked for paths like any other word."""
+    (home / "notes.yaml").write_text("notes: []\n")
+    result = run_guard(_bash(command.format(home=home)), home, cwd=home.parent)
+    assert denied(result), (command, result.stderr)
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        'cd "$(rm {home}/facts.yaml)" 2>/dev/null',
+        'cd "$(rm {home}/facts.yaml)" 2>&1',
+        'cd "$(rm {home}/facts.yaml)"',
+        'pushd "$(rm {home}/facts.yaml)" >/dev/null',
+        "cd `rm {home}/facts.yaml`",
+    ],
+)
+def test_changing_directory_through_a_substitution_is_refused(home: Path, command: str) -> None:
+    """`cd` is exempt only when it can neither run nor write, like `ls`."""
+    assert denied(run_guard(_bash(command.format(home=home)), home, cwd=home.parent)), command
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        (
+            "grep -c x \"$(printf 'y\\n' | script -qec 'uv run callback facts confirm' "
+            '/dev/null)" /dev/null'
+        ),
+        "grep -r x `callback facts confirm`",
+        "git log --grep \"$(python3 -c 'import core.notes')\"",
+        'rg x "$(callback notes activate n1)"',
+    ],
+)
+def test_a_search_runs_what_it_substitutes(home: Path, command: str) -> None:
+    """A search or `git` may mention a candidate-only command, not run one:
+    text inside `$(...)` or backticks runs before the search sees it."""
+    assert denied(run_guard(_bash(command), home, cwd=home)), command
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "CALLBACK_HOME={home} uv run callback facts list",
+        'CALLBACK_HOME="{home}" uv run callback agenda',
+        "H=$CALLBACK_HOME; ls $H",
+    ],
+)
+def test_an_assignment_naming_the_data_home_is_allowed(home: Path, command: str) -> None:
+    """Only an assignment that substitutes a command is checked for paths.
+    Mutation: check every assignment -- all three are refused."""
+    result = run_guard(_bash(command.format(home=home)), home, cwd=home.parent)
+    assert result.returncode == 0, (command, result.stderr)

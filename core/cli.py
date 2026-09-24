@@ -176,6 +176,9 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="rebuild the packet for a job already recorded, after improving its draft",
     )
+    app.add_argument(
+        "--role-family", default=None, help="one of `callback notes families`, for `insights`"
+    )
     app.set_defaults(handler=_cmd_apply)
 
     outcome = sub.add_parser("outcome", help="record what happened to an application")
@@ -210,6 +213,10 @@ def build_parser() -> argparse.ArgumentParser:
         help="reply, callback and offer rates by where you applied, and stale applications",
     )
     fun.set_defaults(handler=_cmd_funnel)
+    sub.add_parser(
+        "insights",
+        help="what happened to what was sent, by template, role family and cited fact (counts)",
+    ).set_defaults(handler=_cmd_insights)
 
     facts = sub.add_parser("facts", help="add, list and confirm the facts a resume may use")
     facts_sub = facts.add_subparsers(dest="facts_command", required=True)
@@ -230,6 +237,27 @@ def build_parser() -> argparse.ArgumentParser:
     )
     gh.add_argument("user", help="your GitHub username")
     gh.set_defaults(handler=_cmd_facts_github)
+
+    notes = sub.add_parser(
+        "notes", help="standing preferences, goals and constraints every session should know"
+    )
+    notes_sub = notes.add_subparsers(dest="notes_command", required=True)
+    n_list = notes_sub.add_parser("list", help="list active notes")
+    n_list.add_argument("--all", action="store_true", help="include proposed and retired notes")
+    n_list.set_defaults(handler=_cmd_notes_list)
+    n_act = notes_sub.add_parser(
+        "activate", help="activate a note; must be run by the candidate in a terminal"
+    )
+    n_act.add_argument("id")
+    n_act.set_defaults(handler=_cmd_notes_activate)
+    n_ret = notes_sub.add_parser("retire", help="set a note aside; it can be activated again")
+    n_ret.add_argument("id")
+    n_ret.set_defaults(handler=_cmd_notes_retire)
+    n_fam = notes_sub.add_parser(
+        "families", help="show, or with --set replace, the role families applications sort into"
+    )
+    n_fam.add_argument("--set", dest="families", default=None, help="comma-separated names")
+    n_fam.set_defaults(handler=_cmd_notes_families)
 
     return parser
 
@@ -611,9 +639,11 @@ def _cmd_interview(args: argparse.Namespace) -> int:
 def _cmd_gaps(args: argparse.Namespace) -> int:
     from datetime import UTC, datetime, timedelta
 
+    from core.apply import ApplyError, load_applications
     from core.discovery.store import load_postings
+    from core.insights import rejected_postings
     from core.profile.store import StoreError, load_facts
-    from core.triage import gaps, load_profile
+    from core.triage import gaps, load_profile, named_by
 
     try:
         postings = list(load_postings().values())
@@ -621,11 +651,17 @@ def _cmd_gaps(args: argparse.Namespace) -> int:
             cutoff = datetime.now(tz=UTC) - timedelta(days=args.days)
             postings = [p for p in postings if p.first_seen >= cutoff]
         found = gaps(postings, load_profile(), load_facts())
-    except (*_discovery_errors(), StoreError, ValueError) as exc:
+        texts, missing = rejected_postings(load_applications())
+    except (*_discovery_errors(), StoreError, ApplyError, ValueError) as exc:
         print(f"callback gaps: {exc}", file=sys.stderr)
         return 3
+    rejected = named_by([tech for tech, _ in found], texts)
+    if found:
+        print(f"{'postings':>8}  {'rejections':>10}  technology")
     for tech, count in found:
-        print(f"{count:>4}  {tech}")
+        print(f"{count:>8}  {rejected[tech]:>10}  {tech}")
+    if missing:
+        print(f"rejected with no saved posting, so not counted: {', '.join(missing)}")
     return 0
 
 
@@ -650,6 +686,7 @@ def _cmd_apply(args: argparse.Namespace) -> int:
             now=datetime.now(tz=UTC),
             accept_warnings=args.accept_warnings,
             refresh=args.refresh,
+            role_family=args.role_family,
         )
     except (ApplyError, ValidationError, OSError) as exc:
         print(f"callback apply: {exc}", file=sys.stderr)
@@ -690,6 +727,27 @@ def _cmd_funnel(_args: argparse.Namespace) -> int:
         print("no applications recorded yet")
         return 0
     print(render(funnel(applications, now=datetime.now(tz=UTC))))
+    return 0
+
+
+def _cmd_insights(_args: argparse.Namespace) -> int:
+    from core.apply import ApplyError, load_applications
+    from core.insights import insights, render
+    from core.recurring import recurring
+    from core.recurring import render as render_recurring
+
+    # First, and whatever else is missing: it matters before any application.
+    print(render_recurring(recurring()))
+    print()
+    try:
+        applications = load_applications()
+    except ApplyError as exc:
+        print(f"callback insights: {exc}", file=sys.stderr)
+        return 3
+    if not applications:
+        print("no applications recorded yet")
+        return 0
+    print(render(insights(applications)))
     return 0
 
 
@@ -851,6 +909,62 @@ def _cmd_facts_confirm(args: argparse.Namespace) -> int:
         print(f"callback facts confirm: {exc}", file=sys.stderr)
         return 3
     print(f"confirmed {len(confirmed)} fact(s)")
+    return 0
+
+
+def _cmd_notes_list(args: argparse.Namespace) -> int:
+    from core.notes import NoteError, load
+
+    try:
+        book = load()
+    except NoteError as exc:
+        print(f"callback notes list: {exc}", file=sys.stderr)
+        return 3
+    shown = [n for n in book.notes if args.all or n.status == "active"]
+    if not shown:
+        print("no notes" if args.all else "no active notes")
+    for n in shown:
+        status = "" if n.status == "active" else f" [{n.status}]"
+        print(f"{n.id:<6} {n.kind:<10} {n.text}{status}")
+    return 0
+
+
+def _cmd_notes_activate(args: argparse.Namespace) -> int:
+    from core.notes import NoteError, activate
+
+    try:
+        done = activate(args.id)
+    except NoteError as exc:
+        print(f"callback notes activate: {exc}", file=sys.stderr)
+        return 3
+    print(f"{args.id} is active" if done else f"{args.id} left as it was")
+    return 0
+
+
+def _cmd_notes_retire(args: argparse.Namespace) -> int:
+    from core.notes import NoteError, retire
+
+    try:
+        retire(args.id)
+    except NoteError as exc:
+        print(f"callback notes retire: {exc}", file=sys.stderr)
+        return 3
+    print(f"{args.id} is retired")
+    return 0
+
+
+def _cmd_notes_families(args: argparse.Namespace) -> int:
+    from core.notes import NoteError, role_families, set_role_families
+
+    try:
+        if args.families is None:
+            families = role_families()
+        else:
+            families = set_role_families([f.strip() for f in args.families.split(",") if f.strip()])
+    except NoteError as exc:
+        print(f"callback notes families: {exc}", file=sys.stderr)
+        return 3
+    print(", ".join(families) if families else "no role families")
     return 0
 
 

@@ -20,5 +20,10 @@ LETTER_ARTIFACTS = ("cover-letter.pdf", "letter-report.md", "letter-report.json"
 # `callback answers`
 ANSWERS_ARTIFACTS = ("answers.md", "answers-report.json")
 
+# Which template `callback template use` seeded the draft from, if any. Not a
+# judgement of the document, so not among the records below: editing the
+# draft is the point of a template, and the origin survives it.
+ORIGIN = "origin.json"
+
 # Everything in a draft that records a judgement of a particular document.
 GATE_RECORDS = (*RESUME_ARTIFACTS, *LETTER_ARTIFACTS, *ANSWERS_ARTIFACTS)

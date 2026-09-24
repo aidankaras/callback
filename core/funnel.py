@@ -8,6 +8,12 @@ is a reply. A *positive* reply is a callback, an interview or an offer.
 Days to reply are measured from submission to the first reply. An
 application with no outcome at all after `STALE_DAYS` is listed as stale,
 as a suggestion to record it as ghosted; nothing here records anything.
+
+A search sends tens of applications, not thousands, so a rate here is a count
+and never a finding. Every rate is printed as its counts ("2 of 3"), and a
+group of fewer than `MIN_GROUP` is marked too few to compare. Nothing ranks
+groups or calls one better. `core.insights` groups by other keys and reuses
+`summarize`, so the two cannot disagree about what a reply is.
 """
 
 from __future__ import annotations
@@ -20,6 +26,7 @@ from datetime import datetime
 from core.apply import Application
 
 STALE_DAYS = 21
+MIN_GROUP = 5
 REPLIES = frozenset({"callback", "interview", "offer", "rejected"})
 POSITIVE = frozenset({"callback", "interview", "offer"})
 
@@ -42,6 +49,11 @@ class Row:
     def positive_rate(self) -> float:
         return self.positive / self.applied if self.applied else 0.0
 
+    @property
+    def comparable(self) -> bool:
+        """Whether the group is large enough that its counts are worth setting beside another's."""
+        return self.applied >= MIN_GROUP
+
 
 @dataclass(frozen=True)
 class Funnel:
@@ -50,7 +62,8 @@ class Funnel:
     stale: tuple[Application, ...]
 
 
-def _row(source: str, applications: Sequence[Application]) -> Row:
+def summarize(source: str, applications: Sequence[Application]) -> Row:
+    """One row: how many of `applications` were replied to, and how."""
     days: list[float] = []
     replied = positive = interviews = offers = 0
     for a in applications:
@@ -79,7 +92,7 @@ def funnel(applications: Sequence[Application], *, now: datetime) -> Funnel:
     for a in applications:
         by_source.setdefault(a.source, []).append(a)
     rows = sorted(
-        (_row(source, apps) for source, apps in by_source.items()),
+        (summarize(source, apps) for source, apps in by_source.items()),
         key=lambda r: (-r.applied, r.source),
     )
     stale = tuple(
@@ -87,24 +100,31 @@ def funnel(applications: Sequence[Application], *, now: datetime) -> Funnel:
         for a in applications
         if not a.outcomes and (now - a.submitted_at).total_seconds() / 86400 >= STALE_DAYS
     )
-    return Funnel(rows=tuple(rows), total=_row("all", applications), stale=stale)
+    return Funnel(rows=tuple(rows), total=summarize("all", applications), stale=stale)
+
+
+def line(r: Row, width: int = 12) -> str:
+    """One row as counts, never bare percentages, marked when it is too small to compare."""
+    days = f"{r.median_days_to_reply:.0f}d" if r.median_days_to_reply is not None else "-"
+    replied = f"{r.replied} of {r.applied}"
+    positive = f"{r.positive} of {r.applied}"
+    note = "" if r.comparable else "  too few to compare"
+    return (
+        f"{r.source:<{width}} {r.applied:>7} {replied:>9} {positive:>9} "
+        f"{r.interviews:>10} {r.offers:>6} {days:>12}{note}"
+    )
+
+
+def header(label: str, width: int = 12, counted: str = "applied") -> str:
+    return (
+        f"{label:<{width}} {counted:>7} {'replied':>9} {'positive':>9} "
+        f"{'interviews':>10} {'offers':>6} {'median reply':>12}"
+    )
 
 
 def render(result: Funnel) -> str:
     """A plain-text table, then the stale applications."""
-
-    def line(r: Row) -> str:
-        days = f"{r.median_days_to_reply:.0f}d" if r.median_days_to_reply is not None else "-"
-        return (
-            f"{r.source:<12} {r.applied:>7} {r.replied:>7} {r.reply_rate:>6.0%} "
-            f"{r.positive:>8} {r.positive_rate:>6.0%} {r.interviews:>10} {r.offers:>6} {days:>12}"
-        )
-
-    header = (
-        f"{'source':<12} {'applied':>7} {'replied':>7} {'rate':>6} "
-        f"{'positive':>8} {'rate':>6} {'interviews':>10} {'offers':>6} {'median reply':>12}"
-    )
-    out = [header, *(line(r) for r in result.rows), line(result.total)]
+    out = [header("source"), *(line(r) for r in result.rows), line(result.total)]
     if result.stale:
         out += [
             "",

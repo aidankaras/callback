@@ -27,7 +27,7 @@ from __future__ import annotations
 
 import html
 import re
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Literal
@@ -121,6 +121,10 @@ class Eligibility:
         return "eligible"
 
 
+class ProfileError(ValueError):
+    """The eligibility profile cannot be read; a `ValueError`, as callers expect."""
+
+
 def load_profile() -> Profile:
     path = resolve_inside(PROFILE_FILE)
     if not path.exists():
@@ -128,7 +132,7 @@ def load_profile() -> Profile:
     try:
         return Profile.model_validate(yaml.safe_load(path.read_text(encoding="utf-8")) or {})
     except (OSError, yaml.YAMLError, ValidationError) as exc:
-        raise ValueError(f"{path} is not a readable profile: {exc}") from exc
+        raise ProfileError(f"{path} is not a readable profile: {exc}") from exc
 
 
 def save_profile(profile: Profile) -> None:
@@ -352,3 +356,12 @@ def gaps(
         for tech in _technologies(posting.text) - evidenced:
             counts[tech] = counts.get(tech, 0) + 1
     return sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))
+
+
+def named_by(technologies: Iterable[str], texts: Iterable[str]) -> dict[str, int]:
+    """For each of `technologies`, how many of `texts` name it, read the way `gaps` reads."""
+    counts = dict.fromkeys(technologies, 0)
+    for text in texts:
+        for tech in _technologies(text) & counts.keys():
+            counts[tech] += 1
+    return counts
