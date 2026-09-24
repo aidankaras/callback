@@ -245,6 +245,18 @@ def _git_config_runs(words: list[str]) -> bool:
     )
 
 
+def _redirect_targets(words: list[str]) -> list[str]:
+    """The files `words` redirect output into. `2>&1` and `>&2` duplicate a
+    descriptor and name no file; `>& file` and `&> file` write one."""
+    return [
+        target
+        for op, target in pairwise(words)
+        if ">" in op
+        and set(op) <= set("<>&|")
+        and not (op == ">&" and (target.isdigit() or target == "-"))
+    ]
+
+
 def check_bash(command: str, cwd: Path) -> None:
     bases = [cwd]
     for segment in _segments(command):
@@ -283,9 +295,10 @@ def check_bash(command: str, cwd: Path) -> None:
                     f"`callback {' '.join(sub)}` must be typed by the candidate "
                     "in their own terminal"
                 )
-        # A redirect turns any command into a write, so a segment with one is
-        # never exempt: `ls > facts.yaml` truncates the file as surely as `echo`.
-        redirects = any(">" in w for w in words)
+        # A redirect turns any command into a write: `ls > facts.yaml` truncates
+        # the file as surely as `echo`. `2>&1` names no file and writes nothing.
+        targets = _redirect_targets(words)
+        redirects = bool(targets)
         if words[0] in {"cd", "pushd"} and len(words) > 1:
             bases += [base / _expand(words[1]) for base in bases]
             if not redirects:
@@ -293,20 +306,22 @@ def check_bash(command: str, cwd: Path) -> None:
         # A backtick in an argument runs a command inside it: `ls \`rm x\``
         # is an `rm`, whatever runs first.
         substitutes = any("`" in w for w in words)
-        if words[0] in _LOOK_ONLY and not redirects and not substitutes:
-            continue
         local = list(bases)
         checked: list[str] = []
         skip_next = False
-        for n, word in enumerate(words):
+        # A command that only looks or prints writes only where it redirects,
+        # so only those targets are checked: `ls ~/.callback 2>/dev/null` looks.
+        look_only = words[0] in _LOOK_ONLY and not substitutes
+        scan = targets if look_only else words
+        for n, word in enumerate(scan):
             if skip_next:
                 skip_next = False
                 continue
             if word in _MESSAGE_FLAGS:
                 skip_next = True
                 continue
-            if word in {"-C", "--directory"} and n + 1 < len(words):
-                local += [base / _expand(words[n + 1]) for base in bases]
+            if word in {"-C", "--directory"} and n + 1 < len(scan):
+                local += [base / _expand(scan[n + 1]) for base in bases]
             elif word.startswith("--directory="):
                 local += [base / _expand(word.split("=", 1)[1]) for base in bases]
             checked.append(word)

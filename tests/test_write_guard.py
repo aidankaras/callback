@@ -410,3 +410,47 @@ def test_a_look_only_command_that_runs_or_writes_something_is_refused(
     """A backtick in an argument runs a command, and a redirect writes.
     Mutation: drop the backtick check -- the first two are allowed."""
     assert denied(run_guard(_bash(command.format(home=home)), home, cwd=home)), command
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "ls ~/.callback 2>&1 | head",
+        "ls {home} 2>/dev/null",
+        'echo "$CALLBACK_HOME" 1>&2',
+        "stat {home}/facts.yaml 2>&1",
+    ],
+)
+def test_looking_with_a_harmless_redirect_is_allowed(home: Path, command: str) -> None:
+    """Only a look-only command's redirect targets are checked, so naming the
+    data home to `ls` stays allowed with a redirect that writes nothing there.
+    Mutation: check every word of a look-only command that redirects -- the
+    /dev/null case is refused."""
+    env_home = home.parent
+    command = command.format(home=home).replace("~/.callback", str(home))
+    result = run_guard(_bash(command), home, cwd=env_home)
+    assert result.returncode == 0, (command, result.stderr)
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "ls x > {home}/facts.yaml",
+        "ls x >> {home}/facts.yaml",
+        "echo x &> {home}/facts.yaml",
+        "echo x >& {home}/facts.yaml",
+        "rm {home}/facts.yaml 2>&1",
+    ],
+)
+def test_a_redirect_into_a_protected_file_is_still_refused(home: Path, command: str) -> None:
+    assert denied(run_guard(_bash(command.format(home=home)), home, cwd=home)), command
+
+
+def test_changing_into_the_data_home_with_a_descriptor_duplication_is_allowed(
+    home: Path,
+) -> None:
+    """`cd` is exempt unless the segment redirects into a file, and `2>&1`
+    duplicates a descriptor rather than naming one. Mutation: count `>&` plus
+    a digit as a file -- this is refused."""
+    result = run_guard(_bash(f"cd {home} 2>&1"), home, cwd=home.parent)
+    assert result.returncode == 0, result.stderr
