@@ -231,6 +231,27 @@ def build_parser() -> argparse.ArgumentParser:
     gh.add_argument("user", help="your GitHub username")
     gh.set_defaults(handler=_cmd_facts_github)
 
+    notes = sub.add_parser(
+        "notes", help="standing preferences, goals and constraints every session should know"
+    )
+    notes_sub = notes.add_subparsers(dest="notes_command", required=True)
+    n_list = notes_sub.add_parser("list", help="list active notes")
+    n_list.add_argument("--all", action="store_true", help="include proposed and retired notes")
+    n_list.set_defaults(handler=_cmd_notes_list)
+    n_act = notes_sub.add_parser(
+        "activate", help="activate a note; must be run by the candidate in a terminal"
+    )
+    n_act.add_argument("id")
+    n_act.set_defaults(handler=_cmd_notes_activate)
+    n_ret = notes_sub.add_parser("retire", help="set a note aside; it can be activated again")
+    n_ret.add_argument("id")
+    n_ret.set_defaults(handler=_cmd_notes_retire)
+    n_fam = notes_sub.add_parser(
+        "families", help="show, or with --set replace, the role families applications sort into"
+    )
+    n_fam.add_argument("--set", dest="families", default=None, help="comma-separated names")
+    n_fam.set_defaults(handler=_cmd_notes_families)
+
     return parser
 
 
@@ -851,6 +872,62 @@ def _cmd_facts_confirm(args: argparse.Namespace) -> int:
         print(f"callback facts confirm: {exc}", file=sys.stderr)
         return 3
     print(f"confirmed {len(confirmed)} fact(s)")
+    return 0
+
+
+def _cmd_notes_list(args: argparse.Namespace) -> int:
+    from core.notes import NoteError, load
+
+    try:
+        book = load()
+    except NoteError as exc:
+        print(f"callback notes list: {exc}", file=sys.stderr)
+        return 3
+    shown = [n for n in book.notes if args.all or n.status == "active"]
+    if not shown:
+        print("no notes" if args.all else "no active notes")
+    for n in shown:
+        status = "" if n.status == "active" else f" [{n.status}]"
+        print(f"{n.id:<6} {n.kind:<10} {n.text}{status}")
+    return 0
+
+
+def _cmd_notes_activate(args: argparse.Namespace) -> int:
+    from core.notes import NoteError, activate
+
+    try:
+        done = activate(args.id)
+    except NoteError as exc:
+        print(f"callback notes activate: {exc}", file=sys.stderr)
+        return 3
+    print(f"{args.id} is active" if done else f"{args.id} left as it was")
+    return 0
+
+
+def _cmd_notes_retire(args: argparse.Namespace) -> int:
+    from core.notes import NoteError, retire
+
+    try:
+        retire(args.id)
+    except NoteError as exc:
+        print(f"callback notes retire: {exc}", file=sys.stderr)
+        return 3
+    print(f"{args.id} is retired")
+    return 0
+
+
+def _cmd_notes_families(args: argparse.Namespace) -> int:
+    from core.notes import NoteError, role_families, set_role_families
+
+    try:
+        if args.families is None:
+            families = role_families()
+        else:
+            families = set_role_families([f.strip() for f in args.families.split(",") if f.strip()])
+    except NoteError as exc:
+        print(f"callback notes families: {exc}", file=sys.stderr)
+        return 3
+    print(", ".join(families) if families else "no role families")
     return 0
 
 

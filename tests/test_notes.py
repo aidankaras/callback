@@ -184,3 +184,42 @@ def test_nothing_that_judges_a_document_reads_notes() -> None:
             else:
                 continue
             assert "core.notes" not in named, path
+
+
+def test_the_cli_lists_only_active_notes_unless_asked(
+    home: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from core.cli import main
+
+    notes.propose("preference", "One page always", source_context=None, now=NOW)
+    assert main(["notes", "list"]) == 0
+    assert capsys.readouterr().out.strip() == "no active notes"
+    assert main(["notes", "list", "--all"]) == 0
+    assert "One page always [proposed]" in capsys.readouterr().out
+
+
+def test_the_cli_refuses_to_activate_without_a_terminal(
+    home: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Patched, as for `facts confirm`: a developer's machine has a `/dev/tty`."""
+    from core.cli import main
+
+    def no_tty() -> io.TextIOBase:
+        raise OSError(6, "patched-no-terminal")
+
+    monkeypatch.setattr("core.terminal._open_tty", no_tty)
+    note = notes.propose("preference", "One page always", source_context=None, now=NOW)
+    assert main(["notes", "activate", note.id]) == 3
+    assert "patched-no-terminal" in capsys.readouterr().err
+    assert notes.active() == []
+
+
+def test_the_cli_sets_and_shows_role_families(
+    home: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from core.cli import main
+
+    assert main(["notes", "families", "--set", "ml-infra, quant"]) == 0
+    assert main(["notes", "families"]) == 0
+    assert capsys.readouterr().out.splitlines()[-1] == "ml-infra, quant"
+    assert main(["notes", "families", "--set", "Bad Name"]) == 3

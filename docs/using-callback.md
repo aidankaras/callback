@@ -14,7 +14,8 @@ claude --plugin-dir .          # loads the `tailor` skill into a Claude Code ses
 ```
 
 Then ask Claude to tailor your resume to a posting. The skill runs the commands
-below for you, except `facts confirm`, which only you can run.
+below for you, except `facts confirm` and `notes activate`, which only you can
+run.
 
 ## The commands
 
@@ -27,6 +28,10 @@ below for you, except `facts confirm`, which only you can run.
 | `callback facts list [--unconfirmed]` | Lists stored facts | 0 |
 | `callback facts github <user>` | Drafts an unconfirmed `project` fact (description as text; name and primary language as entities) for each of your own public, described, non-fork repositories, to `inbox/github-<user>.yaml`. Nothing reaches the store until you `facts add` the file | 0, 1 nothing drafted, 3 |
 | `callback facts confirm [ids...]` | Asks you, fact by fact, whether each is true | 0, 3 if not run from a terminal or an id is unknown or web-sourced |
+| `callback notes list [--all]` | Lists active notes; `--all` adds proposed and retired ones | 0, 3 unreadable notebook |
+| `callback notes activate <id>` | Shows you a proposed note in full, with where it came from, and activates it on your yes at the terminal | 0, 3 if not run from a terminal or the id is unknown |
+| `callback notes retire <id>` | Sets a note aside; it stays in the file and can be activated again | 0, 3 unknown id |
+| `callback notes families [--set a,b]` | Shows, or replaces, the role families applications can be sorted into | 0, 3 invalid name |
 | `callback build <resume.yaml> --job <id>` | Renders the PDF and runs every gate, writing to `outputs/<id>/draft/` | 0 pass, 1 warn, 2 fail, 3 could not build |
 | `callback export <resume.yaml>` | Prints the resume as plain text for forms that want it pasted, and checks every critical field survived | 0, 2 if a field was lost, 3 unreadable document |
 | `callback letter <letter.yaml>` | Renders a cover letter and checks it against your facts and the saved posting | 0 pass, 2 fail, 3 could not run |
@@ -129,6 +134,24 @@ A fact is one thing that is true about you, stated once:
   that fakes a terminal. It guards against accidental confirmation, and against
   an assistant being talked into it. It is not a lock against a program built to
   get round it, or one that edits the store file directly.
+
+## Notes
+
+Facts are what a resume may claim. Notes are everything else a session should
+know before it starts: a preference ("one page always"), a goal ("targeting ML
+infrastructure"), a constraint ("never use 'spearheaded'"), or context ("offer
+deadline Nov 14"). They live in `notes.yaml`, at most 200 characters each.
+
+- An assistant can only *propose* a note. A proposed note does nothing until
+  you run `callback notes activate <id>` yourself, which shows you the full
+  text and where it came from and asks you. Retiring needs no terminal: a
+  session can retire a note when you ask it to, the note stays in the file,
+  and activating it again asks you.
+- A note cannot make a claim pass the gates: grounding reads facts and nothing
+  else. It can change everything the gates do not check -- which facts are
+  chosen, what is left out, the wording, letters and answers -- which is why
+  activating one is yours alone.
+- Sessions receive notes as quoted data, never as instructions.
 
 ## The resume document
 
@@ -294,10 +317,11 @@ rewritten from scratch fails even when every entry chains correctly, and
 
 The plugin registers `callback-mcp` (see `.mcp.json`), which serves the same
 checks as tools: `build`, `letter`, `answers`, `outreach`, `facts_add`,
-`facts_list`, `watch`, `triage`, `fit`, `agenda`, `postings_take`, `postings_resolve`,
+`facts_list`, `notes_list`, `notes_propose`, `notes_retire`, `watch`, `triage`, `fit`, `agenda`, `postings_take`, `postings_resolve`,
 `applications`, `funnel`,
 `eligibility`, `apply`, `interview` and `verify`. Each wraps the function the
 command line calls, so a result is identical whichever way it is reached, and
-a failure is a tool error, never an empty result. `facts confirm` and
-`delete-all` are deliberately not tools: only the candidate, at a terminal,
-may make a fact usable or erase the data home.
+a failure is a tool error, never an empty result. `facts confirm`, activating
+a note, and `delete-all` are deliberately not tools: only the candidate, at a
+terminal, may make a fact usable, make a note something sessions follow, or
+erase the data home.

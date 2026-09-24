@@ -83,3 +83,46 @@ def test_every_command_that_only_reads_is_also_a_tool(
         ],
         "silent": [],
     }
+
+
+def test_a_proposed_note_is_not_listed_as_active(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("CALLBACK_HOME", str(tmp_path / "cb"))
+    proposed = call(
+        "notes_propose",
+        {"kind": "preference", "text": "One page always", "source_context": "acme-ml"},
+    )
+    assert proposed.structured_content == {"id": "n1", "status": "proposed"}  # type: ignore[attr-defined]
+    everything = call("notes_list", {"include_inactive": True})
+    assert [n["id"] for n in everything.structured_content["notes"]] == ["n1"]  # type: ignore[attr-defined]
+    assert call("notes_list", {}).structured_content == {"notes": []}  # type: ignore[attr-defined]
+
+
+def test_no_tool_can_make_a_note_active() -> None:
+    """A session may propose or retire a note, never activate one.
+
+    By name and by what the server imports, since a tool called something
+    innocuous could still call `activate`. Mutation: import `activate` in
+    `notes_list` -- this test fails.
+    """
+    import ast
+
+    names = {t.name for t in asyncio.run(server.list_tools())}
+    assert {"notes_list", "notes_propose", "notes_retire"} <= names  # premise: they exist
+    assert not any("activate" in n for n in names), names
+    source = (Path(__file__).resolve().parents[1] / "core" / "mcp_server.py").read_text()
+    used = {
+        alias.name
+        for node in ast.walk(ast.parse(source))
+        if isinstance(node, ast.ImportFrom) and node.module == "core.notes"
+        for alias in node.names
+    }
+    assert used and used <= {"load", "propose", "retire"}, used
+
+
+def test_a_session_can_retire_a_note(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("CALLBACK_HOME", str(tmp_path / "cb"))
+    call("notes_propose", {"kind": "preference", "text": "One page always"})
+    retired = call("notes_retire", {"note_id": "n1"})
+    assert retired.structured_content == {"id": "n1", "status": "retired"}  # type: ignore[attr-defined]
