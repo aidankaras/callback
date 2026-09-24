@@ -176,6 +176,9 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="rebuild the packet for a job already recorded, after improving its draft",
     )
+    app.add_argument(
+        "--role-family", default=None, help="one of `callback notes families`, for `insights`"
+    )
     app.set_defaults(handler=_cmd_apply)
 
     outcome = sub.add_parser("outcome", help="record what happened to an application")
@@ -671,6 +674,7 @@ def _cmd_apply(args: argparse.Namespace) -> int:
             now=datetime.now(tz=UTC),
             accept_warnings=args.accept_warnings,
             refresh=args.refresh,
+            role_family=args.role_family,
         )
     except (ApplyError, ValidationError, OSError) as exc:
         print(f"callback apply: {exc}", file=sys.stderr)

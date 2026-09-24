@@ -26,12 +26,14 @@ from pathlib import Path
 from typing import Literal, cast
 
 import yaml
-from pydantic import BaseModel, Field, ValidationError, field_validator
+from pydantic import BaseModel, Field, ValidationError, field_validator, model_validator
 
+from core.draft import ORIGIN
 from core.export.text import to_text
 from core.finalize import record_event
 from core.paths import private_dir, resolve_inside, write_private, write_private_bytes
 from core.resume.io import DocumentError, parse_doc
+from core.resume.models import ResumeDoc
 
 APPLICATIONS_FILE = "applications.yaml"
 MAX_PER_DAY = 10
@@ -117,21 +119,60 @@ class Outcome(BaseModel):
 
     kind: OutcomeKind
     occurred_at: datetime
+    # The `Application.sent` entry current when this was recorded, so a later
+    # refresh cannot change what an outcome is attributed to. `None` for an
+    # application recorded before sends were kept.
+    sent_index: int | None = Field(default=None, ge=0)
 
     _aware = field_validator("occurred_at")(_aware)
 
 
+class Sent(BaseModel):
+    """One packet handed to the candidate: its hashes, and what it was built from."""
+
+    model_config = {"extra": "forbid", "frozen": True}
+
+    at: datetime
+    resume_sha256: str
+    letter_sha256: str | None = None
+    answers_sha256: str | None = None
+    resume_txt_sha256: str | None = None
+    # The template the draft was seeded from, if any.
+    based_on: str | None = None
+    # Every fact the resume cites, sorted.
+    cited_fact_ids: tuple[str, ...] = ()
+    role_family: str | None = None
+
+    _aware = field_validator("at")(_aware)
+
+
 class Application(Target):
-    """One application: the target, when, and the hashes of what was sent."""
+    """One application: the target, when, and the hashes of what was sent.
+
+    The top-level hashes name the current packet, which `core.interview`
+    checks against. `sent` keeps every packet in order, the first from `apply`
+    and one more for each refresh; it is empty for an application recorded
+    before it existed, whose sends are unknown rather than guessed.
+    """
 
     submitted_at: datetime
     resume_sha256: str
     letter_sha256: str | None = None
     answers_sha256: str | None = None
     resume_txt_sha256: str | None = None
+    sent: list[Sent] = Field(default_factory=list[Sent])
     outcomes: list[Outcome] = Field(default_factory=list[Outcome])
 
     _aware = field_validator("submitted_at")(_aware)
+
+    @model_validator(mode="after")
+    def _outcomes_name_a_send(self) -> Application:
+        bad = [
+            o for o in self.outcomes if o.sent_index is not None and o.sent_index >= len(self.sent)
+        ]
+        if bad:
+            raise ValueError(f"an outcome is attributed to a send that is not recorded: {bad}")
+        return self
 
 
 def load_applications() -> list[Application]:
@@ -251,15 +292,70 @@ def _check_volume(target: Target, existing: list[Application], now: datetime) ->
         )
 
 
+def _based_on(draft: Path) -> str | None:
+    """The template the draft was seeded from, or `None` when there is no stamp."""
+    path = draft / ORIGIN
+    if not path.is_file():
+        return None
+    try:
+        parsed: object = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ApplyError(f"cannot read the draft's {ORIGIN}: {exc}") from exc
+    name = cast("dict[str, object]", parsed).get("template") if isinstance(parsed, dict) else None
+    if not isinstance(name, str):
+        raise ApplyError(f"the draft's {ORIGIN} names no template")
+    return name
+
+
+def _cited(doc: ResumeDoc) -> tuple[str, ...]:
+    ids = {
+        fid
+        for section in doc.sections
+        for entry in section.entries
+        for fid in (*entry.sources, *(s for b in entry.bullets for s in b.sources))
+    }
+    return tuple(sorted(ids))
+
+
+def _role_family(requested: str | None, prior: Application | None) -> str | None:
+    """The role family to record: the one asked for, checked against the
+    candidate's list, or on a refresh the one the application already had."""
+    from core.notes import NoteError, role_families
+
+    if requested is None:
+        return prior.sent[-1].role_family if prior is not None and prior.sent else None
+    try:
+        known = role_families()
+    except NoteError as exc:
+        raise ApplyError(str(exc)) from exc
+    if requested not in known:
+        listed = ", ".join(known) or "none yet"
+        raise ApplyError(
+            f"{requested!r} is not one of your role families ({listed}); "
+            "add it with `callback notes families --set`"
+        )
+    return requested
+
+
 def apply(
-    target: Target, *, now: datetime, accept_warnings: bool = False, refresh: bool = False
+    target: Target,
+    *,
+    now: datetime,
+    accept_warnings: bool = False,
+    refresh: bool = False,
+    role_family: str | None = None,
 ) -> Path:
     """Build the application packet for `target` and record the application.
 
     With `refresh`, rebuild the packet for a job already recorded -- after the
     draft was improved, say -- under the same gate and hash checks. The
-    record keeps its original date and is not counted again; only its hashes
-    change, to name what the new packet holds.
+    record keeps its original date and is not counted again. Its top-level
+    hashes change to name the new packet, and the new packet is appended to
+    `sent`, leaving earlier sends, and the outcomes attributed to them, as
+    they were.
+
+    `role_family` must be one of the candidate's role families in
+    `notes.yaml`; on a refresh, leaving it out keeps the one already recorded.
 
     Returns the packet directory. Raises `ApplyError`, having written
     nothing, when the draft is not ready or a volume rule refuses it.
@@ -280,6 +376,8 @@ def apply(
         doc = parse_doc((draft / "resume.yaml").read_bytes(), origin=draft / "resume.yaml")
     except (DocumentError, OSError) as exc:
         raise ApplyError(f"cannot read the job's resume document: {exc}") from exc
+    family = _role_family(role_family, prior)
+    based_on = _based_on(draft)
 
     # Built in a staging directory and moved into place only once the record
     # is saved: a packet with no record is one the volume rules never hear of.
@@ -306,11 +404,20 @@ def apply(
             "answers_sha256": _sha256(staging / "answers.md") if answers is not None else None,
             "resume_txt_sha256": _sha256(staging / "resume.txt"),
         }
+        sent = Sent.model_validate(
+            {
+                "at": now,
+                **hashes,
+                "based_on": based_on,
+                "cited_fact_ids": _cited(doc),
+                "role_family": family,
+            }
+        )
         if refresh and prior is not None:
-            record = prior.model_copy(update=hashes)
+            record = prior.model_copy(update={**hashes, "sent": [*prior.sent, sent]})
         else:
             record = Application.model_validate(
-                {**target.model_dump(), "submitted_at": now, **hashes}
+                {**target.model_dump(), "submitted_at": now, **hashes, "sent": [sent]}
             )
         # The ledger first: an entry for an application whose record then failed
         # to save is visible, where a saved record with no entry would not be.
@@ -340,7 +447,8 @@ def record_outcome(job_id: str, kind: OutcomeKind, *, now: datetime) -> None:
     applications = load_applications()
     for application in applications:
         if application.job_id == job_id:
-            application.outcomes.append(Outcome(kind=kind, occurred_at=now))
+            index = len(application.sent) - 1 if application.sent else None
+            application.outcomes.append(Outcome(kind=kind, occurred_at=now, sent_index=index))
             _save(applications)
             return
     raise ApplyError(f"no application recorded for {job_id!r}")

@@ -97,7 +97,7 @@ def test_using_a_template_clears_the_previous_build(home: Path) -> None:
     target = _draft(home, "globex-ml", doc="identity: {name: Someone Else}\n")
     (target / "report.md").write_text("# PASS", encoding="utf-8")
     use("ml-intern", "globex-ml", overwrite=True)
-    assert sorted(p.name for p in target.iterdir()) == ["resume.yaml"]
+    assert sorted(p.name for p in target.iterdir()) == ["origin.json", "resume.yaml"]
 
 
 def test_using_a_template_clears_the_letter_and_answers_records_too(home: Path) -> None:
@@ -113,7 +113,7 @@ def test_using_a_template_clears_the_letter_and_answers_records_too(home: Path) 
         (target / record).write_bytes(b"old")
     assert len(list(target.iterdir())) > 3  # premise: the draft holds every record
     use("ml-intern", "globex-ml", overwrite=True)
-    assert sorted(p.name for p in target.iterdir()) == ["resume.yaml"]
+    assert sorted(p.name for p in target.iterdir()) == ["origin.json", "resume.yaml"]
 
 
 def test_a_report_without_a_document_hash_says_so(home: Path) -> None:

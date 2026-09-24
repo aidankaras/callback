@@ -24,7 +24,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
 
-from core.draft import GATE_RECORDS
+from core.draft import GATE_RECORDS, ORIGIN
 from core.paths import private_dir, resolve_inside, write_private
 
 TEMPLATE_DIR = "templates"
@@ -110,4 +110,6 @@ def use(name: str, job_id: str, *, overwrite: bool = False) -> Path:
     # they would read as this document's, which `apply` believes.
     for record in GATE_RECORDS:
         (target.parent / record).unlink(missing_ok=True)
+    # So an application from this draft can say which template it began as.
+    write_private(target.parent / ORIGIN, json.dumps({"template": name}) + "\n")
     return target

@@ -283,6 +283,7 @@ def apply(
     url: str = "",
     accept_warnings: bool = False,
     refresh: bool = False,
+    role_family: str | None = None,
 ) -> dict[str, object]:
     """Build the application packet from a gated draft and record it. Never submits."""
     from core.apply import Target
@@ -298,7 +299,13 @@ def apply(
             "source": cast("Literal['other']", source),
         }
     )
-    packet = run_apply(target, now=_now(), accept_warnings=accept_warnings, refresh=refresh)
+    packet = run_apply(
+        target,
+        now=_now(),
+        accept_warnings=accept_warnings,
+        refresh=refresh,
+        role_family=role_family,
+    )
     return {"packet": str(packet), "files": sorted(p.name for p in packet.iterdir())}
 
 

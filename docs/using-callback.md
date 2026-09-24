@@ -35,7 +35,7 @@ run.
 | `callback build <resume.yaml> --job <id>` | Renders the PDF and runs every gate, writing to `outputs/<id>/draft/` | 0 pass, 1 warn, 2 fail, 3 could not build |
 | `callback export <resume.yaml>` | Prints the resume as plain text for forms that want it pasted, and checks every critical field survived | 0, 2 if a field was lost, 3 unreadable document |
 | `callback letter <letter.yaml>` | Renders a cover letter and checks it against your facts and the saved posting | 0 pass, 2 fail, 3 could not run |
-| `callback apply <id> --company … --title … --source …` | Builds the application packet from a gated draft and records it; `--refresh` rebuilds it after the draft improves. **Never submits** | 0, 3 refused |
+| `callback apply <id> --company … --title … --source …` | Builds the application packet from a gated draft and records it, with the template it started from, the facts it cites and an optional `--role-family`; `--refresh` rebuilds it after the draft improves, keeping every earlier send and what happened to it. **Never submits** | 0, 3 refused |
 | `callback outcome <id> <kind>` / `callback applications` | Records what happened; lists applications | 0, 3 unreadable record |
 | `callback funnel` | Per source: applied, replied (callback, interview, offer or rejection; not "viewed"), positive, interviews, offers, median days to first reply; then applications silent for 21+ days, as a suggestion to record them as ghosted | 0, 3 unreadable record |
 | `callback finalize <id>` / `callback verify [<id>]` | Seals a gated draft read-only into `final/` with a signed manifest and a hash-chained ledger entry; `verify` reports anything changed since, and any break in the ledger | 0, 2 changed, 3 |
