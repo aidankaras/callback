@@ -232,7 +232,8 @@ def check_bash(command: str, cwd: Path) -> None:
             words, ["-m", "core.cli", "facts", "confirm"]
         ):
             deny("`callback facts confirm` must be typed by the candidate in their own terminal")
-        if words[0] in _RUNNERS and any(_CONFIRM_TEXT.search(w) for w in words[1:]):
+        # By basename: `/bin/bash` and `/usr/bin/env` are the same runners.
+        if Path(words[0]).name in _RUNNERS and any(_CONFIRM_TEXT.search(w) for w in words[1:]):
             deny(
                 "`callback facts confirm` must be typed by the candidate in their own "
                 "terminal, not run through another command"

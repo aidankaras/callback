@@ -249,6 +249,9 @@ def test_a_wildcard_outside_the_data_home_is_allowed(home: Path, tmp_path: Path)
         "python3 -c \"import pty; pty.spawn(['callback', 'facts', 'confirm'])\"",
         'tmux send-keys "callback facts confirm" Enter',
         'unbuffer sh -c "uv run --project /repo callback facts confirm"',
+        '/bin/bash -c "callback facts confirm"',
+        '/usr/bin/env script -qc "callback facts confirm" /dev/null',
+        './script -qc "callback facts confirm" /dev/null',
     ],
 )
 def test_confirm_run_through_a_pseudo_terminal_wrapper_is_denied(home: Path, command: str) -> None:
