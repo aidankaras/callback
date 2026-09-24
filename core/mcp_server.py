@@ -379,10 +379,46 @@ def funnel() -> dict[str, object]:
                 "interviews": r.interviews,
                 "offers": r.offers,
                 "median_days_to_reply": r.median_days_to_reply,
+                "comparable": r.comparable,
             }
             for r in (*result.rows, result.total)
         ],
         "silent": [a.job_id for a in result.stale],
+    }
+
+
+@server.tool()
+def insights() -> dict[str, object]:
+    """What happened to each packet sent, grouped by template, role family and cited fact.
+
+    Counts only. Cite them as counts ("3 of 9"), say so when a group is marked
+    not comparable (fewer than 5 sends), and never call one group better.
+    """
+    from core.apply import load_applications
+    from core.funnel import Row
+    from core.insights import insights as build_insights
+
+    result = build_insights(load_applications())
+
+    def rows(group: tuple[Row, ...]) -> list[dict[str, object]]:
+        return [
+            {
+                "group": r.source,
+                "sent": r.applied,
+                "replied": r.replied,
+                "positive": r.positive,
+                "interviews": r.interviews,
+                "offers": r.offers,
+                "comparable": r.comparable,
+            }
+            for r in group
+        ]
+
+    return {
+        "sends": result.sends,
+        "by_template": rows(result.by_template),
+        "by_role_family": rows(result.by_role_family),
+        "by_fact": rows(result.by_fact),
     }
 
 

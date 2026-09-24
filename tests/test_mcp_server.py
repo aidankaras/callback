@@ -79,6 +79,7 @@ def test_every_command_that_only_reads_is_also_a_tool(
                 "interviews": 0,
                 "offers": 0,
                 "median_days_to_reply": None,
+                "comparable": False,
             }
         ],
         "silent": [],

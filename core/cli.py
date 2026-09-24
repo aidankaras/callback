@@ -213,6 +213,10 @@ def build_parser() -> argparse.ArgumentParser:
         help="reply, callback and offer rates by where you applied, and stale applications",
     )
     fun.set_defaults(handler=_cmd_funnel)
+    sub.add_parser(
+        "insights",
+        help="what happened to what was sent, by template, role family and cited fact (counts)",
+    ).set_defaults(handler=_cmd_insights)
 
     facts = sub.add_parser("facts", help="add, list and confirm the facts a resume may use")
     facts_sub = facts.add_subparsers(dest="facts_command", required=True)
@@ -715,6 +719,22 @@ def _cmd_funnel(_args: argparse.Namespace) -> int:
         print("no applications recorded yet")
         return 0
     print(render(funnel(applications, now=datetime.now(tz=UTC))))
+    return 0
+
+
+def _cmd_insights(_args: argparse.Namespace) -> int:
+    from core.apply import ApplyError, load_applications
+    from core.insights import insights, render
+
+    try:
+        applications = load_applications()
+    except ApplyError as exc:
+        print(f"callback insights: {exc}", file=sys.stderr)
+        return 3
+    if not applications:
+        print("no applications recorded yet")
+        return 0
+    print(render(insights(applications)))
     return 0
 
 

@@ -67,3 +67,15 @@ def test_the_rendering_names_each_source_and_what_to_record() -> None:
     assert text.splitlines()[1].startswith("greenhouse")
     assert "callback outcome <job> ghosted" in text
     assert "g3" in text and "o1" not in text
+
+
+def test_every_rate_is_printed_as_counts_and_small_groups_say_so() -> None:
+    """Greenhouse sent 3 and heard back from 2: that prints as counts, never as 67%.
+    Mutation: set MIN_GROUP to 3 -- greenhouse is no longer marked."""
+    lines = render(funnel(APPS, now=NOW)).splitlines()
+    greenhouse = next(line for line in lines if line.startswith("greenhouse"))
+    assert "2 of 3" in greenhouse and "1 of 3" in greenhouse
+    assert "%" not in "\n".join(lines)
+    assert greenhouse.endswith("too few to compare")
+    total = next(line for line in lines if line.startswith("all"))
+    assert "2 of 5" in total and not total.endswith("too few to compare")  # 5 is enough

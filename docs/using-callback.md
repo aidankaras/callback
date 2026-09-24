@@ -37,7 +37,8 @@ run.
 | `callback letter <letter.yaml>` | Renders a cover letter and checks it against your facts and the saved posting | 0 pass, 2 fail, 3 could not run |
 | `callback apply <id> --company … --title … --source …` | Builds the application packet from a gated draft and records it, with the template it started from, the facts it cites and an optional `--role-family`; `--refresh` rebuilds it after the draft improves, keeping every earlier send and what happened to it. **Never submits** | 0, 3 refused |
 | `callback outcome <id> <kind>` / `callback applications` | Records what happened; lists applications | 0, 3 unreadable record |
-| `callback funnel` | Per source: applied, replied (callback, interview, offer or rejection; not "viewed"), positive, interviews, offers, median days to first reply; then applications silent for 21+ days, as a suggestion to record them as ghosted | 0, 3 unreadable record |
+| `callback funnel` | Per source: applied, replied (callback, interview, offer or rejection; not "viewed"), positive, interviews, offers, median days to first reply, each as counts, with a source of fewer than 5 applications marked too few to compare; then applications silent for 21+ days, as a suggestion to record them as ghosted | 0, 3 unreadable record |
+| `callback insights` | For each packet sent (a refresh is a new one), what happened, grouped by the template the draft began as, the role family and each cited fact. Counts only; a group of fewer than 5 is marked too few to compare, and nothing is ranked | 0, 3 unreadable record |
 | `callback finalize <id>` / `callback verify [<id>]` | Seals a gated draft read-only into `final/` with a signed manifest and a hash-chained ledger entry; `verify` reports anything changed since, and any break in the ledger | 0, 2 changed, 3 |
 | `callback interview <id>` | An interview prep pack: the posting, exactly what was sent (verified against the application record) and the facts behind each claim | 0, 3 |
 
@@ -317,8 +318,13 @@ rewritten from scratch fails even when every entry chains correctly, and
 
 The plugin registers `callback-mcp` (see `.mcp.json`), which serves the same
 checks as tools: `build`, `letter`, `answers`, `outreach`, `facts_add`,
+<<<<<<< ours
 `facts_list`, `notes_list`, `notes_propose`, `notes_retire`, `watch`, `triage`, `fit`, `agenda`, `postings_take`, `postings_resolve`,
 `applications`, `funnel`,
+=======
+`facts_list`, `notes_list`, `notes_propose`, `watch`, `triage`, `fit`, `agenda`, `postings_take`, `postings_resolve`,
+`applications`, `funnel`, `insights`,
+>>>>>>> theirs
 `eligibility`, `apply`, `interview` and `verify`. Each wraps the function the
 command line calls, so a result is identical whichever way it is reached, and
 a failure is a tool error, never an empty result. `facts confirm`, activating
