@@ -11,6 +11,7 @@ unconfirmed, and `confirm` is the only way across that line.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Callable
 from pathlib import Path
 from typing import cast
@@ -22,6 +23,8 @@ from core.errors import validation_problems, yaml_problem
 from core.profile.models import Fact, Provenance, Trust
 from core.profile.store import StoreError, add_fact, load_facts, save_facts
 from core.terminal import NoTerminalError, Terminal, ask, connect
+
+_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}")
 
 
 class ConfirmError(RuntimeError):
@@ -47,7 +50,9 @@ def add_from_file(path: Path) -> tuple[list[str], list[tuple[str, str]]]:
     rejected: list[tuple[str, str]] = []
     for position, body in enumerate(bodies):
         fid = cast("dict[str, object]", body).get("id") if isinstance(body, dict) else None
-        label = str(fid) if fid is not None else f"#{position}"
+        # An entry's own id only when it looks like one: the file may be any
+        # file on the machine, and its "id" any value in it.
+        label = fid if isinstance(fid, str) and _ID.fullmatch(fid) else f"#{position}"
         try:
             fact = Fact.model_validate(body)
             if fact.selectable():

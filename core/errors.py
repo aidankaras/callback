@@ -13,12 +13,24 @@ import re
 
 import yaml
 from pydantic import ValidationError
+from pydantic_core import ErrorDetails
 
 
 def validation_problems(exc: ValidationError) -> str:
-    """Each error as `location: message`, without the input it rejected."""
+    """Each error as `location: message`, without the input it rejected.
+
+    A key the model does not define is shown as `<key>`: it came from the
+    file, and a file's keys can be as private as its values.
+    """
+
+    def where(error: ErrorDetails) -> str:
+        parts = [str(p) for p in error["loc"]]
+        if error["type"] == "extra_forbidden" and parts:
+            parts[-1] = "<key>"
+        return ".".join(parts) or "(document)"
+
     return "; ".join(
-        f"{'.'.join(str(p) for p in error['loc']) or '(document)'}: {error['msg']}"
+        f"{where(error)}: {error['msg']}"
         for error in exc.errors(include_input=False, include_url=False)
     )
 

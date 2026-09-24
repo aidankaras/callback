@@ -43,9 +43,11 @@ def _now() -> datetime:
 
 def _explained(exc: Exception) -> bool:
     """Whether `exc` is a failure callback meant to explain: one of its own
-    errors, invalid arguments, or a file that cannot be read. Its message is
-    the one the command line prints."""
-    return type(exc).__module__.startswith("core.") or isinstance(exc, (ValidationError, OSError))
+    errors, invalid arguments, or a file that cannot be read or parsed. Its
+    message is the one the command line prints."""
+    return type(exc).__module__.startswith("core.") or isinstance(
+        exc, (ValidationError, OSError, yaml.YAMLError, UnicodeDecodeError)
+    )
 
 
 def _reason(exc: BaseException) -> str:

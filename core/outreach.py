@@ -49,7 +49,7 @@ class Outreach(BaseModel):
     @classmethod
     def _is_a_name(cls, value: str) -> str:
         if not _NAME.fullmatch(value.strip()):
-            raise ValueError(f"{value!r} must be a person's name, e.g. 'Sam Rivera'")
+            raise ValueError("must be a person's name, e.g. 'Sam Rivera'")
         return value.strip()
 
 

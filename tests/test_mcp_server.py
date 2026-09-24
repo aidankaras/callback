@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
+from typing import Any, cast
 
 import pytest
 
@@ -234,3 +235,73 @@ def test_a_corrupt_notebook_is_refused_without_quoting_a_note(
         call("notes_list", {})
     assert "kind" in str(raised.value)  # the reason survives
     assert PLANTED not in str(raised.value) and "zqxpl" not in str(raised.value)
+
+
+def test_a_rejected_entry_is_named_by_position_unless_its_id_is_an_id(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import json
+
+    monkeypatch.setenv("CALLBACK_HOME", str(tmp_path / "cb"))
+    ensure_home()
+    path = tmp_path / "x.json"
+    path.write_text(json.dumps([{"id": {"token": PLANTED}}, {"id": PLANTED + " x"}, {"id": "ok-1"}]))
+    called = call("facts_add", {"path": str(path)})
+    result = cast("dict[str, Any]", called.structured_content)  # type: ignore[attr-defined]
+    assert [r["id"] for r in result["rejected"]] == ["#0", "#1", "ok-1"]
+    assert PLANTED not in str(result)
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        f"identity: {{name: A, email: a@b.co}}\n{PLANTED}_key: 1\n",
+        f"recipient: 'api_key={PLANTED}'\n",
+    ],
+)
+def test_an_unknown_key_or_a_rejected_value_is_not_quoted(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, body: str
+) -> None:
+    from mcp.server.mcpserver.exceptions import ToolError
+
+    monkeypatch.setenv("CALLBACK_HOME", str(tmp_path / "cb"))
+    ensure_home()
+    doc = tmp_path / "doc.yaml"
+    doc.write_text(body, encoding="utf-8")
+    for tool in ("build", "outreach"):
+        args: dict[str, object] = {"doc_path": str(doc)}
+        if tool == "build":
+            args["job_id"] = "x"
+        with pytest.raises(ToolError) as raised:
+            call(tool, args)
+        assert PLANTED not in str(raised.value), (tool, str(raised.value))
+
+
+@pytest.mark.parametrize(
+    ("setup", "tool", "args"),
+    [
+        ("outreach-yaml", "outreach", {}),
+        ("profile", "triage", {}),
+        ("binary", "answers", {}),
+    ],
+)
+def test_every_expected_failure_says_why(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, setup: str, tool: str, args: dict[str, object]
+) -> None:
+    """Never the bare "Error executing tool": a model told only that cannot act."""
+    from mcp.server.mcpserver.exceptions import ToolError, UnexpectedToolError
+
+    monkeypatch.setenv("CALLBACK_HOME", str(tmp_path / "cb"))
+    ensure_home()
+    doc = tmp_path / "doc.yaml"
+    if setup == "outreach-yaml":
+        doc.write_text("recipient: [unclosed\n", encoding="utf-8")
+    elif setup == "binary":
+        doc.write_bytes(b"\xff\xfe\x00garbage")
+    else:
+        (tmp_path / "cb" / "profile.yaml").write_text("work_authorization: [\n", encoding="utf-8")
+    if setup != "profile":
+        args = {"doc_path": str(doc)}
+    with pytest.raises(ToolError) as raised:
+        call(tool, args)
+    assert not isinstance(raised.value, UnexpectedToolError), str(raised.value)

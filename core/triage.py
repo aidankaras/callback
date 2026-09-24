@@ -121,6 +121,10 @@ class Eligibility:
         return "eligible"
 
 
+class ProfileError(ValueError):
+    """The eligibility profile cannot be read; a `ValueError`, as callers expect."""
+
+
 def load_profile() -> Profile:
     path = resolve_inside(PROFILE_FILE)
     if not path.exists():
@@ -128,7 +132,7 @@ def load_profile() -> Profile:
     try:
         return Profile.model_validate(yaml.safe_load(path.read_text(encoding="utf-8")) or {})
     except (OSError, yaml.YAMLError, ValidationError) as exc:
-        raise ValueError(f"{path} is not a readable profile: {exc}") from exc
+        raise ProfileError(f"{path} is not a readable profile: {exc}") from exc
 
 
 def save_profile(profile: Profile) -> None:
