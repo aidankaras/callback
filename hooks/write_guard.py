@@ -230,12 +230,16 @@ def _named(text: str) -> str:
     return " ".join(re.findall(r"[a-z]+", found.group(0).casefold())) if found else "facts confirm"
 
 
+def _names_candidate_only(text: str) -> bool:
+    """Whether `text` names a candidate-only command or module."""
+    return bool(_CANDIDATE_TEXT.search(text) or _CANDIDATE_CODE.search(text))
+
+
 def _git_config_runs(words: list[str]) -> bool:
     """Whether a `git` command sets config that names a candidate-only command
     or module (`-c alias.x=!...`)."""
     return Path(words[0]).name == "git" and any(
-        w in {"-c", "--config-env"} and (_CANDIDATE_TEXT.search(nxt) or _CANDIDATE_CODE.search(nxt))
-        for w, nxt in pairwise(words)
+        w in {"-c", "--config-env"} and _names_candidate_only(nxt) for w, nxt in pairwise(words)
     )
 
 
@@ -255,7 +259,7 @@ def check_bash(command: str, cwd: Path) -> None:
             bool(words)
             and Path(words[0]).name in _MENTION_ONLY
             and not _git_config_runs(words)
-            and not any(_CANDIDATE_TEXT.search(w) or _CANDIDATE_CODE.search(w) for w in leading)
+            and not any(_names_candidate_only(w) for w in leading)
         )
         if named is not None and not mention_only:
             deny(
@@ -273,8 +277,10 @@ def check_bash(command: str, cwd: Path) -> None:
         names = [Path(w).name for w in words]
         for sub in _CANDIDATE_ONLY:
             if _runs(names, ["callback", *sub]) or _runs(names, ["-m", "core.cli", *sub]):
-                named = " ".join(sub)
-                deny(f"`callback {named}` must be typed by the candidate in their own terminal")
+                deny(
+                    f"`callback {' '.join(sub)}` must be typed by the candidate "
+                    "in their own terminal"
+                )
         # A redirect turns any command into a write, so a segment with one is
         # never exempt: `ls > facts.yaml` truncates the file as surely as `echo`.
         redirects = any(">" in w for w in words)

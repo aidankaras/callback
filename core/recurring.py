@@ -12,11 +12,11 @@ disappears from the next report without anything being cleared.
 
 A record that cannot be read is listed by job, never skipped. So is one
 whose grounding failed without naming any fact: a record from before per-fact
-findings were kept, a document with no bullets, or a gate that crashed. (A
+findings were kept, a document with no bullets, or a gate that crashed. Its
+failures could recur unseen, so a report of no recurring failures means every
+record was read and every grounding failure in them was traced to a fact. (A
 bullet citing a fact that does not exist names the ids it cited, so it is
-traced like any other failure.) Its failures could recur unseen, so a report of no recurring
-failures means every record was read and every grounding failure in them was
-traced to a fact.
+traced like any other failure.)
 """
 
 from __future__ import annotations
