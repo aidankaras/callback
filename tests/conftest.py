@@ -21,3 +21,14 @@ def _no_network(monkeypatch: pytest.MonkeyPatch) -> None:
         raise RuntimeError(f"tests may not open network connections (tried {address!r})")
 
     monkeypatch.setattr(socket.socket, "connect", guarded)
+
+
+@pytest.fixture(autouse=True)
+def _no_real_home(
+    tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """No test may read or write the machine's real data home. A test that
+    forgets to set `CALLBACK_HOME` gets an empty one of its own instead of
+    whatever `~/.callback` holds -- a pass that depended on it would be a
+    pass on someone's personal data. A test that sets its own still wins."""
+    monkeypatch.setenv("CALLBACK_HOME", str(tmp_path_factory.mktemp("unset-home") / "cb"))
