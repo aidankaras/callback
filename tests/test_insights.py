@@ -78,7 +78,7 @@ def _rows(rows: tuple[object, ...]) -> dict[str, tuple[int, int, int]]:
 
 def test_sends_split_a_refreshed_application_and_keep_legacy_as_unknown() -> None:
     items = sends(APPS)
-    assert len(items) == 10  # 8 applications, one refreshed, one legacy
+    assert len(items) == 10  # 9 applications; a5 refreshed adds one; l1 is legacy
     a5 = [s for s in items if s.view.job_id == "a5"]
     assert [[o.kind for o in s.view.outcomes] for s in a5] == [["viewed"], ["rejected"]]
     assert sum(s.sent is None for s in items) == 1

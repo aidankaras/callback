@@ -187,3 +187,39 @@ def test_gaps_count_the_rejected_applications_whose_posting_asked(
         ],
         "rejected_without_saved_posting": ["lost", "blank"],
     }
+
+
+def test_a_bullet_citing_a_missing_fact_is_traced_even_beside_a_traced_failure(
+    tmp_path: Path,
+) -> None:
+    """One bullet cites a fact id that does not exist, another fails normally.
+    The first must still name its (missing) fact: otherwise the second makes the
+    record look fully traced and the first's failure can recur unseen."""
+    fact = Fact(
+        id="etl",
+        kind=FactKind.EXPERIENCE_DETAIL,
+        text="Built the data pipeline",
+        provenance=Provenance(source="user", trust=Trust.USER_CONFIRMED),
+    )
+    doc = ResumeDoc(
+        identity=Identity(name="Dana Vex", email="d@example.com"),
+        sections=[
+            Section(
+                title="Experience",
+                entries=[
+                    Entry(
+                        heading="Northwind",
+                        bullets=[
+                            Bullet(text="Built the ETL pipeline", sources=["etl"]),
+                            Bullet(text="Shipped the loader", sources=["loader", "ghost"]),
+                        ],
+                    )
+                ],
+            )
+        ],
+    )
+    grounding = run_gates(doc, {"etl": fact}, tmp_path / "absent.pdf").outcomes[0]
+    assert {(f.kind, f.facts) for f in grounding.fact_findings} == {
+        ("unknown_entity", ("etl",)),
+        ("unknown_fact", ("ghost", "loader")),
+    }

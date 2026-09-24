@@ -115,6 +115,10 @@ def _grounding(doc: ResumeDoc, facts: Mapping[str, Fact]) -> tuple[GateOutcome, 
         unknown = [s for s in bullet.sources if s not in facts]
         if unknown:
             findings.append(f"bullet {i}: cites unknown fact(s) {unknown}")
+            # Named per fact too, so a missing fact cited in job after job is
+            # reported as recurring rather than lost beside a traced failure.
+            cited = tuple(sorted(set(bullet.sources)))
+            by_fact.append(FactFinding("unknown_fact", cited, f"cites unknown fact(s) {unknown}"))
             failed = True
             continue
         verdict, bullet_findings = check_bullet(

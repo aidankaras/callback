@@ -321,17 +321,8 @@ rewritten from scratch fails even when every entry chains correctly, and
 
 The plugin registers `callback-mcp` (see `.mcp.json`), which serves the same
 checks as tools: `build`, `letter`, `answers`, `outreach`, `facts_add`,
-<<<<<<< ours
 `facts_list`, `notes_list`, `notes_propose`, `notes_retire`, `watch`, `triage`, `fit`, `agenda`, `postings_take`, `postings_resolve`,
-`applications`, `funnel`,
-=======
-`facts_list`, `notes_list`, `notes_propose`, `watch`, `triage`, `fit`, `agenda`, `postings_take`, `postings_resolve`,
-<<<<<<< ours
-`applications`, `funnel`, `insights`,
->>>>>>> theirs
-=======
 `applications`, `funnel`, `insights`, `gaps`,
->>>>>>> theirs
 `eligibility`, `apply`, `interview` and `verify`. Each wraps the function the
 command line calls, so a result is identical whichever way it is reached, and
 a failure is a tool error, never an empty result. `facts confirm`, activating
