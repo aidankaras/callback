@@ -252,6 +252,11 @@ def test_a_wildcard_outside_the_data_home_is_allowed(home: Path, tmp_path: Path)
         '/bin/bash -c "callback facts confirm"',
         '/usr/bin/env script -qc "callback facts confirm" /dev/null',
         './script -qc "callback facts confirm" /dev/null',
+        'watch "callback facts confirm"',
+        'flock /tmp/l bash -c "callback facts confirm"',
+        'find . -exec bash -c "callback facts confirm" \\;',
+        "awk 'BEGIN{system(\"callback facts confirm\")}'",
+        'uv run --locked bash -c "callback facts confirm"',
     ],
 )
 def test_confirm_run_through_a_pseudo_terminal_wrapper_is_denied(home: Path, command: str) -> None:
@@ -263,3 +268,21 @@ def test_confirm_run_through_a_pseudo_terminal_wrapper_is_denied(home: Path, com
     result = run_guard(_bash(command), home, cwd=home)
     assert denied(result), (command, result.stderr)
     assert "facts confirm" in result.stderr
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        'rg -n "facts confirm" docs/',
+        'git log --grep "facts confirm"',
+    ],
+)
+def test_a_search_or_commit_may_mention_confirm(home: Path, command: str) -> None:
+    result = run_guard(_bash(command), home, cwd=home)
+    assert result.returncode == 0, (command, result.stderr)
+
+
+def test_a_mention_passed_through_a_runner_is_refused_by_design(home: Path) -> None:
+    """The guard does not model what a runner runs, so it refuses the mention too."""
+    result = run_guard(_bash('timeout 10 grep -rn "facts confirm" docs/'), home, cwd=home)
+    assert denied(result)

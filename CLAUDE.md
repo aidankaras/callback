@@ -282,15 +282,18 @@ message naming the fix. The fixtures that pin this collide on value, not layout:
 an English fragment, an ordinary hyphenated word.
 
 **9. A guarantee that rests on the environment lacking something holds only until something
-supplies it.** "Only the candidate can confirm a fact" rested on `/dev/tty` being unavailable
-to an assistant's shell. `script -qec "callback facts confirm" /dev/null` allocates a
-pseudo-terminal, the confirmation succeeded with no one at the keyboard, and the write guard
-allowed it, because the inner command was one quoted word its command-position check never
-split. The guard now also refuses `facts confirm` inside the text a command runner (`script`,
-`bash -c`, `python -c`, `tmux send-keys`, …) is handed, and every document states the claim
-the code's own docstring always made: a guard against accidental or steered confirmation,
-not a boundary against a program built to get round it. When a guarantee is phrased as
-"cannot", find what would supply the missing thing, and run it.
+supplies it.** "Only the candidate can confirm a fact" rested on `/dev/tty` being
+unavailable to an assistant's shell. `script -qec "callback facts confirm" /dev/null`
+allocates a pseudo-terminal, the confirmation succeeded with no one at the keyboard, and the
+write guard allowed it, because the inner command was one quoted word its command-position
+check never split. A first fix listed the runners to refuse (`script`, `bash -c`, …); review
+then got past it with `watch`, `flock`, `find -exec`, `awk` and `uv run --locked bash -c`.
+The guard now refuses any command naming `facts confirm` except a search or `git`, so an
+unlisted runner is refused by default (a harmless `timeout grep` is refused too, which is
+accepted), and every document states the claim the code's own docstring always made: a guard
+against accidental or steered confirmation, not a boundary against a program built to get
+round it. When a guarantee is phrased as "cannot", find what would supply the missing thing,
+and run it.
 
 ## Commands
 

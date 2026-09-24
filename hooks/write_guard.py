@@ -31,8 +31,8 @@ it reads or writes it -- telling the two apart in an arbitrary command is not
 reliable (`cat x | tee x`, `sed -n` against `sed -i`) and nothing needs the
 raw store, which `callback facts list` reads -- except `ls`, `stat` and `du`,
 which only look, and the argument of a `-m` commit message. `callback facts
-confirm` is refused in command position, and inside the text a command runner
-such as `script` or `bash -c` is handed. Any payload this script cannot read
+confirm` is refused in command position, and anywhere else in a command
+except as the text a search or `git` is given. Any payload this script cannot read
 is denied: a guard that fails open would imply a guarantee it does not give.
 
 Bash guarding is defence in depth, not containment. A shell is a general
@@ -184,41 +184,16 @@ def _runs(words: list[str], wanted: list[str]) -> bool:
     return any(words[i : i + len(wanted)] == wanted for i in range(len(words) - len(wanted) + 1))
 
 
-# Commands that run another command they are handed as text. `script` and
-# `unbuffer` also give it a pseudo-terminal, under which `/dev/tty` opens and
-# `callback facts confirm` succeeds with no one at the keyboard. The inner
-# command arrives as one quoted word the command-position check cannot see.
-# A plain mention stays allowed: `grep "facts confirm" docs/` runs nothing.
-_RUNNERS = frozenset(
-    {
-        "script",
-        "unbuffer",
-        "expect",
-        "socat",
-        "tmux",
-        "screen",
-        "sh",
-        "bash",
-        "zsh",
-        "dash",
-        "python",
-        "python3",
-        "perl",
-        "ruby",
-        "node",
-        "env",
-        "timeout",
-        "nohup",
-        "setsid",
-        "xargs",
-        "eval",
-        "exec",
-        "sudo",
-        "su",
-        "stdbuf",
-        "nice",
-    }
-)
+# `callback facts confirm` can also run as text another command is handed:
+# `script -qc "..."` gives it a pseudo-terminal, under which `/dev/tty` opens
+# and confirmation succeeds with no one at the keyboard, and `bash -c`,
+# `watch`, `flock`, `find -exec` or `awk`'s `system()` run it the same way.
+# Listing the runners cannot be complete, so the rule is inverted: a word
+# naming `facts confirm` is allowed only in a command that merely mentions
+# text, and refused everywhere else. That also refuses a harmless
+# `timeout 10 grep "facts confirm"`; the guard does not model what a runner
+# runs.
+_MENTION_ONLY = frozenset({"grep", "egrep", "fgrep", "rg", "git"})
 _CONFIRM_TEXT = re.compile(r"facts\W{1,6}confirm", re.IGNORECASE)
 
 
@@ -232,8 +207,10 @@ def check_bash(command: str, cwd: Path) -> None:
             words, ["-m", "core.cli", "facts", "confirm"]
         ):
             deny("`callback facts confirm` must be typed by the candidate in their own terminal")
-        # By basename: `/bin/bash` and `/usr/bin/env` are the same runners.
-        if Path(words[0]).name in _RUNNERS and any(_CONFIRM_TEXT.search(w) for w in words[1:]):
+        # By basename: `/usr/bin/grep` is still only a search.
+        if Path(words[0]).name not in _MENTION_ONLY and any(
+            _CONFIRM_TEXT.search(w) for w in words[1:]
+        ):
             deny(
                 "`callback facts confirm` must be typed by the candidate in their own "
                 "terminal, not run through another command"
