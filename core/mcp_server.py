@@ -14,7 +14,7 @@ retire a note, never make one active.
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Literal, cast
 
@@ -388,16 +388,28 @@ def funnel() -> dict[str, object]:
 
 
 @server.tool()
-def insights() -> dict[str, object]:
-    """What happened to each packet sent, grouped by template, role family and cited fact.
+def insights(recurring_only: bool = False) -> dict[str, object]:
+    """Grounding failures recurring across jobs, then what happened to each packet sent.
 
+    `recurring_only` returns just the first part, for the start of a session.
     Counts only. Cite them as counts ("3 of 9"), say so when a group is marked
     not comparable (fewer than 5 sends), and never call one group better.
     """
     from core.apply import load_applications
     from core.funnel import Row
     from core.insights import insights as build_insights
+    from core.recurring import recurring as find_recurring
 
+    found = find_recurring()
+    repeated: dict[str, object] = {
+        "recurring": [
+            {"kind": r.kind, "facts": list(r.facts), "detail": r.detail, "jobs": list(r.jobs)}
+            for r in found.recurring
+        ],
+        "unreadable_build_records": list(found.unreadable),
+    }
+    if recurring_only:
+        return repeated
     result = build_insights(load_applications())
 
     def rows(group: tuple[Row, ...]) -> list[dict[str, object]]:
@@ -415,10 +427,39 @@ def insights() -> dict[str, object]:
         ]
 
     return {
+        **repeated,
         "sends": result.sends,
         "by_template": rows(result.by_template),
         "by_role_family": rows(result.by_role_family),
         "by_fact": rows(result.by_fact),
+    }
+
+
+@server.tool()
+def gaps(days: int | None = None) -> dict[str, object]:
+    """Technologies eligible postings ask for that no confirmed fact backs, and how many
+    rejected applications' postings asked for each. A gap is a question for the
+    candidate, never something to add to a resume."""
+    from core.apply import load_applications
+    from core.discovery.store import load_postings
+    from core.insights import rejected_postings
+    from core.profile.store import load_facts
+    from core.triage import gaps as find_gaps
+    from core.triage import load_profile, named_by
+
+    postings = list(load_postings().values())
+    if days is not None:
+        cutoff = _now() - timedelta(days=days)
+        postings = [p for p in postings if p.first_seen >= cutoff]
+    found = find_gaps(postings, load_profile(), load_facts())
+    texts, missing = rejected_postings(load_applications())
+    rejected = named_by([tech for tech, _ in found], texts)
+    return {
+        "gaps": [
+            {"technology": tech, "postings": count, "rejections": rejected[tech]}
+            for tech, count in found
+        ],
+        "rejected_without_saved_posting": missing,
     }
 
 

@@ -45,12 +45,26 @@ _KNOWN: dict[str, Outcome] = {"pass": "pass", "warn": "warn", "fail": "fail"}
 
 
 @dataclass(frozen=True)
+class FactFinding:
+    """Why a bullet failed grounding, with the facts it cited.
+
+    The text findings say which bullet failed; this says which facts, so the
+    same fault recurring across jobs can be traced to one fact and fixed there.
+    """
+
+    kind: str
+    facts: tuple[str, ...]
+    detail: str
+
+
+@dataclass(frozen=True)
 class GateOutcome:
-    """One gate's verdict and its findings as text."""
+    """One gate's verdict and its findings as text; grounding adds them per fact."""
 
     gate: GateName
     verdict: Outcome
     findings: tuple[str, ...]
+    fact_findings: tuple[FactFinding, ...] = ()
 
 
 def aggregate(outcomes: Sequence[GateOutcome]) -> Outcome:
@@ -93,6 +107,7 @@ def _grounding(doc: ResumeDoc, facts: Mapping[str, Fact]) -> tuple[GateOutcome, 
     the bullets that passed -- the only bullets that count as evidence for a
     listed skill."""
     findings: list[str] = []
+    by_fact: list[FactFinding] = []
     grounded: list[str] = []
     failed = False
     bullets = [b for s in doc.sections for e in s.entries for b in e.bullets]
@@ -108,12 +123,17 @@ def _grounding(doc: ResumeDoc, facts: Mapping[str, Fact]) -> tuple[GateOutcome, 
         findings.extend(f"bullet {i}: {f.kind}: {f.detail}" for f in bullet_findings)
         if verdict is Verdict.FAIL:
             failed = True
+            cited = tuple(sorted(set(bullet.sources)))
+            by_fact.extend(FactFinding(str(f.kind), cited, f.detail) for f in bullet_findings)
         else:
             grounded.append(bullet.text)
     if not bullets:
         findings.append("document has no bullets to ground")
         failed = True
-    return GateOutcome("grounding", "fail" if failed else "pass", tuple(findings)), grounded
+    outcome = GateOutcome(
+        "grounding", "fail" if failed else "pass", tuple(findings), tuple(by_fact)
+    )
+    return outcome, grounded
 
 
 def _crashed(gate: GateName, error: Exception) -> GateOutcome:

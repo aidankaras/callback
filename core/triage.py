@@ -27,7 +27,7 @@ from __future__ import annotations
 
 import html
 import re
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Literal
@@ -352,3 +352,12 @@ def gaps(
         for tech in _technologies(posting.text) - evidenced:
             counts[tech] = counts.get(tech, 0) + 1
     return sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))
+
+
+def named_by(technologies: Iterable[str], texts: Iterable[str]) -> dict[str, int]:
+    """For each of `technologies`, how many of `texts` name it, read the way `gaps` reads."""
+    counts = dict.fromkeys(technologies, 0)
+    for text in texts:
+        for tech in _technologies(text) & counts.keys():
+            counts[tech] += 1
+    return counts

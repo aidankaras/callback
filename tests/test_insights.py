@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import Any, cast
 
 import pytest
@@ -147,7 +148,10 @@ def test_no_applications_is_no_sends() -> None:
     assert (result.sends, result.by_template, result.by_fact) == (0, (), ())
 
 
-def test_the_tool_reports_counts_and_never_a_rate(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_the_tool_reports_counts_and_never_a_rate(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("CALLBACK_HOME", str(tmp_path / "cb"))
     monkeypatch.setattr("core.apply.load_applications", lambda: APPS)
     called = asyncio.run(server.call_tool("insights", {}))
     result = cast("dict[str, Any]", called.structured_content)  # type: ignore[attr-defined]
@@ -165,13 +169,15 @@ def test_the_tool_reports_counts_and_never_a_rate(monkeypatch: pytest.MonkeyPatc
     assert not any("rate" in key for r in result["by_fact"] for key in r)
 
 
-def test_the_cli_prints_the_tables(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+def test_the_cli_prints_recurring_failures_then_the_tables(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     from core.cli import main
 
+    monkeypatch.setenv("CALLBACK_HOME", str(tmp_path / "cb"))
     monkeypatch.setattr("core.apply.load_applications", lambda: APPS)
     assert main(["insights"]) == 0
     out = capsys.readouterr().out
-    assert out.startswith("10 packet(s) sent.")
+    assert out.startswith("no grounding failure recurs across jobs\n")
+    assert "10 packet(s) sent." in out
     assert "cited fact" in out and "pricing" in out

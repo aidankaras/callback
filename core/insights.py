@@ -25,6 +25,7 @@ from dataclasses import dataclass
 
 from core.apply import Application, Sent
 from core.funnel import Row, header, line, summarize
+from core.paths import resolve_inside
 
 UNKNOWN = "unknown"
 NO_TEMPLATE = "(no template)"
@@ -83,6 +84,23 @@ def insights(applications: Iterable[Application]) -> Insights:
         ),
         by_fact=_grouped(items, lambda s: [UNKNOWN] if s.sent is None else s.sent.cited_fact_ids),
     )
+
+
+def rejected_postings(applications: Iterable[Application]) -> tuple[list[str], list[str]]:
+    """The saved posting text of every rejected application, and the jobs
+    rejected with no posting saved (`inbox/<job>.md`), which a count built
+    from the texts alone would silently leave out."""
+    texts: list[str] = []
+    missing: list[str] = []
+    for a in applications:
+        if not any(o.kind == "rejected" for o in a.outcomes):
+            continue
+        path = resolve_inside(f"inbox/{a.job_id}.md")
+        if path.is_file():
+            texts.append(path.read_text(encoding="utf-8"))
+        else:
+            missing.append(a.job_id)
+    return texts, missing
 
 
 def render(result: Insights) -> str:

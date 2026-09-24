@@ -38,7 +38,7 @@ run.
 | `callback apply <id> --company … --title … --source …` | Builds the application packet from a gated draft and records it, with the template it started from, the facts it cites and an optional `--role-family`; `--refresh` rebuilds it after the draft improves, keeping every earlier send and what happened to it. **Never submits** | 0, 3 refused |
 | `callback outcome <id> <kind>` / `callback applications` | Records what happened; lists applications | 0, 3 unreadable record |
 | `callback funnel` | Per source: applied, replied (callback, interview, offer or rejection; not "viewed"), positive, interviews, offers, median days to first reply, each as counts, with a source of fewer than 5 applications marked too few to compare; then applications silent for 21+ days, as a suggestion to record them as ghosted | 0, 3 unreadable record |
-| `callback insights` | For each packet sent (a refresh is a new one), what happened, grouped by the template the draft began as, the role family and each cited fact. Counts only; a group of fewer than 5 is marked too few to compare, and nothing is ranked | 0, 3 unreadable record |
+| `callback insights` | Grounding failures that recur in the latest build of two or more jobs, traced to the facts the failing bullets cite; then, for each packet sent (a refresh is a new one), what happened, grouped by the template the draft began as, the role family and each cited fact. Counts only; a group of fewer than 5 is marked too few to compare, and nothing is ranked | 0, 3 unreadable record |
 | `callback finalize <id>` / `callback verify [<id>]` | Seals a gated draft read-only into `final/` with a signed manifest and a hash-chained ledger entry; `verify` reports anything changed since, and any break in the ledger | 0, 2 changed, 3 |
 | `callback interview <id>` | An interview prep pack: the posting, exactly what was sent (verified against the application record) and the facts behind each claim | 0, 3 |
 
@@ -68,7 +68,7 @@ postings anyway.
 | `callback fit <job-id>` | The same knockouts, plus every technology the posting names that the alias table knows: which ones confirmed facts back (with the fact ids to cite) and which are missing | 0 eligible or stretch, 1 a question, 2 knockout, 3 |
 | `callback eligibility <job-id>` | Knockout requirements in a saved posting, each quoted | 0 eligible or stretch, 1 a question, 2 knockout, 3 |
 | `callback triage [--days N]` | Stored postings ranked: knockouts last, then by evidenced technologies and freshness | 0, 3 |
-| `callback gaps [--days N]` | Technologies the eligible stored postings name that no confirmed fact backs, most frequent first | 0, 3 |
+| `callback gaps [--days N]` | Technologies the eligible stored postings name that no confirmed fact backs, most frequent first, with how many rejected applications' saved postings named each; a rejection with no saved posting is listed, not counted | 0, 3 |
 
 **Network access.** Discovery is the only part of callback that uses the
 network:
@@ -323,7 +323,11 @@ checks as tools: `build`, `letter`, `answers`, `outreach`, `facts_add`,
 `applications`, `funnel`,
 =======
 `facts_list`, `notes_list`, `notes_propose`, `watch`, `triage`, `fit`, `agenda`, `postings_take`, `postings_resolve`,
+<<<<<<< ours
 `applications`, `funnel`, `insights`,
+>>>>>>> theirs
+=======
+`applications`, `funnel`, `insights`, `gaps`,
 >>>>>>> theirs
 `eligibility`, `apply`, `interview` and `verify`. Each wraps the function the
 command line calls, so a result is identical whichever way it is reached, and

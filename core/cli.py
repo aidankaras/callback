@@ -639,9 +639,11 @@ def _cmd_interview(args: argparse.Namespace) -> int:
 def _cmd_gaps(args: argparse.Namespace) -> int:
     from datetime import UTC, datetime, timedelta
 
+    from core.apply import ApplyError, load_applications
     from core.discovery.store import load_postings
+    from core.insights import rejected_postings
     from core.profile.store import StoreError, load_facts
-    from core.triage import gaps, load_profile
+    from core.triage import gaps, load_profile, named_by
 
     try:
         postings = list(load_postings().values())
@@ -649,11 +651,17 @@ def _cmd_gaps(args: argparse.Namespace) -> int:
             cutoff = datetime.now(tz=UTC) - timedelta(days=args.days)
             postings = [p for p in postings if p.first_seen >= cutoff]
         found = gaps(postings, load_profile(), load_facts())
-    except (*_discovery_errors(), StoreError, ValueError) as exc:
+        texts, missing = rejected_postings(load_applications())
+    except (*_discovery_errors(), StoreError, ApplyError, ValueError) as exc:
         print(f"callback gaps: {exc}", file=sys.stderr)
         return 3
+    rejected = named_by([tech for tech, _ in found], texts)
+    if found:
+        print(f"{'postings':>8}  {'rejections':>10}  technology")
     for tech, count in found:
-        print(f"{count:>4}  {tech}")
+        print(f"{count:>8}  {rejected[tech]:>10}  {tech}")
+    if missing:
+        print(f"rejected with no saved posting, so not counted: {', '.join(missing)}")
     return 0
 
 
@@ -734,6 +742,11 @@ def _cmd_insights(_args: argparse.Namespace) -> int:
     if not applications:
         print("no applications recorded yet")
         return 0
+    from core.recurring import recurring
+    from core.recurring import render as render_recurring
+
+    print(render_recurring(recurring()))
+    print()
     print(render(insights(applications)))
     return 0
 
