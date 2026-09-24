@@ -485,3 +485,51 @@ def test_a_command_that_looks_but_carries_a_write_is_refused(home: Path, command
     (home / "notes.yaml").write_text("notes: []\n")
     result = run_guard(_bash(command.format(home=home)), home, cwd=home.parent)
     assert denied(result), (command, result.stderr)
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        'cd "$(rm {home}/facts.yaml)" 2>/dev/null',
+        'cd "$(rm {home}/facts.yaml)" 2>&1',
+        'cd "$(rm {home}/facts.yaml)"',
+        'pushd "$(rm {home}/facts.yaml)" >/dev/null',
+        "cd `rm {home}/facts.yaml`",
+    ],
+)
+def test_changing_directory_through_a_substitution_is_refused(home: Path, command: str) -> None:
+    """`cd` is exempt only when it can neither run nor write, like `ls`."""
+    assert denied(run_guard(_bash(command.format(home=home)), home, cwd=home.parent)), command
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        (
+            "grep -c x \"$(printf 'y\\n' | script -qec 'uv run callback facts confirm' "
+            '/dev/null)" /dev/null'
+        ),
+        "grep -r x `callback facts confirm`",
+        "git log --grep \"$(python3 -c 'import core.notes')\"",
+        'rg x "$(callback notes activate n1)"',
+    ],
+)
+def test_a_search_runs_what_it_substitutes(home: Path, command: str) -> None:
+    """A search or `git` may mention a candidate-only command, not run one:
+    text inside `$(...)` or backticks runs before the search sees it."""
+    assert denied(run_guard(_bash(command), home, cwd=home)), command
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "CALLBACK_HOME={home} uv run callback facts list",
+        'CALLBACK_HOME="{home}" uv run callback agenda',
+        "H=$CALLBACK_HOME; ls $H",
+    ],
+)
+def test_an_assignment_naming_the_data_home_is_allowed(home: Path, command: str) -> None:
+    """Only an assignment that substitutes a command is checked for paths.
+    Mutation: check every assignment -- all three are refused."""
+    result = run_guard(_bash(command.format(home=home)), home, cwd=home.parent)
+    assert result.returncode == 0, (command, result.stderr)

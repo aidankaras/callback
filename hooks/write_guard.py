@@ -305,13 +305,18 @@ def check_bash(command: str, cwd: Path) -> None:
         # text (a commit message, a log search) but not through `-c`, whose
         # aliases, editor and pager run commands.
         leading = segment[: len(segment) - len(words)] if words else segment
-        named = next((w for w in segment if _CANDIDATE_TEXT.search(w)), None)
-        code = next((w for w in segment if _CANDIDATE_CODE.search(w)), None)
+        # Searched across the words as well as in each: an unquoted backtick
+        # splits `` `callback facts confirm` `` into three.
+        joined = " ".join(segment)
+        named = joined if _CANDIDATE_TEXT.search(joined) else None
+        code = joined if _CANDIDATE_CODE.search(joined) else None
+        # A search mentions text; a substitution inside its arguments runs it.
         mention_only = (
             bool(words)
             and Path(words[0]).name in _MENTION_ONLY
             and not _git_config_runs(words)
             and not any(_names_candidate_only(w) for w in leading)
+            and not any(_SUBSTITUTION.search(w) for w in segment)
         )
         if named is not None and not mention_only:
             deny(
@@ -323,8 +328,9 @@ def check_bash(command: str, cwd: Path) -> None:
                 "code that confirms facts or activates notes runs only as `callback`, "
                 "typed by the candidate; read with `callback facts list` or `notes list`"
             )
-        # An assignment runs what it substitutes: `A="$(rm facts.yaml)"`.
-        _check_paths(leading, bases)
+        # An assignment runs what it substitutes: `A="$(rm facts.yaml)"`. One
+        # that only names a path, `CALLBACK_HOME=~/.callback`, writes nothing.
+        _check_paths([w for w in leading if _SUBSTITUTION.search(w)], bases)
         if not words:
             continue
         # By basename: `.venv/bin/callback` is the same command as `callback`.
@@ -338,13 +344,13 @@ def check_bash(command: str, cwd: Path) -> None:
         # A redirect turns any command into a write: `ls > facts.yaml` truncates
         # the file as surely as `echo`.
         redirects = _writes(words)
-        if words[0] in {"cd", "pushd"} and len(words) > 1:
-            bases += [base / _expand(words[1]) for base in bases]
-            if not redirects:
-                continue
         # A substitution runs a command inside the argument: `ls "$(rm x)"` is
         # an `rm`, whatever runs first.
         substitutes = any(_SUBSTITUTION.search(w) for w in segment)
+        if words[0] in {"cd", "pushd"} and len(words) > 1:
+            bases += [base / _expand(words[1]) for base in bases]
+            if not redirects and not substitutes:
+                continue
         if words[0] in _LOOK_ONLY and not redirects and not substitutes:
             continue
         _check_paths(words, bases)
