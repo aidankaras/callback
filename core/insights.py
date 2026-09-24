@@ -96,8 +96,10 @@ def rejected_postings(applications: Iterable[Application]) -> tuple[list[str], l
         if not any(o.kind == "rejected" for o in a.outcomes):
             continue
         path = resolve_inside(f"inbox/{a.job_id}.md")
-        if path.is_file():
-            texts.append(path.read_text(encoding="utf-8"))
+        text = path.read_text(encoding="utf-8") if path.is_file() else ""
+        # An empty file names nothing, which reads the same as a zero.
+        if text.strip():
+            texts.append(text)
         else:
             missing.append(a.job_id)
     return texts, missing

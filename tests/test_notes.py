@@ -223,3 +223,24 @@ def test_the_cli_sets_and_shows_role_families(
     assert main(["notes", "families"]) == 0
     assert capsys.readouterr().out.splitlines()[-1] == "ml-infra, quant"
     assert main(["notes", "families", "--set", "Bad Name"]) == 3
+
+
+@pytest.mark.parametrize("hidden", ["\x1b[2K\x1b[1G", "\u202e", "\u200b", "\x07"])
+def test_a_note_cannot_hide_text_from_the_terminal_that_shows_it(home: Path, hidden: str) -> None:
+    """An escape sequence that erases the line, or a bidirectional override,
+    would have the candidate approve words they never saw."""
+    with pytest.raises(NoteError, match="control or format characters"):
+        notes.propose("constraint", f"never x{hidden}always one page", source_context=None, now=NOW)
+
+
+def test_a_notebook_with_a_repeated_id_is_refused(home: Path) -> None:
+    """Otherwise `retire n1` retires the first and reports success while the
+    second stays active."""
+    note = (
+        "{id: n1, kind: goal, text: %s, added: '2026-09-01T00:00:00+00:00', "
+        "source: user, status: %s}"
+    )
+    body = f"notes:\n- {note % ('a', 'retired')}\n- {note % ('b', 'active')}\n"
+    (home / "notes.yaml").write_text(body, encoding="utf-8")
+    with pytest.raises(NoteError, match="must not repeat"):
+        notes.load()

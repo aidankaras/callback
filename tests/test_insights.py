@@ -181,3 +181,31 @@ def test_the_cli_prints_recurring_failures_then_the_tables(
     assert out.startswith("no grounding failure recurs across jobs\n")
     assert "10 packet(s) sent." in out
     assert "cited fact" in out and "pricing" in out
+
+
+def test_the_cli_reports_recurring_failures_before_any_application(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The part meant for the start of a session matters most before the first application."""
+    import json
+
+    from core.cli import main
+
+    monkeypatch.setenv("CALLBACK_HOME", str(tmp_path / "cb"))
+    finding = {
+        "kind": "unknown_entity",
+        "facts": ["etl"],
+        "detail": "'ETL' appears in no cited fact",
+    }
+    for job in ("acme", "globex"):
+        draft = tmp_path / "cb" / "outputs" / job / "draft"
+        draft.mkdir(parents=True)
+        record = {
+            "outcomes": [{"gate": "grounding", "verdict": "fail"}],
+            "fact_findings": [finding],
+        }
+        (draft / "report.json").write_text(json.dumps(record), encoding="utf-8")
+    assert main(["insights"]) == 0
+    out = capsys.readouterr().out
+    assert out.startswith("2 jobs: bullets citing etl")
+    assert "no applications recorded yet" in out

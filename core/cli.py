@@ -733,7 +733,12 @@ def _cmd_funnel(_args: argparse.Namespace) -> int:
 def _cmd_insights(_args: argparse.Namespace) -> int:
     from core.apply import ApplyError, load_applications
     from core.insights import insights, render
+    from core.recurring import recurring
+    from core.recurring import render as render_recurring
 
+    # First, and whatever else is missing: it matters before any application.
+    print(render_recurring(recurring()))
+    print()
     try:
         applications = load_applications()
     except ApplyError as exc:
@@ -742,11 +747,6 @@ def _cmd_insights(_args: argparse.Namespace) -> int:
     if not applications:
         print("no applications recorded yet")
         return 0
-    from core.recurring import recurring
-    from core.recurring import render as render_recurring
-
-    print(render_recurring(recurring()))
-    print()
     print(render(insights(applications)))
     return 0
 

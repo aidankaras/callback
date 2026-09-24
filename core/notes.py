@@ -15,8 +15,9 @@ through `callback notes activate`, which shows the full text and where it came
 from. A tool-permission prompt does not count: it shows an id rather than the
 text, and an auto-approving session approves it with no one looking.
 
-Retiring needs no terminal. It can only set aside a note the candidate
-activated, the note stays in the file, and activating it again asks them.
+Retiring needs no terminal: it only ever removes a note from what sessions
+follow, never adds one. The note stays in the file, and activating it again
+asks the candidate.
 
 `notes.yaml` also holds the role families the candidate sorts applications
 into, so that `insights` can group by them.
@@ -25,6 +26,7 @@ into, so that `insights` can group by them.
 from __future__ import annotations
 
 import re
+import unicodedata
 from collections.abc import Callable
 from datetime import datetime
 from typing import Literal
@@ -73,6 +75,17 @@ class Note(BaseModel):
 
     _aware = field_validator("added")(_aware)
 
+    @field_validator("text")
+    @classmethod
+    def _printable(cls, value: str) -> str:
+        # Activation shows the candidate this text at their terminal. A control
+        # or format character -- an escape sequence that erases the line, a
+        # bidirectional override -- would make them approve words they never saw.
+        hidden = sorted({f"U+{ord(c):04X}" for c in value if unicodedata.category(c)[0] == "C"})
+        if hidden:
+            raise ValueError(f"a note may not contain control or format characters: {hidden}")
+        return value
+
 
 class Notebook(BaseModel):
     model_config = {"extra": "forbid"}
@@ -88,6 +101,15 @@ class Notebook(BaseModel):
             raise ValueError(f"role families must be lowercase letters, digits, hyphens: {bad}")
         if len(set(value)) != len(value):
             raise ValueError("role families must not repeat")
+        return value
+
+    @field_validator("notes")
+    @classmethod
+    def _unique(cls, value: list[Note]) -> list[Note]:
+        ids = [n.id for n in value]
+        repeated = sorted({i for i in ids if ids.count(i) > 1})
+        if repeated:
+            raise ValueError(f"note ids must not repeat: {repeated}")
         return value
 
 

@@ -10,8 +10,12 @@ Only the latest build of each job counts. Rebuilding one draft five times
 while fixing it is one job, not five, and a failure fixed and rebuilt
 disappears from the next report without anything being cleared.
 
-A record that cannot be read is listed by job, never skipped: a report of no
-recurring failures must mean every record was read and none recurred.
+A record that cannot be read is listed by job, never skipped. So is one
+whose grounding failed without naming any fact: a record from before per-fact
+findings were kept, a bullet citing a fact that does not exist, or a gate
+that crashed. Its failures could recur unseen, so a report of no recurring
+failures means every record was read and every grounding failure in them was
+traced to a fact.
 """
 
 from __future__ import annotations
@@ -37,19 +41,26 @@ class Recurring:
 class Report:
     recurring: tuple[Recurring, ...]
     unreadable: tuple[str, ...]
+    untraced: tuple[str, ...] = ()
 
 
-def _findings(record: object) -> set[tuple[str, tuple[str, ...], str]] | None:
+Key = tuple[str, tuple[str, ...], str]
+
+
+def _findings(record: object) -> set[Key] | None:
     """The distinct per-fact findings in one build record, or `None` if it is malformed.
 
-    A record from before per-fact findings were kept has none and is not malformed.
+    Malformed includes a record with no grounding outcome: every build writes one.
     """
     if not isinstance(record, dict):
         return None
-    raw = cast("dict[str, object]", record).get("fact_findings", [])
+    body = cast("dict[str, object]", record)
+    if _grounding_verdict(body) is None:
+        return None
+    raw = body.get("fact_findings", [])
     if not isinstance(raw, list):
         return None
-    found: set[tuple[str, tuple[str, ...], str]] = set()
+    found: set[Key] = set()
     for item in cast("list[object]", raw):
         if not isinstance(item, dict):
             return None
@@ -64,21 +75,38 @@ def _findings(record: object) -> set[tuple[str, tuple[str, ...], str]] | None:
     return found
 
 
+def _grounding_verdict(body: dict[str, object]) -> str | None:
+    outcomes = body.get("outcomes")
+    if not isinstance(outcomes, list):
+        return None
+    for item in cast("list[object]", outcomes):
+        if isinstance(item, dict):
+            entry = cast("dict[str, object]", item)
+            verdict = entry.get("verdict")
+            if entry.get("gate") == "grounding" and isinstance(verdict, str):
+                return verdict
+    return None
+
+
 def recurring() -> Report:
     outputs = resolve_inside("outputs")
     if not outputs.is_dir():
         return Report((), ())
-    seen: dict[tuple[str, tuple[str, ...], str], list[str]] = {}
+    seen: dict[Key, list[str]] = {}
     unreadable: list[str] = []
+    untraced: list[str] = []
     for path in sorted(outputs.glob("*/draft/report.json")):
         job = path.parent.parent.name
         try:
-            found = _findings(json.loads(path.read_text(encoding="utf-8")))
+            body: object = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
-            found = None
+            body = None
+        found = _findings(body)
         if found is None:
             unreadable.append(job)
             continue
+        if not found and _grounding_verdict(cast("dict[str, object]", body)) == "fail":
+            untraced.append(job)
         for key in found:
             seen.setdefault(key, []).append(job)
     hits = [
@@ -87,7 +115,7 @@ def recurring() -> Report:
         if len(jobs) >= MIN_JOBS
     ]
     hits.sort(key=lambda r: (-len(r.jobs), r.facts, r.kind, r.detail))
-    return Report(tuple(hits), tuple(unreadable))
+    return Report(tuple(hits), tuple(unreadable), tuple(untraced))
 
 
 def render(report: Report) -> str:
@@ -98,4 +126,9 @@ def render(report: Report) -> str:
     ]
     if report.unreadable:
         lines.append(f"could not read the build record for: {', '.join(report.unreadable)}")
+    if report.untraced:
+        lines.append(
+            f"grounding failed without naming a fact in: {', '.join(report.untraced)}; "
+            "rebuild them, or read their report.md"
+        )
     return "\n".join(lines) or "no grounding failure recurs across jobs"

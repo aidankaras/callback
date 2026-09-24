@@ -15,7 +15,7 @@ from core.insights import rejected_postings
 from core.mcp_server import server
 from core.paths import ensure_home
 from core.profile.models import Fact, FactKind, Identity, Provenance, Trust
-from core.recurring import MIN_JOBS, recurring, render
+from core.recurring import MIN_JOBS, Report, recurring, render
 from core.resume.models import Bullet, Entry, ResumeDoc, Section
 from core.triage import named_by
 
@@ -31,8 +31,10 @@ def home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 def _record(home: Path, job: str, *findings: tuple[str, list[str], str]) -> None:
     draft = home / "outputs" / job / "draft"
     draft.mkdir(parents=True, exist_ok=True)
-    body = {
-        "verdict": "fail" if findings else "pass",
+    verdict = "fail" if findings else "pass"
+    body: dict[str, object] = {
+        "verdict": verdict,
+        "outcomes": [{"gate": "grounding", "verdict": verdict, "findings": []}],
         "fact_findings": [{"kind": k, "facts": f, "detail": d} for k, f, d in findings],
     }
     (draft / "report.json").write_text(json.dumps(body), encoding="utf-8")
@@ -99,11 +101,37 @@ def test_an_unreadable_record_is_named_not_skipped(home: Path) -> None:
     assert "could not read the build record for: globex" in render(report)
 
 
-def test_a_record_from_before_per_fact_findings_is_not_unreadable(home: Path) -> None:
-    draft = home / "outputs" / "old" / "draft"
+def _grounding_only(home: Path, job: str, verdict: str, **extra: object) -> None:
+    draft = home / "outputs" / job / "draft"
     draft.mkdir(parents=True)
-    (draft / "report.json").write_text(json.dumps({"verdict": "pass", "outcomes": []}))
-    assert recurring() == type(recurring())((), ())
+    outcomes = [{"gate": "grounding", "verdict": verdict, "findings": ["bullet 0: ..."]}]
+    (draft / "report.json").write_text(json.dumps({"outcomes": outcomes, **extra}))
+
+
+def test_a_passing_record_from_before_per_fact_findings_is_neither_unreadable_nor_untraced(
+    home: Path,
+) -> None:
+    _grounding_only(home, "old", "pass")
+    assert recurring() == Report((), (), ())
+
+
+def test_a_grounding_failure_that_names_no_fact_is_listed_not_read_as_clean(home: Path) -> None:
+    """A record from before per-fact findings, and one whose grounding failed
+    naming no fact (a cited fact that does not exist, a crashed gate). Either
+    could hide a recurring failure. Mutation: drop the untraced list -- the
+    report reads "no grounding failure recurs"."""
+    _grounding_only(home, "old", "fail")
+    _grounding_only(home, "crashed", "fail", fact_findings=[])
+    report = recurring()
+    assert report.untraced == ("crashed", "old") and report.unreadable == ()
+    assert "grounding failed without naming a fact in: crashed, old" in render(report)
+
+
+def test_a_record_with_no_grounding_outcome_is_unreadable(home: Path) -> None:
+    draft = home / "outputs" / "odd" / "draft"
+    draft.mkdir(parents=True)
+    (draft / "report.json").write_text("{}")
+    assert recurring().unreadable == ("odd",)
 
 
 def test_nothing_built_yet_is_nothing_recurring(home: Path) -> None:
@@ -128,18 +156,22 @@ def _application(job: str, *kinds: str) -> dict[str, object]:
 def test_gaps_count_the_rejected_applications_whose_posting_asked(
     home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Two rejections: one posting asks for Kubernetes, the other was never saved
-    and is named rather than counted as asking for nothing. The offer's posting
+    """Three rejections: one posting asks for Kubernetes, one was never saved and
+    one was saved empty; those two are named rather than counted as asking for
+    nothing. The offer's posting
     also asks, and must not count. Mutation: count every application -- 2."""
     apps = [_application("k8s", "rejected"), _application("lost", "rejected")]
+    apps.append(_application("blank", "rejected"))
     apps.append(_application("hired", "offer"))
     (home / "applications.yaml").write_text(yaml.safe_dump(apps), encoding="utf-8")
     (home / "inbox" / "k8s.md").write_text("We run Kubernetes and PyTorch.", encoding="utf-8")
     (home / "inbox" / "hired.md").write_text("Kubernetes everywhere.", encoding="utf-8")
+    (home / "inbox" / "blank.md").write_text("  \n", encoding="utf-8")
     assert not (home / "inbox" / "lost.md").exists()  # premise: one posting is missing
 
     texts, missing = rejected_postings(load_applications())
-    assert missing == ["lost"] and len(texts) == 1
+    # An empty saved posting names nothing: listed with the missing, not counted as zero.
+    assert missing == ["lost", "blank"] and len(texts) == 1
     assert named_by(["Kubernetes", "SQL"], texts) == {"Kubernetes": 1, "SQL": 0}
 
     # The tool joins the two; the posting-side count is `gaps`' own, tested in test_triage.
@@ -153,5 +185,5 @@ def test_gaps_count_the_rejected_applications_whose_posting_asked(
             {"technology": "Kubernetes", "postings": 3, "rejections": 1},
             {"technology": "SQL", "postings": 1, "rejections": 0},
         ],
-        "rejected_without_saved_posting": ["lost"],
+        "rejected_without_saved_posting": ["lost", "blank"],
     }

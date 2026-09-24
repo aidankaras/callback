@@ -172,6 +172,17 @@ class Application(Target):
         ]
         if bad:
             raise ValueError(f"an outcome is attributed to a send that is not recorded: {bad}")
+        times = [s.at for s in self.sent]
+        if times != sorted(times) or (times and times[0] < self.submitted_at):
+            raise ValueError("sends must be in order, none before the application")
+        # When the first send is recorded, every outcome came after it, so
+        # each names its send; an unattributed one would vanish from insights.
+        if (
+            times
+            and times[0] == self.submitted_at
+            and any(o.sent_index is None for o in self.outcomes)
+        ):
+            raise ValueError("an outcome of an application with recorded sends names none")
         return self
 
 

@@ -159,3 +159,31 @@ def test_the_cli_passes_the_role_family_through(
     notes.set_role_families(["quant"])
     assert main([*base, "--role-family", "quant"]) == 0
     assert load_applications()[0].sent[0].role_family == "quant"
+
+
+@pytest.mark.parametrize(
+    ("sent_at", "index", "match"),
+    [
+        (NOW, None, "names none"),
+        (NOW - timedelta(days=1), 0, "in order"),
+    ],
+)
+def test_an_application_record_cannot_hide_an_outcome_or_reorder_its_sends(
+    sent_at: datetime, index: int | None, match: str
+) -> None:
+    """An unattributed outcome of a recorded send would vanish from `insights`."""
+    from core.apply import Application
+
+    with pytest.raises(ValueError, match=match):
+        Application.model_validate(
+            {
+                "job_id": "a",
+                "company": "c",
+                "title": "t",
+                "source": "lever",
+                "submitted_at": NOW,
+                "resume_sha256": "0" * 64,
+                "sent": [{"at": sent_at, "resume_sha256": "0" * 64}],
+                "outcomes": [{"kind": "offer", "occurred_at": NOW, "sent_index": index}],
+            }
+        )

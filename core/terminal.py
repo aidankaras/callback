@@ -39,10 +39,11 @@ class NoTerminalError(RuntimeError):
 class _Tty:
     """The controlling terminal, as separate read and write handles.
 
-    A single `"r+"` text handle on `/dev/tty` cannot be opened at all: text
-    mode in read-write requires a seekable stream, and a terminal is not one,
-    so `open` raises `io.UnsupportedOperation` -- which is an `OSError`, and
-    would read as "no terminal" to anything catching that.
+    A single `"r+"` handle on `/dev/tty` cannot be opened at all: a buffered
+    read-write handle, text (`"r+"`) or binary (`"r+b"`), needs a seekable
+    stream, and a terminal is not one, so `open` raises
+    `io.UnsupportedOperation` -- which is an `OSError`, and would read as "no
+    terminal" to anything catching that.
     """
 
     def __init__(self) -> None:

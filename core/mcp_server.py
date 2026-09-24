@@ -407,6 +407,7 @@ def insights(recurring_only: bool = False) -> dict[str, object]:
             for r in found.recurring
         ],
         "unreadable_build_records": list(found.unreadable),
+        "untraced_build_records": list(found.untraced),
     }
     if recurring_only:
         return repeated
