@@ -14,11 +14,15 @@ retire a note, never make one active.
 
 from __future__ import annotations
 
+import functools
+from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Literal, cast
 
 from mcp.server.mcpserver import MCPServer
+from mcp.server.mcpserver.exceptions import ToolError
+from pydantic import ValidationError
 
 from core.paths import ensure_home
 
@@ -35,7 +39,36 @@ def _now() -> datetime:
     return datetime.now(tz=UTC)
 
 
-@server.tool()
+def _explained(exc: Exception) -> bool:
+    """Whether `exc` is a failure callback meant to explain: one of its own
+    errors, invalid arguments, or a file that cannot be read. Its message is
+    the one the command line prints."""
+    return type(exc).__module__.startswith("core.") or isinstance(exc, (ValidationError, OSError))
+
+
+def _tool[**P, R](fn: Callable[P, R]) -> Callable[P, R]:
+    """Register `fn` as a tool whose expected failures reach the model with their reason.
+
+    The MCP server passes on the message of a `ToolError` only; anything else
+    arrives as "Error executing tool <name>". A model told only that cannot fix
+    a document a gate refused. A failure that is not `_explained` -- a bug --
+    still arrives without its message.
+    """
+
+    @functools.wraps(fn)
+    def run(*args: P.args, **kwargs: P.kwargs) -> R:
+        try:
+            return fn(*args, **kwargs)
+        except Exception as exc:
+            if _explained(exc):
+                raise ToolError(str(exc)) from exc
+            raise
+
+    server.tool()(run)
+    return run
+
+
+@_tool
 def facts_list(unconfirmed_only: bool = False) -> dict[str, object]:
     """Every stored fact, with whether the candidate has confirmed it."""
     from core.profile.store import load_facts
@@ -48,7 +81,7 @@ def facts_list(unconfirmed_only: bool = False) -> dict[str, object]:
     return {"facts": facts}
 
 
-@server.tool()
+@_tool
 def facts_add(path: str) -> dict[str, object]:
     """Add facts from a YAML list. They start unconfirmed; one arriving confirmed is refused."""
     from core.factscmd import add_from_file
@@ -58,7 +91,7 @@ def facts_add(path: str) -> dict[str, object]:
     return {"added": added, "rejected": [{"id": i, "reason": r} for i, r in rejected]}
 
 
-@server.tool()
+@_tool
 def notes_list(include_inactive: bool = False) -> dict[str, object]:
     """The candidate's active notes: preferences, goals, constraints and context.
 
@@ -76,7 +109,7 @@ def notes_list(include_inactive: bool = False) -> dict[str, object]:
     }
 
 
-@server.tool()
+@_tool
 def notes_propose(
     kind: Literal["preference", "goal", "constraint", "context"],
     text: str,
@@ -93,7 +126,7 @@ def notes_propose(
     return {"id": note.id, "status": note.status}
 
 
-@server.tool()
+@_tool
 def notes_retire(note_id: str) -> dict[str, object]:
     """Set a note aside when the candidate asks to drop it. It stays in the file,
     and only the candidate can activate it again."""
@@ -103,7 +136,7 @@ def notes_retire(note_id: str) -> dict[str, object]:
     return {"id": note.id, "status": note.status}
 
 
-@server.tool()
+@_tool
 def build(doc_path: str, job_id: str) -> dict[str, object]:
     """Render a resume document and run every gate; writes the job's draft."""
     from core.buildcmd import build as run_build
@@ -119,7 +152,7 @@ def build(doc_path: str, job_id: str) -> dict[str, object]:
     }
 
 
-@server.tool()
+@_tool
 def letter(doc_path: str) -> dict[str, object]:
     """Render and check a cover letter against the facts and the saved posting."""
     from core.letter.cmd import build_letter
@@ -132,7 +165,7 @@ def letter(doc_path: str) -> dict[str, object]:
     }
 
 
-@server.tool()
+@_tool
 def answers(doc_path: str) -> dict[str, object]:
     """Check free-text application-form answers and write them ready to paste."""
     from core.answers import build_answers
@@ -146,7 +179,7 @@ def answers(doc_path: str) -> dict[str, object]:
     }
 
 
-@server.tool()
+@_tool
 def outreach(doc_path: str) -> dict[str, object]:
     """Check a short note to someone at the company, and return it as it would be sent."""
     import yaml
@@ -165,7 +198,7 @@ def outreach(doc_path: str) -> dict[str, object]:
     }
 
 
-@server.tool()
+@_tool
 def watch() -> dict[str, object]:
     """Poll every watched board and store new matching postings."""
     from core.discovery.fetch import HttpFetcher
@@ -178,7 +211,7 @@ def watch() -> dict[str, object]:
     }
 
 
-@server.tool()
+@_tool
 def triage(days: int | None = None, limit: int = 20) -> dict[str, object]:
     """Stored postings ranked: knockouts last, then by evidenced technologies and freshness."""
     from datetime import timedelta
@@ -213,7 +246,7 @@ def triage(days: int | None = None, limit: int = 20) -> dict[str, object]:
     }
 
 
-@server.tool()
+@_tool
 def postings_take(posting_id: str, job_id: str) -> dict[str, object]:
     """Save a stored posting's own text as the posting for a job."""
     from core.discovery.store import take
@@ -221,7 +254,7 @@ def postings_take(posting_id: str, job_id: str) -> dict[str, object]:
     return {"file": str(take(posting_id, job_id))}
 
 
-@server.tool()
+@_tool
 def postings_resolve(url: str, company: str) -> dict[str, object]:
     """Fetch the posting behind a Greenhouse, Lever or Ashby URL, or a careers
     page's schema.org JobPosting data."""
@@ -234,7 +267,7 @@ def postings_resolve(url: str, company: str) -> dict[str, object]:
     return {"id": found.id, "company": found.company, "title": found.title}
 
 
-@server.tool()
+@_tool
 def eligibility(job_id: str) -> dict[str, object]:
     """Knockout requirements in a saved posting, each quoted, judged against the profile."""
     from core.paths import resolve_inside
@@ -251,7 +284,7 @@ def eligibility(job_id: str) -> dict[str, object]:
     }
 
 
-@server.tool()
+@_tool
 def fit(job_id: str) -> dict[str, object]:
     """A saved posting's knockouts, and which technologies confirmed facts back."""
     from core.paths import resolve_inside
@@ -273,7 +306,7 @@ def fit(job_id: str) -> dict[str, object]:
     }
 
 
-@server.tool()
+@_tool
 def apply(
     job_id: str,
     company: str,
@@ -309,7 +342,7 @@ def apply(
     return {"packet": str(packet), "files": sorted(p.name for p in packet.iterdir())}
 
 
-@server.tool()
+@_tool
 def interview(job_id: str) -> dict[str, object]:
     """Build an interview prep pack from exactly what was sent."""
     from core.interview import prepare
@@ -317,7 +350,7 @@ def interview(job_id: str) -> dict[str, object]:
     return {"file": str(prepare(job_id))}
 
 
-@server.tool()
+@_tool
 def agenda() -> dict[str, object]:
     """What to do next, most time-sensitive first; judges nothing new, acts on nothing."""
     from core.agenda import agenda as build_agenda
@@ -339,7 +372,7 @@ def agenda() -> dict[str, object]:
     }
 
 
-@server.tool()
+@_tool
 def applications() -> dict[str, object]:
     """Every application recorded, with what has happened to it so far."""
     from core.apply import load_applications
@@ -361,7 +394,7 @@ def applications() -> dict[str, object]:
     }
 
 
-@server.tool()
+@_tool
 def funnel() -> dict[str, object]:
     """Reply, callback and offer rates by source, and applications long silent."""
     from core.apply import load_applications
@@ -387,7 +420,7 @@ def funnel() -> dict[str, object]:
     }
 
 
-@server.tool()
+@_tool
 def insights(recurring_only: bool = False) -> dict[str, object]:
     """Grounding failures recurring across jobs, then what happened to each packet sent.
 
@@ -436,7 +469,7 @@ def insights(recurring_only: bool = False) -> dict[str, object]:
     }
 
 
-@server.tool()
+@_tool
 def gaps(days: int | None = None) -> dict[str, object]:
     """Technologies eligible postings ask for that no confirmed fact backs, and how many
     rejected applications' postings asked for each. A gap is a question for the
@@ -464,7 +497,7 @@ def gaps(days: int | None = None) -> dict[str, object]:
     }
 
 
-@server.tool()
+@_tool
 def verify(job_id: str | None = None) -> dict[str, object]:
     """Report any sealed file changed since sealing, and any break in the ledger."""
     from core.finalize import verify as verify_sealed

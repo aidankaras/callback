@@ -49,14 +49,61 @@ def test_a_failure_is_a_tool_error_not_an_empty_result(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Called directly, a failing tool raises; the MCP session turns that into
-    an error result for the client. Either way it is never an empty success.
-    Mutation: swallow the error and return {} -- this fails."""
-    from mcp.server.mcpserver.exceptions import UnexpectedToolError
+    an error result for the client. Either way it is never an empty success,
+    and an expected failure carries its reason: a model told only "Error
+    executing tool build" cannot fix the document. Mutation: swallow the error
+    and return {}, or let the reason drop -- this fails."""
+    from mcp.server.mcpserver.exceptions import ToolError, UnexpectedToolError
 
     monkeypatch.setenv("CALLBACK_HOME", str(tmp_path / "cb"))
     ensure_home()
-    with pytest.raises(UnexpectedToolError, match="build"):
+    with pytest.raises(ToolError, match="No such file or directory") as raised:
         call("build", {"doc_path": str(tmp_path / "missing.yaml"), "job_id": "x"})
+    assert not isinstance(raised.value, UnexpectedToolError)
+
+
+def test_a_callback_error_reaches_the_model_with_its_reason(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The reason a gate or a store refused is what the model needs to act on."""
+    from mcp.server.mcpserver.exceptions import ToolError
+
+    monkeypatch.setenv("CALLBACK_HOME", str(tmp_path / "cb"))
+    with pytest.raises(ToolError, match="no note 'n9'"):
+        call("notes_retire", {"note_id": "n9"})
+
+
+def test_a_bug_still_arrives_without_its_message(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Only failures callback means to explain pass their message on; a crash
+    is not a message written for anyone."""
+    from mcp.server.mcpserver.exceptions import UnexpectedToolError
+
+    def crash() -> object:
+        raise KeyError("internal detail")
+
+    monkeypatch.setattr("core.notes.load", crash)
+    with pytest.raises(UnexpectedToolError) as raised:
+        call("notes_list", {})
+    assert "internal detail" not in str(raised.value)
+
+
+def test_the_eval_runner_grants_every_registered_tool() -> None:
+    """`evals/run.sh` finds the tools by the decorator that registers them. If
+    the two drift, every eval runs without callback's tools and still scores."""
+    import subprocess
+
+    root = Path(__file__).resolve().parents[1]
+    found = subprocess.run(
+        ["bash", str(root / "evals" / "run.sh"), "--list-tools"],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.split()
+    registered = {
+        f"mcp__plugin_callback_callback__{t.name}" for t in asyncio.run(server.list_tools())
+    }
+    assert len(registered) > 20  # premise: the server registers its tools
+    assert set(found) == registered
 
 
 def test_every_command_that_only_reads_is_also_a_tool(
