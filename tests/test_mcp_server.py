@@ -245,7 +245,9 @@ def test_a_rejected_entry_is_named_by_position_unless_its_id_is_an_id(
     monkeypatch.setenv("CALLBACK_HOME", str(tmp_path / "cb"))
     ensure_home()
     path = tmp_path / "x.json"
-    path.write_text(json.dumps([{"id": {"token": PLANTED}}, {"id": PLANTED + " x"}, {"id": "ok-1"}]))
+    path.write_text(
+        json.dumps([{"id": {"token": PLANTED}}, {"id": PLANTED + " x"}, {"id": "ok-1"}])
+    )
     called = call("facts_add", {"path": str(path)})
     result = cast("dict[str, Any]", called.structured_content)  # type: ignore[attr-defined]
     assert [r["id"] for r in result["rejected"]] == ["#0", "#1", "ok-1"]
