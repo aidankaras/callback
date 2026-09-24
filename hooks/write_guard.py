@@ -32,8 +32,9 @@ session's working directory, every `cd` or `pushd` target, and any `-C` or
 `--directory` argument. A command naming a protected path is refused whether
 it reads or writes it -- telling the two apart in an arbitrary command is not
 reliable (`cat x | tee x`, `sed -n` against `sed -i`) and nothing needs the
-raw store, which `callback facts list` reads -- except `ls`, `stat` and `du`,
-which only look, and the argument of a `-m` commit message. The commands only
+raw store, which `callback facts list` reads -- except `ls`, `stat`, `du`,
+`echo` and `printf`, which only look or print, unless an argument holds a
+backtick command, and the argument of a `-m` commit message. The commands only
 the candidate may run, `callback facts confirm` and `callback notes activate`,
 are refused in command position, and anywhere else in a command except as the
 text a search or `git` is given. Any payload this script cannot read
@@ -78,8 +79,9 @@ SEALED_DIRS = {"final", "released"}
 GUARD_FILES = {Path(__file__).resolve(), Path(__file__).resolve().with_name("hooks.json")}
 
 _OPERATORS = {";", "&&", "||", "|", "&", "(", ")"}
-# Commands that only look: naming a protected path to one of these is not a write.
-_LOOK_ONLY = {"ls", "stat", "du"}
+# Commands that only look or print: naming a protected path to one of these is
+# not a write -- `echo "$CALLBACK_HOME"` prints a directory it does not touch.
+_LOOK_ONLY = {"ls", "stat", "du", "echo", "printf"}
 _MESSAGE_FLAGS = {"-m", "--message"}
 
 
@@ -288,7 +290,10 @@ def check_bash(command: str, cwd: Path) -> None:
             bases += [base / _expand(words[1]) for base in bases]
             if not redirects:
                 continue
-        if words[0] in _LOOK_ONLY and not redirects:
+        # A backtick in an argument runs a command inside it: `ls \`rm x\``
+        # is an `rm`, whatever runs first.
+        substitutes = any("`" in w for w in words)
+        if words[0] in _LOOK_ONLY and not redirects and not substitutes:
             continue
         local = list(bases)
         checked: list[str] = []

@@ -386,3 +386,27 @@ def test_a_candidate_only_command_is_refused_by_any_path(home: Path, command: st
 def test_naming_the_files_or_other_modules_is_allowed(home: Path, command: str) -> None:
     result = run_guard(_bash(command), home, cwd=home)
     assert result.returncode == 0, (command, result.stderr)
+
+
+def test_printing_the_data_home_is_allowed(home: Path) -> None:
+    """`echo "$CALLBACK_HOME"` names a directory holding protected files, but
+    prints it; refusing it only stopped a session learning where its data is."""
+    for command in ('echo "CH=$CALLBACK_HOME"', "printf '%s\\n' {home}"):
+        result = run_guard(_bash(command.format(home=home)), home, cwd=home)
+        assert result.returncode == 0, (command, result.stderr)
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "ls `rm {home}/facts.yaml`",
+        "echo `rm {home}/facts.yaml`",
+        "echo hi > {home}/facts.yaml",
+    ],
+)
+def test_a_look_only_command_that_runs_or_writes_something_is_refused(
+    home: Path, command: str
+) -> None:
+    """A backtick in an argument runs a command, and a redirect writes.
+    Mutation: drop the backtick check -- the first two are allowed."""
+    assert denied(run_guard(_bash(command.format(home=home)), home, cwd=home)), command
