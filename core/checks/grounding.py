@@ -258,7 +258,8 @@ def _abbreviation_letter(text: str, found: Sequence[re.Match[str]], position: in
     """
     here = found[position]
     # The letter itself: a token keeps the full stop that ends its sentence
-    # ("M&R."), and the caller has already set that aside.
+    # ("M&R."), so it is split off here. The caller strips its own copy of
+    # the token, which never reaches this function.
     if len(re.split(r"[-.]", here.group(), maxsplit=1)[0]) != 1:
         return False
     neighbours: list[str] = []
