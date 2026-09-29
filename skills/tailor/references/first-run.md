@@ -38,10 +38,12 @@ If `callback facts list` shows no confirmed facts:
      what the resume needs (numbers, dates, what they built), and merge it
      into `facts.yaml`.
 3. Run `callback facts add facts.yaml` and report any refusals. It also
-   prints, for each fact added, what a bullet quoting it would fail on. Fix
-   those in the file and run `callback facts add --replace facts.yaml` until
-   `callback facts check` finds nothing, so the user confirms only facts a
-   bullet can use.
+   prints, for each fact added, what a bullet quoting it word for word would
+   fail on. Fix the findings about words a bullet will use (an acronym, a tool,
+   a figure worth stating) in the file, and run
+   `callback facts add --replace facts.yaml`. A fact may hold more than any
+   bullet quotes, such as a full date or a course number, and a finding about
+   that part needs no fix: say which findings you left and why.
 4. Tell the user to run this **in their own terminal**, with `<repo root>`
    replaced by the absolute path, since they will paste it as it stands:
 

@@ -352,3 +352,31 @@ def test_a_skill_no_printed_entry_shows_still_warns(tmp_path: Path, extra: dict[
     )
 
     assert (skills.verdict, skills.findings) == ("warn", (f"skill 'SQL' {_NOT_SHOWN}",))
+
+
+@pytest.mark.slow
+def test_a_skill_the_entry_shows_is_not_reported_for_a_bullet_that_failed(
+    tmp_path: Path,
+) -> None:
+    """The bullet that names Python fails grounding on its number, and the
+    grounding gate says so. The skill itself is shown by the role's own fact,
+    so the skills gate has nothing to add."""
+    doc = _doc()
+    entry = doc.sections[0].entries[0]
+    wrong = entry.model_copy(
+        update={
+            "bullets": [
+                Bullet(text="Cut the review queue to 999 items using Python", sources=["queue"])
+            ]
+        }
+    )
+    doc = doc.model_copy(
+        update={
+            "sections": [doc.sections[0].model_copy(update={"entries": [wrong]}), doc.sections[1]]
+        }
+    )
+
+    by_gate = {o.gate: o for o in _run(doc, tmp_path).outcomes}
+
+    assert by_gate["grounding"].verdict == "fail"
+    assert (by_gate["skills"].verdict, by_gate["skills"].findings) == ("pass", ())

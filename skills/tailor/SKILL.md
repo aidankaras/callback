@@ -68,9 +68,9 @@ under `inbox/` with the Write tool and pass the file's path to the command.
 4. **Only the user confirms facts.** You may draft facts with
    `provenance: {source: "import:<file>" | "assistant:<topic>", trust: import_unconfirmed}`
    and add them with `callback facts add`. Read what it prints: each fact is
-   checked against its own text, and one that would fail as a bullet is fixed
-   in the file and added again with `--replace` before the user is asked to
-   confirm anything. `callback facts confirm` and `callback facts retire` must
+   checked against its own text. Where a finding is about words a bullet will
+   use, fix the file and add it again with `--replace` before the user is
+   asked to confirm anything. `callback facts confirm` and `callback facts retire` must
    be typed by the user in their own terminal: they read `/dev/tty`, and the
    write guard refuses them from you, including through `script`, `bash -c` or
    any other wrapper. Never try to obtain a terminal to run one. A confirmed

@@ -302,3 +302,32 @@ def test_unconfirmed_means_still_waiting_for_an_answer(
 
     lines = capsys.readouterr().out.splitlines()
     assert [line.split()[:2] for line in lines] == [["UNCONFIRMED", "d"]]
+
+
+@pytest.mark.parametrize(
+    "answered",
+    [
+        pytest.param(
+            {
+                "provenance": {"source": "user:confirmed:x", "trust": "user_confirmed"},
+                "retired_on": "2026-01-01",
+            },
+            id="confirmed-and-already-retired",
+        ),
+        pytest.param({"retired_on": "2026-01-01"}, id="already-retired"),
+        pytest.param({"declined_on": "2026-01-01"}, id="already-declined"),
+    ],
+)
+def test_a_fact_cannot_arrive_with_the_candidates_answer_already_on_it(
+    tmp_path: Path, answered: dict[str, object]
+) -> None:
+    """Confirmed, declined and retired are each something the candidate said
+    at the terminal. A file that carries one is claiming an answer nobody gave,
+    whether or not the fact could then back a document."""
+    arriving = {**_draft("a", "one"), **answered}
+
+    added, refused = add_from_file(_file(tmp_path, [arriving, _draft("b", "two")]))
+
+    assert added == ["b"]
+    assert [fid for fid, _ in refused] == ["a"]
+    assert "a" not in load_facts()

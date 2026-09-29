@@ -179,7 +179,11 @@ def run_gates(
         result = check_skills(doc, grounded)
         by_entry = skills_shown_by_entries(result.listed_only, doc, facts)
         unshown = [s for s in result.listed_only if s not in by_entry]
-        texts = tuple(result.findings) + tuple(
+        # `check_skills` opens each of its findings with the skill it is about.
+        # One about a skill an entry shows is dropped: what it reports is a
+        # bullet that failed grounding, which the grounding gate has reported.
+        about_unshown = [f for f in result.findings if any(f.startswith(repr(s)) for s in unshown)]
+        texts = tuple(about_unshown) + tuple(
             f"skill {s!r} is listed but no grounded bullet names it and no confirmed fact "
             "under an entry on the page lists it"
             for s in unshown

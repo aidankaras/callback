@@ -72,14 +72,27 @@ def add_from_file(path: Path, *, replace: bool = False) -> tuple[list[str], list
         label = fid if isinstance(fid, str) and _ID.fullmatch(fid) else f"#{position}"
         try:
             fact = Fact.model_validate(body)
-            if fact.selectable():
+            if fact.was_confirmed():
                 # Only `confirm` makes a fact usable. Accepting one that arrives
                 # confirmed would let whoever wrote the file skip the candidate.
+                # Asked of the provenance, not of `selectable`: a fact arriving
+                # confirmed and retired backs nothing, and would still enter the
+                # store recording a confirmation nobody gave.
                 rejected.append(
                     (
                         label,
                         "a fact cannot arrive confirmed; add it unconfirmed and run "
                         "`callback facts confirm`",
+                    )
+                )
+                continue
+            if fact.declined_on is not None or fact.retired_on is not None:
+                rejected.append(
+                    (
+                        label,
+                        "a fact cannot arrive declined or retired; those are the "
+                        "candidate's answers, given at `callback facts confirm` and "
+                        "`callback facts retire`",
                     )
                 )
                 continue
