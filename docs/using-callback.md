@@ -137,6 +137,10 @@ A fact is one thing that is true about you, stated once:
   4"): a bullet may use one only if a cited fact lists it, and the digits of a
   listed name that the fact's text also states are read as part of the name,
   not as a quantity.
+- A name that opens with a digit is always read as a quantity, listed or not:
+  "3M" an employer is spelled like "$3M" a saving, and "10x" a platform like
+  "10x" an improvement. Write such a name with its noun, "Form 8-K" and not
+  "8-K", where a bullet should be able to state it.
 - One fact per skill, never one per printed line of a skills section: you
   confirm or decline a fact whole, so a line of six languages cannot lose the
   one you would not claim.

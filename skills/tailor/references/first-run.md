@@ -22,7 +22,9 @@ If `callback facts list` shows no confirmed facts:
    - Give each detail fact a `parent`: the id of its role.
    - List in `entities` every tool, technology and acronym the fact's text
      names as used ("ETL", "AWS"), and every name that holds a digit
-     ("SHA-256", "Form 4"). List the token as the text spells it ("GPA", not
+     ("SHA-256", "Form 4"). A name that opens with a digit is read as a
+     quantity wherever it stands, so write it with its noun: "Form 8-K", not
+     "8-K". List the token as the text spells it ("GPA", not
      only "grade point average"): the check compares tokens. A bullet may name
      a technology only if a cited fact lists it there; the text alone does
      not back it.
