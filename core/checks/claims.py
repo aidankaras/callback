@@ -228,11 +228,15 @@ def skills_shown_by_entries(
     fact belonging to an entry on the page lists in its entities.
 
     A fact belongs to an entry when the entry's header or one of its bullets
-    cites it, or when it shares an ancestor with a fact they cite: a bullet
-    that cites one detail of a role puts that role on the page, and the role's
-    other details are facts about the same entry. A role's stack is usually
-    recorded once, in a fact no bullet quotes, and a bullet written to name
-    every tool reads as a keyword list.
+    cites it, or when it is a detail that shares an ancestor with a fact they
+    cite: a bullet that cites one detail of a role puts that role on the page,
+    and the role's other details are facts about the same entry. A role's
+    stack is usually recorded once, in a fact no bullet quotes, and a bullet
+    written to name every tool reads as a keyword list.
+
+    Only a detail is reached this way. A skill or a project that names a role
+    as its parent is filed under the role, not done in it, and shows a skill
+    only where an entry cites it.
 
     Entities only, never a fact's text: entities are where a fact records what
     was used, and its text may name a tool it moved away from. A fact kept on
@@ -260,7 +264,8 @@ def skills_shown_by_entries(
     listed = {
         _canon(entity)
         for fid, fact in confirmed.items()
-        if on_page.intersection(lineage(fid))
+        if fid in cited
+        or (fact.kind is FactKind.EXPERIENCE_DETAIL and on_page.intersection(lineage(fid)))
         for entity in fact.entities
     }
     return {skill for skill in skills if _canon(skill) in listed}

@@ -219,7 +219,9 @@ def _runs(words: list[str], wanted: list[str]) -> bool:
 # runs.
 _MENTION_ONLY = frozenset({"grep", "egrep", "fgrep", "rg", "git"})
 _CANDIDATE_ONLY = (("facts", "confirm"), ("facts", "retire"), ("notes", "activate"))
-_CANDIDATE_TEXT = re.compile(r"facts\W{1,6}(?:confirm|retire)|notes\W{1,6}activate", re.IGNORECASE)
+# Any run of separators: the shell reads the same command however many spaces
+# or tabs stand between its words, and a bound on them is a gap to step through.
+_CANDIDATE_TEXT = re.compile(r"facts\W+(?:confirm|retire)|notes\W+activate", re.IGNORECASE)
 
 
 # The modules that can change what only the candidate decides, named as Python

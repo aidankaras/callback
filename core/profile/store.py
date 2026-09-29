@@ -21,7 +21,7 @@ from pydantic import ValidationError
 
 from core.aliases import canonicalize
 from core.paths import OutsideHomeError, resolve_inside, write_private
-from core.profile.models import Dates, Derivation, Fact, Provenance, Quantity
+from core.profile.models import Dates, Derivation, Fact, Provenance, Quantity, Trust
 
 FACTS_FILE = "facts.yaml"
 
@@ -267,6 +267,18 @@ def add_fact(fact: Fact, *, replace: bool = False) -> None:
             raise DuplicateFactError(
                 f"fact {fact.id!r} is {state} and is not rewritten; retire it with "
                 "`callback facts retire` and add the change under a new id"
+            )
+        if stored.provenance.trust is Trust.WEB:
+            # Research about someone else can never be confirmed. A draft
+            # taking its id would turn the id into one that can.
+            raise DuplicateFactError(
+                f"fact {fact.id!r} is research from the web and is not replaced by a "
+                "claim; add the claim under a new id"
+            )
+        unanswered = stored.model_copy(update={"declined_on": None, "captured": fact.captured})
+        if stored.declined_on is not None and unanswered == fact:
+            raise DuplicateFactError(
+                f"fact {fact.id!r} was declined as written; change it before adding it again"
             )
     facts[fact.id] = fact
     save_facts(facts)

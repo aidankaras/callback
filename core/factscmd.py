@@ -245,6 +245,12 @@ def confirm(
                 # What a bullet may name as used rests on this list, not on
                 # the text, so it is part of what is being confirmed.
                 tty.write(f"  names as used: {', '.join(fact.entities)}\n")
+            if fact.parent:
+                # Which entry a fact may back, and which skills that entry
+                # shows, follow from where the fact is filed.
+                above = facts.get(fact.parent)
+                about = f" ({above.text})" if above is not None else " (no such fact)"
+                tty.write(f"  filed under: {fact.parent}{about}\n")
             answer = ask(tty, "True as written?")
             if answer == "q":
                 break

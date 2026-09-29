@@ -30,6 +30,10 @@ by design rather than merely unimplemented.
   sealed documents and itself. For Bash, it resolves the paths a command names, after `cd`,
   `pushd` and `-C`, and with `~`, `$HOME` and `$CALLBACK_HOME` expanded. It does not catch a path a
   command builds at run time: from another variable, `find`, an encoded string, or a script it runs.
+  The same holds for the commands only the candidate may run: the guard reads the words
+  `facts confirm`, `facts retire` and `notes activate` in a command's text, whatever the space
+  between them, and cannot read them in a command that assembles them, as in `V=retire` followed
+  by `callback facts $V`, or that splits one with quotes.
   It guards against accidental writes, not a determined process.
 - **The careers-page reader** refuses a host that resolves to a private, loopback or link-local
   address, but checks the address before connecting and the connection resolves the name again, so

@@ -380,3 +380,40 @@ def test_a_skill_the_entry_shows_is_not_reported_for_a_bullet_that_failed(
 
     assert by_gate["grounding"].verdict == "fail"
     assert (by_gate["skills"].verdict, by_gate["skills"].findings) == ("pass", ())
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize(
+    "filed",
+    [
+        pytest.param(
+            Fact(
+                id="stack",
+                kind=FactKind.SKILL,
+                parent="role",
+                text="SQL",
+                provenance=CONFIRMED,
+                entities=["SQL"],
+            ),
+            id="a-skill-filed-under-the-role",
+        ),
+        pytest.param(
+            Fact(
+                id="stack",
+                kind=FactKind.PROJECT,
+                parent="role",
+                text="Ran a database on a home cluster of three laptops",
+                entities=["SQL"],
+                provenance=CONFIRMED,
+            ),
+            id="a-project-filed-under-the-role",
+        ),
+    ],
+)
+def test_only_a_detail_of_the_role_shows_a_skill_through_it(tmp_path: Path, filed: Fact) -> None:
+    """Filing a fact under a role does not make it something done in the role.
+    A detail of the role is; a skill or a project given the role as its parent
+    is a separate thing wearing the role's name."""
+    skills = _skills_outcome(_doc(skills=["Python", "SQL"]), {**FACTS, "stack": filed}, tmp_path)
+
+    assert (skills.verdict, skills.findings) == ("warn", (f"skill 'SQL' {_NOT_SHOWN}",))

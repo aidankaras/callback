@@ -331,3 +331,52 @@ def test_a_fact_cannot_arrive_with_the_candidates_answer_already_on_it(
     assert added == ["b"]
     assert [fid for fid, _ in refused] == ["a"]
     assert "a" not in load_facts()
+
+
+def test_a_declined_fact_is_not_offered_again_by_adding_it_unchanged(tmp_path: Path) -> None:
+    """The candidate said no to these words. Adding the same words again must
+    not put the question back; adding different ones asks a new question."""
+    add_from_file(_file(tmp_path, [_draft("a", "Led a team of 12 engineers")]))
+    confirm([], open_tty=_Asked("n\n"))
+
+    same = add_from_file(_file(tmp_path, [_draft("a", "Led a team of 12 engineers")]), replace=True)
+
+    assert same[0] == [] and [fid for fid, _ in same[1]] == ["a"]
+    assert "declined" in same[1][0][1]
+    assert load_facts()["a"].declined_on is not None
+    nobody = _Asked("y\n")
+    assert confirm([], open_tty=nobody) == [] and nobody.opened == 0
+
+    changed = _draft("a", "Worked on a team of 12 engineers")
+    assert add_from_file(_file(tmp_path, [changed], "b.yaml"), replace=True) == (["a"], [])
+    assert load_facts()["a"].declined_on is None
+
+
+def test_research_about_someone_else_is_never_replaced_by_a_claim(tmp_path: Path) -> None:
+    """A web-sourced fact can never be confirmed. Replacing it with a draft of
+    the same id would turn the id into one that can."""
+    web = {
+        **_draft("acme", "Acme raised a Series B"),
+        "provenance": {"source": "https://x.test", "trust": "web"},
+    }
+    assert add_from_file(_file(tmp_path, [web])) == (["acme"], [])
+
+    added, refused = add_from_file(
+        _file(tmp_path, [_draft("acme", "I raised a Series B")], "b.yaml"), replace=True
+    )
+
+    assert added == [] and [fid for fid, _ in refused] == ["acme"]
+    assert load_facts()["acme"].text == "Acme raised a Series B"
+
+
+def test_the_candidate_is_shown_what_a_fact_is_filed_under(tmp_path: Path) -> None:
+    """Which role a fact belongs to decides which entry it may back, so it is
+    part of what is being confirmed."""
+    add_from_file(_file(tmp_path, [SCHOOL, {**GPA, "entities": ["GPA"]}]))
+    asked = _Asked("n\nn\n")
+
+    confirm([], open_tty=asked)
+
+    shown = asked.shown.getvalue()
+    assert shown.count("filed under:") == 1
+    assert "filed under: school (B.S. at Example University)" in shown

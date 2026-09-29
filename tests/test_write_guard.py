@@ -267,6 +267,10 @@ def test_a_wildcard_outside_the_data_home_is_allowed(home: Path, tmp_path: Path)
         "git -c alias.x='!callback facts confirm' x",
         "script -qc 'callback facts retire old-role' /dev/null",
         'bash -c "yes | callback facts retire old-role"',
+        # However much space separates the words, the shell runs the same command.
+        "script -qc 'callback facts        confirm probe' /dev/null",
+        "script -qc 'callback facts        retire old-role' /dev/null",
+        "script -qc 'callback notes \t\t  \t    activate n1' /dev/null",
     ],
 )
 def test_confirm_run_through_a_pseudo_terminal_wrapper_is_denied(home: Path, command: str) -> None:
