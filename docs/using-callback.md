@@ -13,6 +13,13 @@ uv sync
 claude --plugin-dir .          # loads the `tailor` skill into a Claude Code session
 ```
 
+Started this way, from inside the repository, the session also reads
+`.mcp.json` as the project's own configuration, where `${CLAUDE_PLUGIN_ROOT}`
+is unset, and warns that a `callback` server failed to start. The plugin's
+copy of the server is unaffected; `/mcp` shows it connected. To avoid the
+warning, start the session from the folder you work in and name the
+repository: `claude --plugin-dir /path/to/callback`.
+
 Then ask Claude to tailor your resume to a posting. The skill runs the commands
 below for you, except `facts confirm`, `facts retire` and `notes activate`,
 which only you can run.
@@ -31,6 +38,7 @@ which only you can run.
 | `callback facts confirm [--include-declined] [ids...]` | Asks you, fact by fact, whether each is true, showing its text, numbers, dates and the names it lists as used. A fact you answer `n` to is marked declined and not offered again unless you name it or pass `--include-declined` | 0, 3 if not run from a terminal or an id is unknown, web-sourced or retired |
 | `callback facts retire <ids...>` | Asks you whether each named fact should go out of use. A retired fact backs nothing from then on and stays in the store, since documents already sent cite it | 0, 3 if not run from a terminal or an id is unknown |
 | `callback notes list [--all]` | Lists active notes; `--all` adds proposed and retired ones | 0, 3 unreadable notebook |
+| `callback notes propose <kind> <text> [--context <label>]` | Records a note as proposed, where `kind` is `preference`, `goal`, `constraint` or `context`, and the label says what it arose from (`job:acme-ml-intern`). It does nothing until you activate it | 0, 3 if the text is empty or over 200 characters, or the label is not lowercase letters, digits, `:`, `_` or `-` |
 | `callback notes activate <id>` | Shows you a proposed note in full, with where it came from, and activates it on your yes at the terminal | 0, 3 if not run from a terminal or the id is unknown |
 | `callback notes retire <id>` | Sets a note aside; it stays in the file and can be activated again | 0, 3 unknown id |
 | `callback notes families [--set a,b]` | Shows, or replaces, the role families applications can be sorted into | 0, 3 invalid name |
@@ -305,10 +313,14 @@ and exits 0 pass, 2 fail, 3 could not run.
 - write the fact store;
 - write anything under `final/` or `released/`;
 - write the guard itself;
-- run `callback facts confirm`.
+- run `callback facts confirm`, `callback facts retire` or
+  `callback notes activate`.
 
 For Bash it resolves the paths a command names, including after a `cd`. It
-guards against accidental writes; it is not a sandbox. A command that builds
+reads the command's text, so a command that names a protected file is refused
+even where the name is only data, such as a quoted string or a here-document
+recording where a fact came from. Put that text in a file and pass the file's
+path. It guards against accidental writes; it is not a sandbox. A command that builds
 its path at run time is not caught.
 
 **Layout lints** (a bullet over two lines, fewer than 2 or more than 6

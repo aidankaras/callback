@@ -86,6 +86,10 @@ uv sync
 claude --plugin-dir .      # loads the tailor skill, the MCP tools and the write guard
 ```
 
+From inside the repository the session warns once that a `callback` MCP server failed: that is
+the project-level reading of `.mcp.json`, and the plugin's own server is the one `/mcp` shows
+connected. `claude --plugin-dir /path/to/callback` from any other folder starts without it.
+
 Then talk to Claude: *"find me ML internships"*, *"tailor my resume to this posting"*, *"what
 should I do next?"*. The session calls the checks as MCP tools and reports what they said; the
 command line below is the same code with an argv front end, used by the tests, by CI, and

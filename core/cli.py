@@ -269,6 +269,17 @@ def build_parser() -> argparse.ArgumentParser:
     n_list = notes_sub.add_parser("list", help="list active notes")
     n_list.add_argument("--all", action="store_true", help="include proposed and retired notes")
     n_list.set_defaults(handler=_cmd_notes_list)
+    n_prop = notes_sub.add_parser(
+        "propose", help="record a note for the candidate to activate; it does nothing until then"
+    )
+    n_prop.add_argument("kind", choices=["preference", "goal", "constraint", "context"])
+    n_prop.add_argument("text", help="the candidate's own words, at most 200 characters")
+    n_prop.add_argument(
+        "--context",
+        default=None,
+        help="what the note arose from, as a label such as job:acme-ml-intern",
+    )
+    n_prop.set_defaults(handler=_cmd_notes_propose)
     n_act = notes_sub.add_parser(
         "activate", help="activate a note; must be run by the candidate in a terminal"
     )
@@ -1004,6 +1015,23 @@ def _cmd_notes_activate(args: argparse.Namespace) -> int:
         print(f"callback notes activate: {exc}", file=sys.stderr)
         return 3
     print(f"{args.id} is active" if done else f"{args.id} left as it was")
+    return 0
+
+
+def _cmd_notes_propose(args: argparse.Namespace) -> int:
+    from datetime import UTC, datetime
+
+    from core.notes import NoteError, propose
+    from core.paths import ensure_home
+
+    ensure_home()
+    try:
+        note = propose(args.kind, args.text, source_context=args.context, now=datetime.now(tz=UTC))
+    except NoteError as exc:
+        print(f"callback notes propose: {exc}", file=sys.stderr)
+        return 3
+    print(f"{note.id} is proposed and does nothing yet")
+    print(f"to activate it, run in your own terminal: callback notes activate {note.id}")
     return 0
 
 
