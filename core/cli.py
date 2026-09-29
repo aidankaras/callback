@@ -6,7 +6,7 @@ import argparse
 import re
 import sys
 from pathlib import Path
-from typing import cast
+from typing import TextIO, cast
 
 from core import __version__
 
@@ -225,15 +225,36 @@ def build_parser() -> argparse.ArgumentParser:
     facts_sub = facts.add_subparsers(dest="facts_command", required=True)
     add = facts_sub.add_parser("add", help="add facts from a YAML list (they start unconfirmed)")
     add.add_argument("file", type=Path)
+    add.add_argument(
+        "--replace",
+        action="store_true",
+        help="replace a stored draft of the same id (never a confirmed or retired fact)",
+    )
     add.set_defaults(handler=_cmd_facts_add)
+    check = facts_sub.add_parser(
+        "check", help="what a bullet quoting each fact as written would fail on"
+    )
+    check.add_argument("ids", nargs="*", help="fact ids (default: every fact in use or waiting)")
+    check.set_defaults(handler=_cmd_facts_check)
     listing = facts_sub.add_parser("list", help="list stored facts")
     listing.add_argument("--unconfirmed", action="store_true", help="only unconfirmed facts")
     listing.set_defaults(handler=_cmd_facts_list)
     conf = facts_sub.add_parser(
         "confirm", help="confirm facts interactively; must be run by the candidate in a terminal"
     )
-    conf.add_argument("ids", nargs="*", help="fact ids (default: every unconfirmed fact)")
+    conf.add_argument(
+        "ids", nargs="*", help="fact ids (default: every unconfirmed fact not yet declined)"
+    )
+    conf.add_argument(
+        "--include-declined", action="store_true", help="also offer the facts answered no before"
+    )
     conf.set_defaults(handler=_cmd_facts_confirm)
+    ret = facts_sub.add_parser(
+        "retire",
+        help="take facts out of use for good; must be run by the candidate in a terminal",
+    )
+    ret.add_argument("ids", nargs="+", help="the facts to retire")
+    ret.set_defaults(handler=_cmd_facts_retire)
     gh = facts_sub.add_parser(
         "github",
         help="draft unconfirmed project facts from your public GitHub repositories, to a file",
@@ -876,32 +897,60 @@ def _cmd_import(args: argparse.Namespace) -> int:
     return 4 if result.findings else 0
 
 
+def _print_fact_problems(problems: dict[str, list[str]], *, to: TextIO) -> None:
+    for fid, details in problems.items():
+        print(f"  {fid}: a bullet quoting this fact as written would fail", file=to)
+        for detail in details:
+            print(f"      {detail}", file=to)
+
+
 def _cmd_facts_add(args: argparse.Namespace) -> int:
-    from core.factscmd import add_from_file
+    from core.factscmd import add_from_file, check_facts
     from core.paths import ensure_home
     from core.profile.store import StoreError
 
     ensure_home()
     try:
-        added, rejected = add_from_file(args.file)
+        added, rejected = add_from_file(args.file, replace=args.replace)
+        problems = check_facts(added) if added else {}
     except (StoreError, OSError) as exc:
         print(f"callback facts add: {exc}", file=sys.stderr)
         return 3
     print(f"added {len(added)} fact(s), all unconfirmed until you run `callback facts confirm`")
     for fid, reason in rejected:
         print(f"  refused {fid}: {reason}", file=sys.stderr)
+    if problems:
+        _print_fact_problems(problems, to=sys.stderr)
+        print("  fix the file and add it again with --replace before confirming", file=sys.stderr)
     return 1 if rejected else 0
 
 
+def _cmd_facts_check(args: argparse.Namespace) -> int:
+    from core.factscmd import FactsError, check_facts
+    from core.profile.store import StoreError
+
+    try:
+        problems = check_facts(list(args.ids))
+    except (FactsError, StoreError) as exc:
+        print(f"callback facts check: {exc}", file=sys.stderr)
+        return 3
+    if not problems:
+        print("every fact checked can be quoted as written")
+        return 0
+    _print_fact_problems(problems, to=sys.stdout)
+    return 1
+
+
 def _cmd_facts_list(args: argparse.Namespace) -> int:
+    from core.factscmd import state
     from core.profile.store import load_facts
 
     for fid, fact in load_facts().items():
-        confirmed = fact.selectable()
-        if args.unconfirmed and confirmed:
+        if args.unconfirmed and fact.selectable():
             continue
-        mark = "confirmed  " if confirmed else "UNCONFIRMED"
-        print(f"{mark} {fid:<24} {fact.kind:<18} {fact.text}")
+        mark = state(fact)
+        mark = mark.upper() if mark == "unconfirmed" else mark
+        print(f"{mark:<11} {fid:<24} {fact.kind:<18} {fact.text}")
     return 0
 
 
@@ -909,11 +958,23 @@ def _cmd_facts_confirm(args: argparse.Namespace) -> int:
     from core.factscmd import ConfirmError, confirm
 
     try:
-        confirmed = confirm(list(args.ids))
+        confirmed = confirm(list(args.ids), include_declined=args.include_declined)
     except ConfirmError as exc:
         print(f"callback facts confirm: {exc}", file=sys.stderr)
         return 3
     print(f"confirmed {len(confirmed)} fact(s)")
+    return 0
+
+
+def _cmd_facts_retire(args: argparse.Namespace) -> int:
+    from core.factscmd import ConfirmError, retire
+
+    try:
+        retired = retire(list(args.ids))
+    except ConfirmError as exc:
+        print(f"callback facts retire: {exc}", file=sys.stderr)
+        return 3
+    print(f"retired {len(retired)} fact(s)")
     return 0
 
 

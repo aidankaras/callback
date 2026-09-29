@@ -9,8 +9,9 @@ What is protected, under `$CALLBACK_HOME` (default `~/.callback`):
 
 - `facts.yaml`, the fact store. Facts enter it only through
   `callback facts add`, which marks them unconfirmed, and become usable only
-  through `callback facts confirm`, which only the candidate can answer. A
-  tool that could write the store directly could skip both.
+  through `callback facts confirm`, which only the candidate can answer, and
+  go out of use only through `callback facts retire`, likewise theirs. A tool
+  that could write the store directly could skip all three.
 - `notes.yaml`, the candidate's standing preferences. An assistant may
   propose or retire a note through `callback`; only the candidate activates
   one, with `callback notes activate` at their own terminal.
@@ -36,7 +37,7 @@ raw store, which `callback facts list` reads -- except `ls`, `stat` and `du`,
 which only look, unless the command substitutes another (`$(...)`, a
 backtick, `<(...)`) or redirects into a file -- and the argument of a `-m`
 commit message. The commands only the candidate may run, `callback facts
-confirm` and `callback notes activate`,
+confirm`, `callback facts retire` and `callback notes activate`,
 are refused in command position, and anywhere else in a command except as the
 text a search or `git` is given. Any payload this script cannot read
 is denied: a guard that fails open would imply a guarantee it does not give.
@@ -143,7 +144,8 @@ def protected(path: Path) -> str | None:
     inside = target.relative_to(home).parts
     if inside == ("facts.yaml",):
         return (
-            "the fact store changes only through `callback facts add` and `callback facts confirm`"
+            "the fact store changes only through `callback facts add`, and through "
+            "`callback facts confirm` and `callback facts retire`, which the candidate runs"
         )
     if inside == ("notes.yaml",):
         return "notes change only through `callback notes`, and only the candidate activates one"
@@ -216,8 +218,8 @@ def _runs(words: list[str], wanted: list[str]) -> bool:
 # `timeout 10 grep "facts confirm"`; the guard does not model what a runner
 # runs.
 _MENTION_ONLY = frozenset({"grep", "egrep", "fgrep", "rg", "git"})
-_CANDIDATE_ONLY = (("facts", "confirm"), ("notes", "activate"))
-_CANDIDATE_TEXT = re.compile(r"facts\W{1,6}confirm|notes\W{1,6}activate", re.IGNORECASE)
+_CANDIDATE_ONLY = (("facts", "confirm"), ("facts", "retire"), ("notes", "activate"))
+_CANDIDATE_TEXT = re.compile(r"facts\W{1,6}(?:confirm|retire)|notes\W{1,6}activate", re.IGNORECASE)
 
 
 # The modules that can change what only the candidate decides, named as Python

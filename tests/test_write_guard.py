@@ -109,6 +109,9 @@ def test_a_finalised_document_is_not_writable(home: Path) -> None:
         "# tidy up\nrm {home}/facts.yaml",
         "echo hi # note\nrm {home}/facts.yaml",
         "# a comment\ncallback facts confirm",
+        "callback facts retire old-role",
+        "uv run --locked callback facts retire old-role",
+        "uv run --no-project python -m core.cli facts retire old-role",
     ],
 )
 def test_bash_forms_that_touch_a_protected_path_are_denied(home: Path, command: str) -> None:
@@ -262,6 +265,8 @@ def test_a_wildcard_outside_the_data_home_is_allowed(home: Path, tmp_path: Path)
         "GIT_EDITOR='script -qc \"callback facts confirm\" /dev/null' git commit",
         "git -c core.editor='script -qc \"callback facts confirm\" /dev/null' commit",
         "git -c alias.x='!callback facts confirm' x",
+        "script -qc 'callback facts retire old-role' /dev/null",
+        'bash -c "yes | callback facts retire old-role"',
     ],
 )
 def test_confirm_run_through_a_pseudo_terminal_wrapper_is_denied(home: Path, command: str) -> None:

@@ -20,7 +20,7 @@ from pydantic import ValidationError
 
 from core.aliases import canonicalize
 from core.paths import OutsideHomeError, resolve_inside, write_private
-from core.profile.models import Dates, Derivation, Fact, Provenance, Quantity
+from core.profile.models import Dates, Derivation, Fact, Provenance, Quantity, Trust
 
 FACTS_FILE = "facts.yaml"
 
@@ -235,13 +235,26 @@ def save_facts(facts: dict[str, Fact]) -> None:
         raise StoreError(f"could not write {path}: {exc}") from exc
 
 
-def add_fact(fact: Fact) -> None:
-    """Admit `fact` into the store after screening its free text and checking for a duplicate id."""
+def add_fact(fact: Fact, *, replace: bool = False) -> None:
+    """Admit `fact` into the store after screening its free text and checking for a duplicate id.
+
+    With `replace`, a stored fact of the same id gives way to `fact` while it
+    is still a draft: never confirmed and not retired. A confirmed fact is what
+    documents already sent rest on, so it is never rewritten in place.
+    """
     for field, value in _free_text_fields(fact):
         screen_sensitive(value, field)
     fact = fact.model_copy(update={"entities": [canonicalize(e) for e in fact.entities]})
     facts = load_facts()
     if fact.id in facts:
-        raise DuplicateFactError(f"fact {fact.id!r} already exists")
+        stored = facts[fact.id]
+        if not replace:
+            raise DuplicateFactError(f"fact {fact.id!r} already exists")
+        if stored.provenance.trust is Trust.USER_CONFIRMED or stored.retired_on is not None:
+            state = "retired" if stored.retired_on is not None else "confirmed"
+            raise DuplicateFactError(
+                f"fact {fact.id!r} is {state} and is not rewritten; retire it with "
+                "`callback facts retire` and add the change under a new id"
+            )
     facts[fact.id] = fact
     save_facts(facts)

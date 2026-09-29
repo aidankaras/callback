@@ -14,8 +14,8 @@ claude --plugin-dir .          # loads the `tailor` skill into a Claude Code ses
 ```
 
 Then ask Claude to tailor your resume to a posting. The skill runs the commands
-below for you, except `facts confirm` and `notes activate`, which only you can
-run.
+below for you, except `facts confirm`, `facts retire` and `notes activate`,
+which only you can run.
 
 ## The commands
 
@@ -24,10 +24,12 @@ run.
 | `callback init` | Creates the data home (`$CALLBACK_HOME`, default `~/.callback`) with private permissions; every other command does this for itself | 0 |
 | `callback delete-all` | Removes every file under the data home: facts, postings, drafts, packets, sealed documents, the ledger and the signing key. There is no undo, and no tool can run it -- it is not an MCP tool, and the write guard cannot stop it | 0 |
 | `callback import <resume.pdf>` | Extracts the text of an existing PDF into `inbox/`, after screening it for hidden text | 0 clean, 3 unreadable, 4 hidden content found or a page could not be screened |
-| `callback facts add <facts.yaml>` | Adds facts, all unconfirmed. Each fact is accepted or refused on its own, and one that arrives already confirmed is refused | 0, 1 if any fact was refused, 3 unreadable file |
-| `callback facts list [--unconfirmed]` | Lists stored facts | 0 |
+| `callback facts add [--replace] <facts.yaml>` | Adds facts, all unconfirmed. Each fact is accepted or refused on its own, and one that arrives already confirmed is refused. `--replace` lets a fact replace a stored draft of the same id, never a confirmed or retired one. Each fact added is then checked against its own text, and what a bullet quoting it would fail on is printed | 0, 1 if any fact was refused, 3 unreadable file |
+| `callback facts list [--unconfirmed]` | Lists stored facts, each marked `confirmed`, `UNCONFIRMED`, `declined` or `retired` | 0 |
+| `callback facts check [ids...]` | Grounds each fact's text against the fact itself and its parent, as a build grounds a bullet that quotes it, and prints what would fail. With no ids: every detail and project fact in use or waiting for your answer | 0 nothing found, 1 findings, 3 unknown id |
 | `callback facts github <user>` | Drafts an unconfirmed `project` fact (description as text; name and primary language as entities) for each of your own public, described, non-fork repositories, to `inbox/github-<user>.yaml`. Nothing reaches the store until you `facts add` the file | 0, 1 nothing drafted, 3 |
-| `callback facts confirm [ids...]` | Asks you, fact by fact, whether each is true | 0, 3 if not run from a terminal or an id is unknown or web-sourced |
+| `callback facts confirm [--include-declined] [ids...]` | Asks you, fact by fact, whether each is true, showing its text, numbers, dates and the names it lists as used. A fact you answer `n` to is marked declined and not offered again unless you name it or pass `--include-declined` | 0, 3 if not run from a terminal or an id is unknown, web-sourced or retired |
+| `callback facts retire <ids...>` | Asks you whether each named fact should go out of use. A retired fact backs nothing from then on and stays in the store, since documents already sent cite it | 0, 3 if not run from a terminal or an id is unknown |
 | `callback notes list [--all]` | Lists active notes; `--all` adds proposed and retired ones | 0, 3 unreadable notebook |
 | `callback notes activate <id>` | Shows you a proposed note in full, with where it came from, and activates it on your yes at the terminal | 0, 3 if not run from a terminal or the id is unknown |
 | `callback notes retire <id>` | Sets a note aside; it stays in the file and can be activated again | 0, 3 unknown id |
@@ -122,13 +124,25 @@ A fact is one thing that is true about you, stated once:
 - A detail fact names its role in `parent`. A bullet may cite only its own
   entry's facts, or their children.
 - `entities` holds names and tools the fact states. Tool names are matched
-  through an alias table, so `k8s` and `Kubernetes` are one skill.
+  through an alias table, so `k8s` and `Kubernetes` are one skill. List every
+  acronym and every name that holds a digit ("GPA", "SEC", "SHA-256", "Form
+  4"): a bullet may use one only if a cited fact lists it, and the digits of a
+  listed name that the fact's text also states are read as part of the name,
+  not as a quantity.
+- One fact per skill, never one per printed line of a skills section: you
+  confirm or decline a fact whole, so a line of six languages cannot lose the
+  one you would not claim.
 - One `links` fact holds your name, email, phone and links as `entities`.
   The resume's identity block must match it exactly.
 - Record a percentage with `unit: "%"`. A count can never be backed by a
   percentage.
 - `dates` use `YYYY-MM`. Leave out `end` for a role that has not ended; that is
   what lets a resume say "Present".
+- A fact is never edited once confirmed, and none is ever deleted. While it
+  is a draft, add it again with `--replace`. Once confirmed, retire it with
+  `callback facts retire` and add the correction under a new id.
+  `callback facts check` finds a fact that would fail as a bullet while it is
+  still a draft.
 - A fact is usable only after `callback facts confirm`. That command reads your
   answers from the terminal itself (`/dev/tty`), so piping in "y" does not work,
   and the write guard refuses it when an assistant runs it through a wrapper
@@ -323,11 +337,11 @@ rewritten from scratch fails even when every entry chains correctly, and
 
 The plugin registers `callback-mcp` (see `.mcp.json`), which serves the same
 checks as tools: `build`, `letter`, `answers`, `outreach`, `facts_add`,
-`facts_list`, `notes_list`, `notes_propose`, `notes_retire`, `watch`, `triage`, `fit`, `agenda`, `postings_take`, `postings_resolve`,
+`facts_list`, `facts_check`, `notes_list`, `notes_propose`, `notes_retire`, `watch`, `triage`, `fit`, `agenda`, `postings_take`, `postings_resolve`,
 `applications`, `funnel`, `insights`, `gaps`,
 `eligibility`, `apply`, `interview` and `verify`. Each wraps the function the
 command line calls, so a result is identical whichever way it is reached, and
-a failure is a tool error, never an empty result. `facts confirm`, activating
-a note, and `delete-all` are deliberately not tools: only the candidate, at a
+a failure is a tool error, never an empty result. `facts confirm`, `facts
+retire`, activating a note, and `delete-all` are deliberately not tools: only the candidate, at a
 terminal, may make a fact usable, make a note something sessions follow, or
 erase the data home.

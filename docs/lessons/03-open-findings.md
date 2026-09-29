@@ -10,7 +10,7 @@ each is the *reproduction*, which is the part a summary loses.
 
 ## Watch — the round-trip gate's regional matching is the recurring defect class
 
-`core/checks/roundtrip.py` has taken seven `fix:` commits, all the same shape:
+Seven of the `fix:` commits to `core/checks/roundtrip.py` have the same shape:
 a declared value matched against the wrong region of the extracted text (a
 value inside a longer value, one entry's field satisfied by another's, a
 section's skills found in the section before or after it). Each is fixed and

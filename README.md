@@ -91,9 +91,10 @@ should I do next?"*. The session calls the checks as MCP tools and reports what 
 command line below is the same code with an argv front end, used by the tests, by CI, and
 whenever you want to run something yourself.
 
-**One command is yours alone.** `callback facts confirm` reads your controlling terminal rather
-than piped input, and the write guard refuses the assistant's attempts to run it, so making a fact
-usable is your step — and a bullet may rest only on a confirmed fact. Erasing the data home is
+**Deciding what is true is yours alone.** `callback facts confirm` and `callback facts retire`
+read your controlling terminal rather than piped input, and the write guard refuses the
+assistant's attempts to run them, so making a fact usable, or taking one out of use, is your step —
+and a bullet may rest only on a confirmed fact. Erasing the data home is
 likewise not a tool. Everything else is conversational:
 
 | Command | Does |
@@ -101,7 +102,7 @@ likewise not a tool. Everything else is conversational:
 | `callback targets add`, `criteria`, `watch`, `postings` | find postings on employers' own Greenhouse, Lever and Ashby boards and in Hacker News's "Who is hiring?", never by scraping job sites |
 | `callback profile`, `eligibility`, `triage` | flag knockout requirements (sponsorship, citizenship, graduation window) quoted from the posting, and rank postings by evidence and freshness |
 | `callback import resume.pdf` | extract an existing resume's text, screening it for hidden content |
-| `callback facts add / list / confirm` | store facts (unconfirmed), list them, confirm them yourself |
+| `callback facts add / list / check / confirm / retire` | store facts (unconfirmed), list them, check each against its own text, and confirm or retire them yourself |
 | `callback build resume.yaml --job <id>` | render the PDF and run every gate; exit 0 pass, 1 warn, 2 fail |
 | `callback letter letter.yaml` | render and check a cover letter |
 | `callback export resume.yaml` | the resume as plain text, for forms that want it pasted |

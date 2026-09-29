@@ -1,41 +1,58 @@
-"""Adding facts from a file, and confirming them -- which only the candidate can do.
+"""Adding facts from a file, checking them, and the two decisions only the
+candidate can make about one: that it is true, and that it no longer is.
 
 A fact becomes usable as resume material only once its provenance says the
 candidate confirmed it (`Fact.selectable`). Everything else -- a fact drafted
 from an imported resume, or by an assistant from an answer -- starts
-unconfirmed, and `confirm` is the only way across that line.
+unconfirmed, and `confirm` is the only way across that line. `retire` is the
+way back: a confirmed fact is never edited or deleted, because documents
+already sent cite it, so a fact that stopped being true is taken out of use and
+its correction added under a new id.
 
-`confirm` reads its answers from the candidate's own terminal; see
-`core.terminal` for what that does and does not guarantee.
+A draft is cheaper to fix than a confirmed fact, so two things happen before
+confirmation. `check_facts` grounds a fact's own text against the fact, which
+is what a bullet quoting it would face, and `add_from_file` can replace a
+draft that failed.
+
+`confirm` and `retire` read their answers from the candidate's own terminal;
+see `core.terminal` for what that does and does not guarantee.
 """
 
 from __future__ import annotations
 
 import re
 from collections.abc import Callable
+from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import cast
 
 import yaml
 from pydantic import ValidationError
 
+from core.checks.grounding import Verdict, check_bullet
 from core.errors import validation_problems, yaml_problem
-from core.profile.models import Fact, Provenance, Trust
+from core.profile.models import Fact, FactKind, Provenance, Trust
 from core.profile.store import StoreError, add_fact, load_facts, save_facts
 from core.terminal import NoTerminalError, Terminal, ask, connect
 
 _ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}")
 
 
-class ConfirmError(RuntimeError):
-    """Confirmation could not proceed; nothing was changed."""
+class FactsError(RuntimeError):
+    """A command about stored facts could not proceed; nothing was changed."""
 
 
-def add_from_file(path: Path) -> tuple[list[str], list[tuple[str, str]]]:
+class ConfirmError(FactsError):
+    """A decision only the candidate can make could not be asked for; nothing was changed."""
+
+
+def add_from_file(path: Path, *, replace: bool = False) -> tuple[list[str], list[tuple[str, str]]]:
     """Add every fact listed in the YAML file at `path`.
 
     Returns the ids added and, for each fact refused, its id (or its position
     when it has none) and the reason. One bad fact never costs the others.
+    With `replace`, a fact whose id is already stored replaces it while the
+    stored one is still a draft (`core.profile.store.add_fact`).
     """
     try:
         parsed: object = yaml.safe_load(path.read_text(encoding="utf-8"))
@@ -66,7 +83,7 @@ def add_from_file(path: Path) -> tuple[list[str], list[tuple[str, str]]]:
                     )
                 )
                 continue
-            add_fact(fact)
+            add_fact(fact, replace=replace)
         except ValidationError as exc:
             # The reason, not the entry: the file may be any file on the machine.
             rejected.append((label, validation_problems(exc)))
@@ -85,22 +102,88 @@ def _confirmed(fact: Fact) -> Fact:
             "provenance": Provenance(
                 source=source if source.startswith("user:") else f"user:confirmed:{source}",
                 trust=Trust.USER_CONFIRMED,
-            )
+            ),
+            "declined_on": None,
         }
     )
 
 
-def confirm(ids: list[str], *, open_tty: Callable[[], Terminal] | None = None) -> list[str]:
-    """Ask the candidate, fact by fact, whether each is true; return the ids confirmed.
+def state(fact: Fact) -> str:
+    """The one word that says where `fact` stands: whether it is in use, and if
+    not, which decision put it there."""
+    if fact.retired_on is not None:
+        return "retired"
+    if fact.selectable():
+        return "confirmed"
+    return "declined" if fact.declined_on is not None else "unconfirmed"
 
-    With no `ids`, every unconfirmed fact is offered. Answers are `y` (true
-    as written), `n` (leave unconfirmed) or `q` (stop; answers already given
-    are kept). A web-sourced fact is research about someone else and can
-    never become a claim about the candidate. `open_tty` defaults to the
-    controlling terminal.
+
+def _today() -> date:
+    return datetime.now(tz=UTC).date()
+
+
+def _unknown(ids: list[str], facts: dict[str, Fact]) -> list[str]:
+    return [i for i in ids if i not in facts]
+
+
+# The kinds a bullet quotes: a detail of a role, and a project, whose text is
+# its one-line description. A role or a degree reaches the page through its
+# header fields, which the claims check compares field by field; its text
+# restates them ("Boston, MA"), and would fail as prose on the state's initials.
+_QUOTED_BY_BULLETS = frozenset({FactKind.EXPERIENCE_DETAIL, FactKind.PROJECT})
+
+
+def check_facts(ids: list[str]) -> dict[str, list[str]]:
+    """What a bullet quoting each fact word for word would fail on, by fact id.
+
+    A fact's text is grounded against the fact itself and its parent, exactly
+    as `build` grounds a bullet that cites them, so a token the text states
+    and `entities` omits is found while the fact is still a draft. With no
+    `ids`, every fact in use or still waiting for an answer is checked:
+    retired and declined ones are skipped, as are web-sourced ones, which can
+    never back a bullet.
+
+    Facts are treated as confirmed for the comparison only. Nothing is saved.
     """
     facts = load_facts()
-    unknown = [i for i in ids if i not in facts]
+    unknown = _unknown(ids, facts)
+    if unknown:
+        raise FactsError(f"no such fact(s): {unknown}")
+    targets = [facts[i] for i in ids] or [
+        f for f in facts.values() if f.retired_on is None and f.declined_on is None
+    ]
+    problems: dict[str, list[str]] = {}
+    for fact in targets:
+        if fact.kind not in _QUOTED_BY_BULLETS or fact.provenance.trust is Trust.WEB:
+            continue
+        parent = facts.get(fact.parent) if fact.parent else None
+        sources = [fact] if parent is None else [fact, parent]
+        as_confirmed = [_confirmed(s).model_copy(update={"retired_on": None}) for s in sources]
+        verdict, findings = check_bullet(fact.text, as_confirmed)
+        if verdict is Verdict.FAIL:
+            problems[fact.id] = [f.detail for f in findings]
+    return problems
+
+
+def confirm(
+    ids: list[str],
+    *,
+    include_declined: bool = False,
+    open_tty: Callable[[], Terminal] | None = None,
+) -> list[str]:
+    """Ask the candidate, fact by fact, whether each is true; return the ids confirmed.
+
+    With no `ids`, every unconfirmed fact not yet answered about is offered;
+    `include_declined` adds the ones answered `n` before, and naming a fact
+    offers it whatever was answered. Answers are `y` (true as written), `n`
+    (not as written: recorded, and not offered again) or `q` (stop; answers
+    already given are kept, and what was not reached is offered next time). A
+    web-sourced fact is research about someone else and can never become a
+    claim about the candidate, and a retired fact is out of use for good.
+    `open_tty` defaults to the controlling terminal.
+    """
+    facts = load_facts()
+    unknown = _unknown(ids, facts)
     if unknown:
         raise ConfirmError(f"no such fact(s): {unknown}")
     if ids:
@@ -110,11 +193,20 @@ def confirm(ids: list[str], *, open_tty: Callable[[], Terminal] | None = None) -
             raise ConfirmError(
                 f"web-sourced facts cannot be confirmed as the candidate's own: {web}"
             )
+        retired = [f.id for f in targets if f.retired_on is not None]
+        if retired:
+            raise ConfirmError(
+                f"retired facts stay retired: {retired}; add the fact again under a new id"
+            )
     else:
         # Offering everything unconfirmed skips web facts rather than refusing:
         # one stored piece of research must not block confirming everything else.
         targets = [
-            f for f in facts.values() if not f.selectable() and f.provenance.trust is not Trust.WEB
+            f
+            for f in facts.values()
+            if f.provenance.trust is Trust.IMPORT_UNCONFIRMED
+            and f.retired_on is None
+            and (include_declined or f.declined_on is None)
         ]
     targets = [f for f in targets if not f.selectable()]
     if not targets:
@@ -128,6 +220,7 @@ def confirm(ids: list[str], *, open_tty: Callable[[], Terminal] | None = None) -
         ) from exc
 
     shown: dict[str, Fact] = {}
+    declined: dict[str, Fact] = {}
     try:
         for n, fact in enumerate(targets, 1):
             tty.write(f"\n[{n}/{len(targets)}] {fact.id} ({fact.kind})\n  {fact.text}\n")
@@ -135,22 +228,74 @@ def confirm(ids: list[str], *, open_tty: Callable[[], Terminal] | None = None) -
                 tty.write(f"  numbers: {fact.model_dump(mode='json')['numbers']}\n")
             if fact.dates:
                 tty.write(f"  dates: {fact.dates.start} .. {fact.dates.end or 'present'}\n")
+            if fact.entities:
+                # What a bullet may name as used rests on this list, not on
+                # the text, so it is part of what is being confirmed.
+                tty.write(f"  names as used: {', '.join(fact.entities)}\n")
             answer = ask(tty, "True as written?")
             if answer == "q":
                 break
-            if answer == "y":
-                shown[fact.id] = fact
+            (shown if answer == "y" else declined)[fact.id] = fact
     finally:
         tty.close()
-    if not shown:
+    if not shown and not declined:
         return []
     # Re-read the store rather than saving the snapshot taken before the
     # prompts, which would silently drop anything added meanwhile. A fact
-    # that changed or vanished since it was shown is not confirmed: the
-    # candidate answered about the text they saw.
+    # that changed or vanished since it was shown keeps no answer, yes or no:
+    # the candidate answered about the text they saw.
     current = load_facts()
     confirmed = [fid for fid, fact in shown.items() if current.get(fid) == fact]
     for fid in confirmed:
         current[fid] = _confirmed(current[fid])
+    for fid, fact in declined.items():
+        if current.get(fid) == fact:
+            current[fid] = fact.model_copy(update={"declined_on": _today()})
     save_facts(current)
     return confirmed
+
+
+def retire(ids: list[str], *, open_tty: Callable[[], Terminal] | None = None) -> list[str]:
+    """Ask the candidate whether each named fact should go out of use; return the ids retired.
+
+    A retired fact backs nothing from then on and is never offered, confirmed
+    or replaced. It stays in the store with its provenance, because a
+    document sent while it was in use still cites it. Facts must be named:
+    retiring is never the default for anything.
+    """
+    if not ids:
+        raise ConfirmError("name the fact(s) to retire")
+    facts = load_facts()
+    unknown = _unknown(ids, facts)
+    if unknown:
+        raise ConfirmError(f"no such fact(s): {unknown}")
+    targets = [facts[i] for i in dict.fromkeys(ids) if facts[i].retired_on is None]
+    if not targets:
+        return []
+    try:
+        tty = connect(open_tty)
+    except NoTerminalError as exc:
+        raise ConfirmError(
+            f"retiring a fact must be typed by the candidate in a terminal ({exc})"
+        ) from exc
+
+    chosen: dict[str, Fact] = {}
+    try:
+        for n, fact in enumerate(targets, 1):
+            state = "confirmed" if fact.selectable() else "unconfirmed"
+            tty.write(f"\n[{n}/{len(targets)}] {fact.id} ({fact.kind}, {state})\n  {fact.text}\n")
+            answer = ask(tty, "Retire it? It will back no document from now on.")
+            if answer == "q":
+                break
+            if answer == "y":
+                chosen[fact.id] = fact
+    finally:
+        tty.close()
+    if not chosen:
+        return []
+    current = load_facts()
+    retired = [fid for fid, fact in chosen.items() if current.get(fid) == fact]
+    for fid in retired:
+        current[fid] = current[fid].model_copy(update={"retired_on": _today()})
+    save_facts(current)
+    return retired
