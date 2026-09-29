@@ -168,6 +168,10 @@ class Fact(BaseModel):
     # that it was once confirmed is part of what earlier documents rest on.
     retired_on: date | None = None
 
+    def was_confirmed(self) -> bool:
+        """Whether the candidate ever called this fact true, in use or retired."""
+        return self.provenance.trust is Trust.USER_CONFIRMED
+
     def selectable(self) -> bool:
         """Only confirmed facts the candidate has not retired may back generated text."""
-        return self.provenance.trust is Trust.USER_CONFIRMED and self.retired_on is None
+        return self.was_confirmed() and self.retired_on is None

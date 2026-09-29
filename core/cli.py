@@ -237,7 +237,9 @@ def build_parser() -> argparse.ArgumentParser:
     check.add_argument("ids", nargs="*", help="fact ids (default: every fact in use or waiting)")
     check.set_defaults(handler=_cmd_facts_check)
     listing = facts_sub.add_parser("list", help="list stored facts")
-    listing.add_argument("--unconfirmed", action="store_true", help="only unconfirmed facts")
+    listing.add_argument(
+        "--unconfirmed", action="store_true", help="only facts still waiting for an answer"
+    )
     listing.set_defaults(handler=_cmd_facts_list)
     conf = facts_sub.add_parser(
         "confirm", help="confirm facts interactively; must be run by the candidate in a terminal"
@@ -957,9 +959,9 @@ def _cmd_facts_list(args: argparse.Namespace) -> int:
     from core.profile.store import load_facts
 
     for fid, fact in load_facts().items():
-        if args.unconfirmed and fact.selectable():
-            continue
         mark = state(fact)
+        if args.unconfirmed and mark != "unconfirmed":
+            continue
         mark = mark.upper() if mark == "unconfirmed" else mark
         print(f"{mark:<11} {fid:<24} {fact.kind:<18} {fact.text}")
     return 0

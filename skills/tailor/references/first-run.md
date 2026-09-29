@@ -49,8 +49,8 @@ If `callback facts list` shows no confirmed facts:
    uv run --project <repo root> callback facts confirm
    ```
 
-   Then wait. Continue only once `callback facts list --unconfirmed` shows
-   nothing still `UNCONFIRMED`, or they say to proceed with what's confirmed.
+   Then wait. Continue only once `callback facts list --unconfirmed` is
+   empty, or they say to proceed with what's confirmed.
    A fact they answered no to is listed as `declined` and is not offered
    again; draft its correction under the same id with `--replace`.
 

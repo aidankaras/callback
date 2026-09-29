@@ -286,3 +286,19 @@ def test_the_candidate_is_shown_the_names_a_fact_lists(tmp_path: Path) -> None:
     shown = asked.shown.getvalue()
     assert shown.count("names as used:") == 1
     assert "names as used: SHA-256" in shown
+
+
+def test_unconfirmed_means_still_waiting_for_an_answer(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A declined or retired fact has had its answer. Listing it as unconfirmed
+    would leave a session waiting for the list to empty, which it never would."""
+    drafts = [_draft(fid, f"text {fid}") for fid in ("a", "b", "c", "d")]
+    add_from_file(_file(tmp_path, drafts))
+    confirm(["a", "b"], open_tty=_Asked("y\nn\n"))
+    retire(["c"], open_tty=_Asked("y\n"))
+
+    assert main(["facts", "list", "--unconfirmed"]) == 0
+
+    lines = capsys.readouterr().out.splitlines()
+    assert [line.split()[:2] for line in lines] == [["UNCONFIRMED", "d"]]

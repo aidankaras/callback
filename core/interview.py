@@ -125,6 +125,14 @@ def prepare(job_id: str) -> Path:
                     fact = facts.get(fid)
                     if fact is None:
                         lines.append(f"  - (fact {fid!r} is no longer stored)")
+                    elif fact.retired_on is not None and fact.was_confirmed():
+                        # Retiring keeps a fact out of later documents. This one
+                        # went out resting on it, and its text cannot have
+                        # changed since: a confirmed fact is never rewritten.
+                        lines.append(
+                            f"  - {fact.text} (retired {fact.retired_on:%Y-%m-%d}, "
+                            "after this was sent)"
+                        )
                     elif not fact.selectable():
                         lines.append(f"  - (fact {fid!r} is no longer confirmed; not shown)")
                     else:

@@ -96,7 +96,8 @@ def facts_list(unconfirmed_only: bool = False) -> dict[str, object]:
     """Every stored fact, with its state: confirmed, unconfirmed, declined or retired.
 
     `confirmed` is whether the fact may back a document, which a retired fact
-    may not, whatever it once was.
+    may not, whatever it once was. `unconfirmed_only` keeps the facts still
+    waiting for the candidate's answer: a declined or retired one has had it.
     """
     from core.factscmd import state
     from core.profile.store import load_facts
@@ -110,7 +111,7 @@ def facts_list(unconfirmed_only: bool = False) -> dict[str, object]:
             "text": f.text,
         }
         for fid, f in load_facts().items()
-        if not (unconfirmed_only and f.selectable())
+        if not unconfirmed_only or state(f) == "unconfirmed"
     ]
     return {"facts": facts}
 

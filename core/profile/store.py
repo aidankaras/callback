@@ -20,7 +20,7 @@ from pydantic import ValidationError
 
 from core.aliases import canonicalize
 from core.paths import OutsideHomeError, resolve_inside, write_private
-from core.profile.models import Dates, Derivation, Fact, Provenance, Quantity, Trust
+from core.profile.models import Dates, Derivation, Fact, Provenance, Quantity
 
 FACTS_FILE = "facts.yaml"
 
@@ -250,7 +250,7 @@ def add_fact(fact: Fact, *, replace: bool = False) -> None:
         stored = facts[fact.id]
         if not replace:
             raise DuplicateFactError(f"fact {fact.id!r} already exists")
-        if stored.provenance.trust is Trust.USER_CONFIRMED or stored.retired_on is not None:
+        if stored.was_confirmed() or stored.retired_on is not None:
             state = "retired" if stored.retired_on is not None else "confirmed"
             raise DuplicateFactError(
                 f"fact {fact.id!r} is {state} and is not rewritten; retire it with "
