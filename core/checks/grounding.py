@@ -247,9 +247,14 @@ def _abbreviation_letter(text: str, found: Sequence[re.Match[str]], position: in
     abbreviation ("R&D", "M&A") rather than a word of its own.
 
     Only a letter written against the ampersand counts, and only when what
-    stands on the ampersand's other side is not a table entry: "R&D" is a
-    department, while "Python&R" and "Python & R" are two tools, and the
-    one-letter entry "R" must still be cited there.
+    stands on the ampersand's other side is a single letter too: "R&D" is a
+    department, while "R&Stata", "Python&R" and "Python & R" are two tools,
+    and the one-letter entry "R" must still be cited there. Asking instead
+    whether the neighbour is a table entry would excuse the letter beside
+    every tool the table has not heard of.
+
+    What this cannot tell apart is two one-letter languages written the same
+    way: "C&R" reads as an abbreviation, and R goes unchecked there.
     """
     here = found[position]
     if len(here.group()) != 1:
@@ -259,7 +264,9 @@ def _abbreviation_letter(text: str, found: Sequence[re.Match[str]], position: in
         neighbours.append(found[position - 1].group())
     if position + 1 < len(found) and text[here.end() : found[position + 1].start()] == "&":
         neighbours.append(found[position + 1].group())
-    return bool(neighbours) and not any(n.rstrip(".").lower() in ALIAS_TABLE for n in neighbours)
+    # The letter itself, of a neighbour such as "D." or "D-focused".
+    letters = [re.split(r"[-.]", n, maxsplit=1)[0] for n in neighbours]
+    return bool(letters) and all(len(letter) == 1 for letter in letters)
 
 
 def _whole(name: str) -> re.Pattern[str]:
@@ -268,28 +275,37 @@ def _whole(name: str) -> re.Pattern[str]:
     return re.compile(rf"(?<![A-Za-z0-9]){re.escape(name)}(?![A-Za-z0-9])", re.IGNORECASE)
 
 
-def _without_listed_names(text: str, sources: Sequence[Fact]) -> str:
-    """`text` with every name that carries its own digits blanked out, so the
-    digits in "SHA-256", "Form 4" or "Lorenz-96" are not read as quantities
-    the bullet claims.
+def _listed_name_spans(text: str, sources: Sequence[Fact]) -> list[tuple[int, int]]:
+    """Where `text` states a name that carries its own digits, so the digits
+    in "SHA-256", "Form 4" or "Lorenz-96" are not read as quantities the
+    bullet claims.
 
     A name counts only when a cited fact does both of two things: lists it in
     `entities`, and states it in its own text. The first is what makes it a
     name rather than a phrase that happens to hold a number; the second ties
-    it to words the candidate read when confirming the fact. It must also hold
-    a letter, so an entity of "256" excuses no number at all. Only the name's
-    own occurrence is blanked: the same digits standing elsewhere in the
-    bullet are a quantity like any other.
+    it to words the candidate read when confirming the fact.
+
+    It must also open with a letter. A name that opens with a digit is spelled
+    like a quantity: someone who worked at 3M has not saved "$3M", and "10x" a
+    platform is not "10x" an improvement. Such a name excuses nothing, so
+    "8-K" is written "Form 8-K" where its digit is to be read as part of it.
+
+    The spans are of the name's own occurrences. `check_bullet` excuses a
+    number only when the whole of it, magnitude and currency sign included,
+    lies inside one: "Form 4 million" states four million, which no name
+    holds, and the same digits standing elsewhere in the bullet are a
+    quantity like any other.
     """
+    spans: list[tuple[int, int]] = []
     for fact in sources:
         for entity in fact.entities:
             name = entity.strip()
-            if not (any(c.isalpha() for c in name) and any(c.isdigit() for c in name)):
+            if not (name[:1].isalpha() and any(c.isdigit() for c in name)):
                 continue
             pattern = _whole(name)
             if pattern.search(fact.text):
-                text = pattern.sub(lambda found: " " * len(found.group()), text)
-    return text
+                spans.extend(found.span() for found in pattern.finditer(text))
+    return spans
 
 
 def _names_a_technology(token: str) -> bool:
@@ -576,7 +592,10 @@ def check_bullet(
 
     start, end = date_hull(sources)
 
-    for number in parse_numbers(_without_listed_names(text, sources)):
+    names = _listed_name_spans(text, sources)
+    for number in parse_numbers(text):
+        if any(a <= number.span[0] and number.span[1] <= b for a, b in names):
+            continue
         # A quantity recorded as a percent never backs a plain count, so
         # "42 direct reports" cannot rest on a fact that says 42%.
         # A percentage's direction is carried by its verb ("cut churn by 15%"),

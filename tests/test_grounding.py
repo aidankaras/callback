@@ -1017,7 +1017,7 @@ def test_a_spaced_ampersand_is_a_list_whatever_stands_beside_it() -> None:
     [
         ("Recorded each file with its SHA-256 hash", ["SHA-256"]),
         ("Studied the Lorenz-96 system", ["Lorenz-96"]),
-        ("Parsed Form 4 and 8-K filings", ["Form 4", "8-K"]),
+        ("Parsed Form 4 and Form 8-K filings", ["Form 4", "Form 8-K"]),
         ("Built the service on Python 3.12", ["Python", "Python 3.12"]),
     ],
 )
@@ -1084,3 +1084,54 @@ def test_a_number_outside_a_listed_name_is_still_a_quantity(
     assert [x.detail for x in findings if x.kind is FindingKind.UNRESOLVED_NUMBER] == [
         f"'{number}' is not derivable from the cited facts"
     ], findings
+
+
+@pytest.mark.parametrize(
+    ("fact_text", "entity", "bullet", "demanded"),
+    [
+        ("Interned on the adhesives analytics team at 3M", "3M", "Saved $3M in costs", "$3M"),
+        ("Prepared libraries on the 10x platform", "10x", "Improved throughput 10x", "10"),
+        ("Encoded 4K video for the streaming team", "4K", "Cut storage costs by $4K", "$4K"),
+        ("Worked alongside 5 engineers", "5 engineers", "Managed 5 engineers", "5"),
+        ("Parsed 8-K filings into a table", "8-K", "Parsed 8-K filings into a table", "8"),
+        ("Parsed Form 4 filings", "Form 4", "Parsed Form 4 million filings", "4 million"),
+        ("Parsed Form 4 filings", "Form 4", "Parsed Form 4,000 filings", "4,000"),
+    ],
+)
+def test_a_quantity_spelled_like_a_listed_name_is_still_a_quantity(
+    fact_text: str, entity: str, bullet: str, demanded: str
+) -> None:
+    """Someone who worked at 3M has not saved three million of anything. A
+    name that opens with a digit reads as a quantity wherever it stands, so it
+    excuses nothing, and a number reaching past the end of a name ("Form 4
+    million") is not the number the name holds."""
+    f = fact("d", text=fact_text, entities=[entity])
+
+    verdict, findings = check_bullet(bullet, [f])
+
+    assert verdict is Verdict.FAIL
+    assert [x.detail for x in findings if x.kind is FindingKind.UNRESOLVED_NUMBER] == [
+        f"'{demanded}' is not derivable from the cited facts"
+    ], findings
+
+
+@pytest.mark.parametrize("bullet", ["Ran the models in R&Stata", "Ran the models in R&stata"])
+def test_a_letter_glued_to_a_word_is_not_an_abbreviation(bullet: str) -> None:
+    """ "R&D" is two letters. A letter joined to a whole word is a tool beside
+    something else, whether or not the alias table has heard of the word."""
+    from core.aliases import ALIAS_TABLE
+
+    assert "stata" not in ALIAS_TABLE
+    f = fact("d", text="Ran the models in Stata", entities=["Stata"])
+
+    verdict, findings = check_bullet(bullet, [f])
+
+    assert verdict is Verdict.FAIL
+    assert any("'R'" in finding.detail for finding in findings), findings
+
+
+@pytest.mark.parametrize(
+    "text", ["Led the R&D group", "Joined an R&D-focused team", "the M&A desk"]
+)
+def test_letters_joined_by_an_ampersand_are_an_abbreviation(text: str) -> None:
+    assert checkable_entity_tokens(text) == []
