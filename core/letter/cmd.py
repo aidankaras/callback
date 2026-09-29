@@ -23,7 +23,7 @@ from core.letter.checks import check_letter
 from core.letter.io import parse_letter
 from core.letter.render import render_letter
 from core.paths import private_dir, resolve_inside, write_private, write_private_bytes
-from core.profile.store import load_facts
+from core.profile.store import facts_sha256, load_facts
 from core.render.typst import RenderError
 from core.resume.io import DocumentError, load_doc
 
@@ -83,6 +83,7 @@ def build_letter(path: Path) -> LetterBuild:
     record = {
         "verdict": "fail" if findings else "pass",
         "pdf_sha256": hashlib.sha256(pdf_bytes).hexdigest(),
+        "facts_sha256": facts_sha256(),
         "findings": list(findings),
     }
     write_private(out_dir / "letter-report.json", json.dumps(record, indent=2) + "\n")

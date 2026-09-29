@@ -1,6 +1,12 @@
 import pytest
 
-from core.checks.grounding import FindingKind, Verdict, check_bullet, check_document
+from core.checks.grounding import (
+    FindingKind,
+    Verdict,
+    check_bullet,
+    check_document,
+    checkable_entity_tokens,
+)
 from core.profile.models import Dates, Derivation, Fact, FactKind, Provenance, Quantity, Trust
 
 PROV = Provenance(source="onboarding_answer", trust=Trust.USER_CONFIRMED)
@@ -958,3 +964,174 @@ def test_the_fix_message_names_text_only_when_the_text_states_the_token() -> Non
     )
     _, findings = check_bullet("Ran pipelines across MA sites", [f])
     assert findings[0].detail.endswith("appears in no cited fact")
+
+
+def test_a_letter_in_an_ampersand_abbreviation_is_not_a_language() -> None:
+    """ "R&D" is a department, not the language R. The bullet repeats its
+    fact's own words and names no technology."""
+    f = fact("d", text="Built forecasting models for the R&D group", entities=[])
+    assert checkable_entity_tokens("Built forecasting models for the R&D group") == []
+
+    verdict, findings = check_bullet("Built forecasting models for the R&D group", [f])
+
+    assert verdict is Verdict.PASS, findings
+
+
+@pytest.mark.parametrize(
+    "bullet",
+    [
+        "Built forecasting models in R",
+        "Wrote the analysis in Python & R",
+        "Wrote the analysis in Python&R",
+        "Wrote the analysis in R&Python",
+    ],
+)
+def test_an_ampersand_does_not_hide_the_language(bullet: str) -> None:
+    """Beside a technology the letter is the language: an ampersand joining
+    two tools is a list of tools, and each still needs a fact behind it."""
+    f = fact("d", text="Wrote the analysis for the R&D group", entities=["Python"])
+    assert "R" in checkable_entity_tokens(bullet)
+
+    verdict, findings = check_bullet(bullet, [f])
+
+    assert verdict is Verdict.FAIL
+    assert any("'R'" in finding.detail for finding in findings), findings
+
+
+def test_a_spaced_ampersand_is_a_list_whatever_stands_beside_it() -> None:
+    """Written with spaces, "R & Stata" is two tools. The second is unknown to
+    the alias table, so nothing but the spacing says the first is a language."""
+    from core.aliases import ALIAS_TABLE
+
+    assert "stata" not in ALIAS_TABLE
+    f = fact("d", text="Wrote the analysis", entities=[])
+
+    verdict, findings = check_bullet("Wrote the analysis in R & Stata", [f])
+
+    assert verdict is Verdict.FAIL
+    assert any("'R'" in finding.detail for finding in findings), findings
+
+
+@pytest.mark.parametrize(
+    ("text", "entities"),
+    [
+        ("Recorded each file with its SHA-256 hash", ["SHA-256"]),
+        ("Studied the Lorenz-96 system", ["Lorenz-96"]),
+        ("Parsed Form 4 and Form 8-K filings", ["Form 4", "Form 8-K"]),
+        ("Built the service on Python 3.12", ["Python", "Python 3.12"]),
+    ],
+)
+def test_a_number_inside_a_name_the_fact_lists_is_not_a_quantity(
+    text: str, entities: list[str]
+) -> None:
+    """ "SHA-256" claims no count of 256. The fact states the name and lists
+    it, so the digits are part of what it is called."""
+    f = fact("d", text=text, entities=entities)
+
+    verdict, findings = check_bullet(text, [f])
+
+    assert verdict is not Verdict.FAIL, findings
+
+
+@pytest.mark.parametrize(
+    ("fact_text", "entities", "bullet", "number"),
+    [
+        pytest.param(
+            "Recorded each file with its hash",
+            ["SHA-256"],
+            "Recorded each file with its SHA-256 hash",
+            "256",
+            id="a-name-the-facts-text-never-states",
+        ),
+        pytest.param(
+            "Recorded each file with its SHA-256 hash",
+            ["256"],
+            "Recorded each file with its SHA-256 hash",
+            "256",
+            id="a-listed-entity-that-is-only-digits",
+        ),
+        pytest.param(
+            "Recorded each file with its SHA-256 hash",
+            ["SHA-256"],
+            "Recorded 256 files, each with its SHA-256 hash",
+            "256",
+            id="the-same-digits-standing-alone",
+        ),
+        pytest.param(
+            "Parsed 8-K filings",
+            ["8-K"],
+            "Parsed 18-K filings",
+            "18",
+            id="the-name-inside-a-longer-token",
+        ),
+        pytest.param(
+            "Did not reach 300 users",
+            [],
+            "Reached 300 users",
+            "300",
+            id="a-number-the-text-states-and-no-entity-names",
+        ),
+    ],
+)
+def test_a_number_outside_a_listed_name_is_still_a_quantity(
+    fact_text: str, entities: list[str], bullet: str, number: str
+) -> None:
+    f = fact("d", text=fact_text, entities=entities)
+
+    verdict, findings = check_bullet(bullet, [f])
+
+    assert verdict is Verdict.FAIL
+    assert [x.detail for x in findings if x.kind is FindingKind.UNRESOLVED_NUMBER] == [
+        f"'{number}' is not derivable from the cited facts"
+    ], findings
+
+
+@pytest.mark.parametrize(
+    ("fact_text", "entity", "bullet", "demanded"),
+    [
+        ("Interned on the adhesives analytics team at 3M", "3M", "Saved $3M in costs", "$3M"),
+        ("Prepared libraries on the 10x platform", "10x", "Improved throughput 10x", "10"),
+        ("Encoded 4K video for the streaming team", "4K", "Cut storage costs by $4K", "$4K"),
+        ("Worked alongside 5 engineers", "5 engineers", "Managed 5 engineers", "5"),
+        ("Parsed 8-K filings into a table", "8-K", "Parsed 8-K filings into a table", "8"),
+        ("Parsed Form 4 filings", "Form 4", "Parsed Form 4 million filings", "4 million"),
+        ("Parsed Form 4 filings", "Form 4", "Parsed Form 4,000 filings", "4,000"),
+    ],
+)
+def test_a_quantity_spelled_like_a_listed_name_is_still_a_quantity(
+    fact_text: str, entity: str, bullet: str, demanded: str
+) -> None:
+    """Someone who worked at 3M has not saved three million of anything. A
+    name that opens with a digit reads as a quantity wherever it stands, so it
+    excuses nothing, and a number reaching past the end of a name ("Form 4
+    million") is not the number the name holds."""
+    f = fact("d", text=fact_text, entities=[entity])
+
+    verdict, findings = check_bullet(bullet, [f])
+
+    assert verdict is Verdict.FAIL
+    assert [x.detail for x in findings if x.kind is FindingKind.UNRESOLVED_NUMBER] == [
+        f"'{demanded}' is not derivable from the cited facts"
+    ], findings
+
+
+@pytest.mark.parametrize("bullet", ["Ran the models in R&Stata", "Ran the models in R&stata"])
+def test_a_letter_glued_to_a_word_is_not_an_abbreviation(bullet: str) -> None:
+    """ "R&D" is two letters. A letter joined to a whole word is a tool beside
+    something else, whether or not the alias table has heard of the word."""
+    from core.aliases import ALIAS_TABLE
+
+    assert "stata" not in ALIAS_TABLE
+    f = fact("d", text="Ran the models in Stata", entities=["Stata"])
+
+    verdict, findings = check_bullet(bullet, [f])
+
+    assert verdict is Verdict.FAIL
+    assert any("'R'" in finding.detail for finding in findings), findings
+
+
+@pytest.mark.parametrize(
+    "text", ["Led the R&D group", "Joined an R&D-focused team", "the M&A desk"]
+)
+def test_letters_joined_by_an_ampersand_are_an_abbreviation(text: str) -> None:
+    assert checkable_entity_tokens(text) == []

@@ -27,7 +27,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
-from core.checks.claims import check_claims
+from core.checks.claims import check_claims, skills_shown_by_entries
 from core.checks.grounding import Verdict, check_bullet
 from core.checks.hidden import check_hidden
 from core.checks.lints import check_lints
@@ -152,7 +152,9 @@ def _guarded(gate: GateName, run: Callable[[], tuple[Outcome, tuple[str, ...]]])
     return GateOutcome(gate, verdict, findings)
 
 
-def run_gates(doc: ResumeDoc, facts: Mapping[str, Fact], pdf_path: Path) -> GateReport:
+def run_gates(
+    doc: ResumeDoc, facts: Mapping[str, Fact], pdf_path: Path, *, max_pages: int = 1
+) -> GateReport:
     """Run every gate in `GATES` on `doc` and the PDF rendered from it."""
     try:
         grounding, grounded = _grounding(doc, facts)
@@ -175,14 +177,22 @@ def run_gates(doc: ResumeDoc, facts: Mapping[str, Fact], pdf_path: Path) -> Gate
 
     def skills() -> tuple[Outcome, tuple[str, ...]]:
         result = check_skills(doc, grounded)
-        texts = tuple(result.findings) + tuple(
-            f"skill {s!r} is listed but no grounded bullet shows it" for s in result.listed_only
+        by_entry = skills_shown_by_entries(result.listed_only, doc, facts)
+        unshown = [s for s in result.listed_only if s not in by_entry]
+        # `check_skills` opens each of its findings with the skill it is about.
+        # One about a skill an entry shows is dropped: what it reports is a
+        # bullet that failed grounding, which the grounding gate has reported.
+        about_unshown = [f for f in result.findings if any(f.startswith(repr(s)) for s in unshown)]
+        texts = tuple(about_unshown) + tuple(
+            f"skill {s!r} is listed but no grounded bullet names it and no confirmed fact "
+            "under an entry on the page lists it"
+            for s in unshown
         )
-        return ("warn" if result.listed_only else "pass"), texts
+        return ("warn" if texts else "pass"), texts
 
     def lints() -> tuple[Outcome, tuple[str, ...]]:
         # Layout is advice: a lint can warn, never fail a document.
-        found = check_lints(doc, pdf_path)
+        found = check_lints(doc, pdf_path, max_pages=max_pages)
         return ("warn" if found else "pass"), tuple(f"{x.rule}: {x.detail}" for x in found)
 
     return GateReport(

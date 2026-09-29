@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
 import pytest
 
@@ -293,3 +294,26 @@ def test_fit_carries_the_postings_knockouts() -> None:
     result = fit(posting, profile, {})
     assert result.eligibility.verdict == "knockout"
     assert [f.rule for f in result.eligibility.findings] == ["sponsorship"]
+
+
+def test_the_page_limit_is_part_of_the_profile(
+    tmp_path: object, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from core.cli import main
+    from core.paths import ensure_home
+    from core.triage import load_profile
+
+    assert isinstance(tmp_path, Path)
+    monkeypatch.setenv("CALLBACK_HOME", str(tmp_path / "cb"))
+    home = ensure_home()
+    (home / "profile.yaml").write_text("graduation: May 2028\n", encoding="utf-8")
+    assert load_profile().resume_pages == 1, "a profile written before the field existed"
+
+    assert main(["profile", "--pages", "2"]) == 0
+    assert load_profile().resume_pages == 2
+    assert load_profile().graduation == "May 2028"
+
+    capsys.readouterr()
+    assert main(["profile", "--pages", "0"]) == 3
+    assert "resume_pages" in capsys.readouterr().err
+    assert load_profile().resume_pages == 2

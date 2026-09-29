@@ -13,9 +13,16 @@ uv sync
 claude --plugin-dir .          # loads the `tailor` skill into a Claude Code session
 ```
 
+Started this way, from inside the repository, the session also reads
+`.mcp.json` as the project's own configuration, where `${CLAUDE_PLUGIN_ROOT}`
+is unset, and warns that a `callback` server failed to start. The plugin's
+copy of the server is unaffected; `/mcp` shows it connected. To avoid the
+warning, start the session from the folder you work in and name the
+repository: `claude --plugin-dir /path/to/callback`.
+
 Then ask Claude to tailor your resume to a posting. The skill runs the commands
-below for you, except `facts confirm` and `notes activate`, which only you can
-run.
+below for you, except `facts confirm`, `facts retire` and `notes activate`,
+which only you can run.
 
 ## The commands
 
@@ -24,18 +31,21 @@ run.
 | `callback init` | Creates the data home (`$CALLBACK_HOME`, default `~/.callback`) with private permissions; every other command does this for itself | 0 |
 | `callback delete-all` | Removes every file under the data home: facts, postings, drafts, packets, sealed documents, the ledger and the signing key. There is no undo, and no tool can run it -- it is not an MCP tool, and the write guard cannot stop it | 0 |
 | `callback import <resume.pdf>` | Extracts the text of an existing PDF into `inbox/`, after screening it for hidden text | 0 clean, 3 unreadable, 4 hidden content found or a page could not be screened |
-| `callback facts add <facts.yaml>` | Adds facts, all unconfirmed. Each fact is accepted or refused on its own, and one that arrives already confirmed is refused | 0, 1 if any fact was refused, 3 unreadable file |
-| `callback facts list [--unconfirmed]` | Lists stored facts | 0 |
+| `callback facts add [--replace] <facts.yaml>` | Adds facts, all unconfirmed. Each fact is accepted or refused on its own, and one that arrives already confirmed is refused. `--replace` lets a fact replace a stored draft of the same id, never a confirmed or retired one. Each fact added is then checked against its own text, and what a bullet quoting it would fail on is printed | 0, 1 if any fact was refused, 3 unreadable file |
+| `callback facts list [--unconfirmed]` | Lists stored facts, each marked `confirmed`, `UNCONFIRMED`, `declined` or `retired`; `--unconfirmed` keeps the ones still waiting for your answer | 0 |
+| `callback facts check [ids...]` | Grounds each fact's text against the fact itself and its parent, as a build grounds a bullet that quotes it, and prints what would fail. With no ids: every detail and project fact in use or waiting for your answer. It says how many facts it checked, and names any fact you asked about that it does not check, with the reason | 0 nothing found, 1 findings, 3 unknown id |
 | `callback facts github <user>` | Drafts an unconfirmed `project` fact (description as text; name and primary language as entities) for each of your own public, described, non-fork repositories, to `inbox/github-<user>.yaml`. Nothing reaches the store until you `facts add` the file | 0, 1 nothing drafted, 3 |
-| `callback facts confirm [ids...]` | Asks you, fact by fact, whether each is true | 0, 3 if not run from a terminal or an id is unknown or web-sourced |
+| `callback facts confirm [--include-declined] [ids...]` | Asks you, fact by fact, whether each is true, showing its text, numbers, dates and the names it lists as used. A fact you answer `n` to is marked declined and not offered again unless you name it or pass `--include-declined` | 0, 3 if not run from a terminal or an id is unknown, web-sourced or retired |
+| `callback facts retire <ids...>` | Asks you whether each named fact should go out of use. A retired fact backs nothing from then on and stays in the store, since documents already sent cite it | 0, 3 if not run from a terminal or an id is unknown |
 | `callback notes list [--all]` | Lists active notes; `--all` adds proposed and retired ones | 0, 3 unreadable notebook |
+| `callback notes propose <kind> <text> [--context <label>]` | Records a note as proposed, where `kind` is `preference`, `goal`, `constraint` or `context`, and the label says what it arose from (`job:acme-ml-intern`). It does nothing until you activate it | 0, 3 if the text is empty or over 200 characters, or the label is not lowercase letters, digits, `:`, `_` or `-` |
 | `callback notes activate <id>` | Shows you a proposed note in full, with where it came from, and activates it on your yes at the terminal | 0, 3 if not run from a terminal or the id is unknown |
 | `callback notes retire <id>` | Sets a note aside; it stays in the file and can be activated again | 0, 3 unknown id |
 | `callback notes families [--set a,b]` | Shows, or replaces, the role families applications can be sorted into | 0, 3 invalid name |
 | `callback build <resume.yaml> --job <id>` | Renders the PDF and runs every gate, writing to `outputs/<id>/draft/` | 0 pass, 1 warn, 2 fail, 3 could not build |
 | `callback export <resume.yaml>` | Prints the resume as plain text for forms that want it pasted, and checks every critical field survived | 0, 2 if a field was lost, 3 unreadable document |
 | `callback letter <letter.yaml>` | Renders a cover letter and checks it against your facts and the saved posting | 0 pass, 2 fail, 3 could not run |
-| `callback apply <id> --company … --title … --source …` | Builds the application packet from a gated draft and records it, with the template it started from, the facts it cites and an optional `--role-family`; `--refresh` rebuilds it after the draft improves, keeping every earlier send and what happened to it. **Never submits** | 0, 3 refused |
+| `callback apply <id> --company … --title … --source …` | Builds the application packet from a gated draft and records it. A draft, letter or set of answers checked against facts that have since changed (one confirmed, replaced or retired) is refused until it is built again. Records it with the template it started from, the facts it cites and an optional `--role-family`; `--refresh` rebuilds it after the draft improves, keeping every earlier send and what happened to it. **Never submits** | 0, 3 refused |
 | `callback outcome <id> <kind>` / `callback applications` | Records what happened; lists applications | 0, 3 unreadable record |
 | `callback funnel` | Per source: applied, replied (callback, interview, offer or rejection; not "viewed"), positive, interviews, offers, median days to first reply, each as counts, with a source of fewer than 5 applications marked too few to compare; then applications silent for 21+ days, as a suggestion to record them as ghosted | 0, 3 unreadable record |
 | `callback insights` | Grounding failures that recur in the latest build of two or more jobs, traced to the facts the failing bullets cite, and the jobs whose grounding failed without naming a fact, whose failures it cannot trace; then, for each packet sent (a refresh is a new one), what happened, grouped by the template the draft began as, the role family and each cited fact. Counts only; a group of fewer than 5 is marked too few to compare, and nothing is ranked | 0, 3 unreadable record |
@@ -62,7 +72,7 @@ postings anyway.
 | `callback postings list [--days N]` | Stored postings, newest first | 0, 3 |
 | `callback postings resolve <url> --company "<company>"` | The canonical posting behind a Greenhouse, Lever or Ashby URL, or an employer careers page's `schema.org/JobPosting` data | 0, 3 |
 | `callback postings take <id> --job <job-id>` | Saves the posting's own text to `inbox/<job-id>.md` | 0, 3 |
-| `callback profile --work-authorization … --graduation … --degree …` | What eligibility is judged against | 0, 3 |
+| `callback profile --work-authorization … --graduation … --degree … --pages …` | What eligibility is judged against, and how many pages a resume may run to (1 unless set) | 0, 3 |
 | `callback agenda` | What to do next, most time-sensitive first: interviews recorded with no prep pack, drafts built but never sent, the five freshest eligible postings at companies not yet applied to, and applications silent for 21+ days. Each line names the command that acts; this one never does | 0, 3 |
 | `callback template save <job-id> --name <name>` / `list` / `use <name> --job <job-id> [--overwrite]` | Saves a document whose build passed under a name, and copies it into another job's draft as a starting point. The copy is an ordinary draft: every gate runs against it again, and its bullets still cite facts that must still be confirmed | 0, 3 |
 | `callback fit <job-id>` | The same knockouts, plus every technology the posting names that the alias table knows: which ones confirmed facts back (with the fact ids to cite) and which are missing | 0 eligible or stretch, 1 a question, 2 knockout, 3 |
@@ -122,13 +132,29 @@ A fact is one thing that is true about you, stated once:
 - A detail fact names its role in `parent`. A bullet may cite only its own
   entry's facts, or their children.
 - `entities` holds names and tools the fact states. Tool names are matched
-  through an alias table, so `k8s` and `Kubernetes` are one skill.
+  through an alias table, so `k8s` and `Kubernetes` are one skill. List every
+  acronym and every name that holds a digit ("GPA", "SEC", "SHA-256", "Form
+  4"): a bullet may use one only if a cited fact lists it, and the digits of a
+  listed name that the fact's text also states are read as part of the name,
+  not as a quantity.
+- A name that opens with a digit is always read as a quantity, listed or not:
+  "3M" an employer is spelled like "$3M" a saving, and "10x" a platform like
+  "10x" an improvement. Write such a name with its noun, "Form 8-K" and not
+  "8-K", where a bullet should be able to state it.
+- One fact per skill, never one per printed line of a skills section: you
+  confirm or decline a fact whole, so a line of six languages cannot lose the
+  one you would not claim.
 - One `links` fact holds your name, email, phone and links as `entities`.
   The resume's identity block must match it exactly.
 - Record a percentage with `unit: "%"`. A count can never be backed by a
   percentage.
 - `dates` use `YYYY-MM`. Leave out `end` for a role that has not ended; that is
   what lets a resume say "Present".
+- A fact is never edited once confirmed, and none is ever deleted. While it
+  is a draft, add it again with `--replace`. Once confirmed, retire it with
+  `callback facts retire` and add the correction under a new id.
+  `callback facts check` finds a fact that would fail as a bullet while it is
+  still a draft.
 - A fact is usable only after `callback facts confirm`. That command reads your
   answers from the terminal itself (`/dev/tty`), so piping in "y" does not work,
   and the write guard refuses it when an assistant runs it through a wrapper
@@ -291,15 +317,21 @@ and exits 0 pass, 2 fail, 3 could not run.
 - write the fact store;
 - write anything under `final/` or `released/`;
 - write the guard itself;
-- run `callback facts confirm`.
+- run `callback facts confirm`, `callback facts retire` or
+  `callback notes activate`.
 
 For Bash it resolves the paths a command names, including after a `cd`. It
-guards against accidental writes; it is not a sandbox. A command that builds
+reads the command's text, so a command that names a protected file is refused
+even where the name is only data, such as a quoted string or a here-document
+recording where a fact came from. Put that text in a file and pass the file's
+path. It guards against accidental writes; it is not a sandbox. A command that builds
 its path at run time is not caught.
 
-**Layout lints** (a bullet over two lines, fewer than 3 or more than 6
-bullets for a role, a second page, a near-empty last page) can only warn.
-They never fail a document.
+**Layout lints** (a bullet over two lines, fewer than 2 or more than 6
+bullets for a role, more pages than your profile allows, a near-empty last
+page) can only warn. They never fail a document. The page limit is one unless
+you raise it with `callback profile --pages 2`; it belongs to you, not to a
+draft, so a document cannot grant itself a second page.
 
 **Sealing.** `build` only ever writes a draft. `finalize` is the only
 writer of `final/`:
@@ -321,11 +353,11 @@ rewritten from scratch fails even when every entry chains correctly, and
 
 The plugin registers `callback-mcp` (see `.mcp.json`), which serves the same
 checks as tools: `build`, `letter`, `answers`, `outreach`, `facts_add`,
-`facts_list`, `notes_list`, `notes_propose`, `notes_retire`, `watch`, `triage`, `fit`, `agenda`, `postings_take`, `postings_resolve`,
+`facts_list`, `facts_check`, `notes_list`, `notes_propose`, `notes_retire`, `watch`, `triage`, `fit`, `agenda`, `postings_take`, `postings_resolve`,
 `applications`, `funnel`, `insights`, `gaps`,
 `eligibility`, `apply`, `interview` and `verify`. Each wraps the function the
 command line calls, so a result is identical whichever way it is reached, and
-a failure is a tool error, never an empty result. `facts confirm`, activating
-a note, and `delete-all` are deliberately not tools: only the candidate, at a
+a failure is a tool error, never an empty result. `facts confirm`, `facts
+retire`, activating a note, and `delete-all` are deliberately not tools: only the candidate, at a
 terminal, may make a fact usable, make a note something sessions follow, or
 erase the data home.

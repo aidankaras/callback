@@ -244,3 +244,31 @@ def test_a_notebook_with_a_repeated_id_is_refused(home: Path) -> None:
     (home / "notes.yaml").write_text(body, encoding="utf-8")
     with pytest.raises(NoteError, match="must not repeat"):
         notes.load()
+
+
+def test_a_note_can_be_proposed_from_the_command_line(
+    home: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The tool and the command are the same function; a session whose tools
+    are unavailable can still record what the candidate said."""
+    from core.cli import main
+
+    text = "No R or Rust listed as working skills"
+    assert main(["notes", "propose", "constraint", text, "--context", "job:northwind-de"]) == 0
+
+    out = capsys.readouterr().out
+    (note,) = notes.load().notes
+    assert (note.kind, note.text, note.status, note.source) == (
+        "constraint",
+        text,
+        "proposed",
+        "assistant",
+    )
+    assert note.source_context == "job:northwind-de"
+    assert note.id in out and f"callback notes activate {note.id}" in out
+    assert notes.active() == [], "proposing activates nothing"
+
+    for refused in (["x" * 201], [text, "--context", "said while tailoring"]):
+        assert main(["notes", "propose", "constraint", *refused]) == 3
+        assert "callback notes propose:" in capsys.readouterr().err
+    assert len(notes.load().notes) == 1

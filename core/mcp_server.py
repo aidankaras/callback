@@ -93,25 +93,66 @@ def _tool[**P, R](fn: Callable[P, R]) -> Callable[P, R]:
 
 @_tool
 def facts_list(unconfirmed_only: bool = False) -> dict[str, object]:
-    """Every stored fact, with whether the candidate has confirmed it."""
+    """Every stored fact, with its state: confirmed, unconfirmed, declined or retired.
+
+    `confirmed` is whether the fact may back a document, which a retired fact
+    may not, whatever it once was. `unconfirmed_only` keeps the facts still
+    waiting for the candidate's answer: a declined or retired one has had it.
+    """
+    from core.factscmd import state
     from core.profile.store import load_facts
 
     facts = [
-        {"id": fid, "kind": str(f.kind), "confirmed": f.selectable(), "text": f.text}
+        {
+            "id": fid,
+            "kind": str(f.kind),
+            "confirmed": f.selectable(),
+            "state": state(f),
+            "text": f.text,
+        }
         for fid, f in load_facts().items()
-        if not (unconfirmed_only and f.selectable())
+        if not unconfirmed_only or state(f) == "unconfirmed"
     ]
     return {"facts": facts}
 
 
 @_tool
-def facts_add(path: str) -> dict[str, object]:
-    """Add facts from a YAML list. They start unconfirmed; one arriving confirmed is refused."""
-    from core.factscmd import add_from_file
+def facts_add(path: str, replace: bool = False) -> dict[str, object]:
+    """Add facts from a YAML list. They start unconfirmed; one arriving confirmed is refused.
+
+    `replace` lets a fact replace a stored draft of the same id, never a
+    confirmed or retired one. `checks` lists, for each fact added, what a
+    bullet quoting its text would fail on: fix the file and add it again with
+    `replace` before the candidate is asked to confirm it.
+    """
+    from core.factscmd import add_from_file, check_facts
 
     ensure_home()
-    added, rejected = add_from_file(Path(path))
-    return {"added": added, "rejected": [{"id": i, "reason": r} for i, r in rejected]}
+    added, rejected = add_from_file(Path(path), replace=replace)
+    return {
+        "added": added,
+        "rejected": [{"id": i, "reason": r} for i, r in rejected],
+        "checks": check_facts(added).problems if added else {},
+    }
+
+
+@_tool
+def facts_check(ids: list[str] | None = None) -> dict[str, object]:
+    """What a bullet quoting each fact word for word would fail on, by fact id.
+
+    With no ids, every detail and project fact in use or waiting for an
+    answer. `checked` lists the facts looked at, and `not_checked` gives the
+    reason for each named fact that never is: no problems among no facts
+    checked is not a pass.
+    """
+    from core.factscmd import check_facts
+
+    result = check_facts(list(ids or []))
+    return {
+        "problems": result.problems,
+        "checked": result.checked,
+        "not_checked": result.not_checked,
+    }
 
 
 @_tool

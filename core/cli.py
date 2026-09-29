@@ -6,7 +6,7 @@ import argparse
 import re
 import sys
 from pathlib import Path
-from typing import cast
+from typing import TextIO, cast
 
 from core import __version__
 
@@ -73,7 +73,9 @@ def build_parser() -> argparse.ArgumentParser:
     p_take.add_argument("--job", required=True)
     p_take.set_defaults(handler=_cmd_postings_take)
 
-    profile = sub.add_parser("profile", help="what eligibility is judged against")
+    profile = sub.add_parser(
+        "profile", help="what eligibility is judged against, and the resume's page limit"
+    )
     profile.add_argument(
         "--work-authorization", help='e.g. "US citizen", "F-1, will need sponsorship"'
     )
@@ -81,6 +83,7 @@ def build_parser() -> argparse.ArgumentParser:
     profile.add_argument(
         "--degree", choices=["high school", "associate", "bachelor", "master", "phd"]
     )
+    profile.add_argument("--pages", type=int, help="how many pages a resume may run to (default 1)")
     profile.set_defaults(handler=_cmd_profile)
 
     triage = sub.add_parser("triage", help="rank stored postings: eligibility, evidence, freshness")
@@ -222,15 +225,38 @@ def build_parser() -> argparse.ArgumentParser:
     facts_sub = facts.add_subparsers(dest="facts_command", required=True)
     add = facts_sub.add_parser("add", help="add facts from a YAML list (they start unconfirmed)")
     add.add_argument("file", type=Path)
+    add.add_argument(
+        "--replace",
+        action="store_true",
+        help="replace a stored draft of the same id (never a confirmed or retired fact)",
+    )
     add.set_defaults(handler=_cmd_facts_add)
+    check = facts_sub.add_parser(
+        "check", help="what a bullet quoting each fact as written would fail on"
+    )
+    check.add_argument("ids", nargs="*", help="fact ids (default: every fact in use or waiting)")
+    check.set_defaults(handler=_cmd_facts_check)
     listing = facts_sub.add_parser("list", help="list stored facts")
-    listing.add_argument("--unconfirmed", action="store_true", help="only unconfirmed facts")
+    listing.add_argument(
+        "--unconfirmed", action="store_true", help="only facts still waiting for an answer"
+    )
     listing.set_defaults(handler=_cmd_facts_list)
     conf = facts_sub.add_parser(
         "confirm", help="confirm facts interactively; must be run by the candidate in a terminal"
     )
-    conf.add_argument("ids", nargs="*", help="fact ids (default: every unconfirmed fact)")
+    conf.add_argument(
+        "ids", nargs="*", help="fact ids (default: every unconfirmed fact not yet declined)"
+    )
+    conf.add_argument(
+        "--include-declined", action="store_true", help="also offer the facts answered no before"
+    )
     conf.set_defaults(handler=_cmd_facts_confirm)
+    ret = facts_sub.add_parser(
+        "retire",
+        help="take facts out of use for good; must be run by the candidate in a terminal",
+    )
+    ret.add_argument("ids", nargs="+", help="the facts to retire")
+    ret.set_defaults(handler=_cmd_facts_retire)
     gh = facts_sub.add_parser(
         "github",
         help="draft unconfirmed project facts from your public GitHub repositories, to a file",
@@ -245,6 +271,17 @@ def build_parser() -> argparse.ArgumentParser:
     n_list = notes_sub.add_parser("list", help="list active notes")
     n_list.add_argument("--all", action="store_true", help="include proposed and retired notes")
     n_list.set_defaults(handler=_cmd_notes_list)
+    n_prop = notes_sub.add_parser(
+        "propose", help="record a note for the candidate to activate; it does nothing until then"
+    )
+    n_prop.add_argument("kind", choices=["preference", "goal", "constraint", "context"])
+    n_prop.add_argument("text", help="the candidate's own words, at most 200 characters")
+    n_prop.add_argument(
+        "--context",
+        default=None,
+        help="what the note arose from, as a label such as job:acme-ml-intern",
+    )
+    n_prop.set_defaults(handler=_cmd_notes_propose)
     n_act = notes_sub.add_parser(
         "activate", help="activate a note; must be run by the candidate in a terminal"
     )
@@ -405,7 +442,7 @@ def _cmd_postings_take(args: argparse.Namespace) -> int:
 
 def _cmd_profile(args: argparse.Namespace) -> int:
     from core.paths import ensure_home
-    from core.triage import load_profile, save_profile
+    from core.triage import Profile, load_profile, save_profile
 
     ensure_home()
     try:
@@ -416,10 +453,12 @@ def _cmd_profile(args: argparse.Namespace) -> int:
                 ("work_authorization", args.work_authorization),
                 ("graduation", args.graduation),
                 ("degree", args.degree),
+                ("resume_pages", args.pages),
             )
             if v is not None
         }
-        profile = current.model_copy(update=updates)
+        # Validated, not copied: `model_copy` would store a page limit of 0.
+        profile = Profile.model_validate({**current.model_dump(), **updates})
         save_profile(profile)
     except (ValueError, OSError) as exc:
         print(f"callback profile: {exc}", file=sys.stderr)
@@ -871,32 +910,68 @@ def _cmd_import(args: argparse.Namespace) -> int:
     return 4 if result.findings else 0
 
 
+def _print_fact_problems(problems: dict[str, list[str]], *, to: TextIO) -> None:
+    for fid, details in problems.items():
+        print(f"  {fid}: a bullet quoting this fact as written would fail", file=to)
+        for detail in details:
+            print(f"      {detail}", file=to)
+
+
 def _cmd_facts_add(args: argparse.Namespace) -> int:
-    from core.factscmd import add_from_file
+    from core.factscmd import add_from_file, check_facts
     from core.paths import ensure_home
     from core.profile.store import StoreError
 
     ensure_home()
     try:
-        added, rejected = add_from_file(args.file)
+        added, rejected = add_from_file(args.file, replace=args.replace)
+        problems = check_facts(added).problems if added else {}
     except (StoreError, OSError) as exc:
         print(f"callback facts add: {exc}", file=sys.stderr)
         return 3
     print(f"added {len(added)} fact(s), all unconfirmed until you run `callback facts confirm`")
     for fid, reason in rejected:
         print(f"  refused {fid}: {reason}", file=sys.stderr)
+    if problems:
+        _print_fact_problems(problems, to=sys.stderr)
+        print("  fix the file and add it again with --replace before confirming", file=sys.stderr)
     return 1 if rejected else 0
 
 
+def _cmd_facts_check(args: argparse.Namespace) -> int:
+    from core.factscmd import FactsError, check_facts
+    from core.profile.store import StoreError
+
+    try:
+        result = check_facts(list(args.ids))
+    except (FactsError, StoreError) as exc:
+        print(f"callback facts check: {exc}", file=sys.stderr)
+        return 3
+    for fid, reason in result.not_checked.items():
+        print(f"  {fid}: not checked: {reason}")
+    count = len(result.checked)
+    if not count:
+        print("no fact was checked")
+        return 0
+    noun = "fact" if count == 1 else "facts"
+    if not result.problems:
+        print(f"{count} {noun} checked: each can be quoted as written")
+        return 0
+    print(f"{count} {noun} checked, {len(result.problems)} with findings:")
+    _print_fact_problems(result.problems, to=sys.stdout)
+    return 1
+
+
 def _cmd_facts_list(args: argparse.Namespace) -> int:
+    from core.factscmd import state
     from core.profile.store import load_facts
 
     for fid, fact in load_facts().items():
-        confirmed = fact.selectable()
-        if args.unconfirmed and confirmed:
+        mark = state(fact)
+        if args.unconfirmed and mark != "unconfirmed":
             continue
-        mark = "confirmed  " if confirmed else "UNCONFIRMED"
-        print(f"{mark} {fid:<24} {fact.kind:<18} {fact.text}")
+        mark = mark.upper() if mark == "unconfirmed" else mark
+        print(f"{mark:<11} {fid:<24} {fact.kind:<18} {fact.text}")
     return 0
 
 
@@ -904,11 +979,23 @@ def _cmd_facts_confirm(args: argparse.Namespace) -> int:
     from core.factscmd import ConfirmError, confirm
 
     try:
-        confirmed = confirm(list(args.ids))
+        confirmed = confirm(list(args.ids), include_declined=args.include_declined)
     except ConfirmError as exc:
         print(f"callback facts confirm: {exc}", file=sys.stderr)
         return 3
     print(f"confirmed {len(confirmed)} fact(s)")
+    return 0
+
+
+def _cmd_facts_retire(args: argparse.Namespace) -> int:
+    from core.factscmd import ConfirmError, retire
+
+    try:
+        retired = retire(list(args.ids))
+    except ConfirmError as exc:
+        print(f"callback facts retire: {exc}", file=sys.stderr)
+        return 3
+    print(f"retired {len(retired)} fact(s)")
     return 0
 
 
@@ -938,6 +1025,23 @@ def _cmd_notes_activate(args: argparse.Namespace) -> int:
         print(f"callback notes activate: {exc}", file=sys.stderr)
         return 3
     print(f"{args.id} is active" if done else f"{args.id} left as it was")
+    return 0
+
+
+def _cmd_notes_propose(args: argparse.Namespace) -> int:
+    from datetime import UTC, datetime
+
+    from core.notes import NoteError, propose
+    from core.paths import ensure_home
+
+    ensure_home()
+    try:
+        note = propose(args.kind, args.text, source_context=args.context, now=datetime.now(tz=UTC))
+    except NoteError as exc:
+        print(f"callback notes propose: {exc}", file=sys.stderr)
+        return 3
+    print(f"{note.id} is proposed and does nothing yet")
+    print(f"to activate it, run in your own terminal: callback notes activate {note.id}")
     return 0
 
 

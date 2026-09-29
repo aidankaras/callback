@@ -15,12 +15,13 @@ def call(name: str, arguments: dict[str, object]) -> object:
 
 
 def test_confirmation_and_deletion_are_not_tools() -> None:
-    """Only the candidate, at a terminal, can confirm a fact; no tool may.
-    Mutation: register a confirm tool -- this test fails."""
+    """Only the candidate, at a terminal, can confirm a fact or retire one; no
+    tool may. Mutation: register a confirm tool -- this test fails."""
     names = {t.name for t in asyncio.run(server.list_tools())}
     assert {
         "build",
         "facts_list",
+        "facts_check",
         "watch",
         "triage",
         "apply",
@@ -29,6 +30,9 @@ def test_confirmation_and_deletion_are_not_tools() -> None:
         "funnel",
     } <= names
     assert not any("confirm" in n or "delete" in n for n in names), names
+    # A note may be retired by a tool; a fact is evidence, and may not.
+    assert "notes_retire" in names
+    assert not any("retire" in n for n in names - {"notes_retire"}), names
 
 
 def test_a_tool_returns_structured_results(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -41,7 +45,7 @@ def test_a_tool_returns_structured_results(tmp_path: Path, monkeypatch: pytest.M
         encoding="utf-8",
     )
     added = call("facts_add", {"path": str(facts)})
-    assert added.structured_content == {"added": ["a"], "rejected": []}  # type: ignore[attr-defined]
+    assert added.structured_content == {"added": ["a"], "rejected": [], "checks": {}}  # type: ignore[attr-defined]
     listed = call("facts_list", {"unconfirmed_only": True})
     assert listed.structured_content["facts"][0]["confirmed"] is False  # type: ignore[attr-defined]
 

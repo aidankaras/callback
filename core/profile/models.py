@@ -161,7 +161,17 @@ class Fact(BaseModel):
     entities: list[str] = Field(default_factory=list)
     provenance: Provenance
     captured: date = Field(default_factory=lambda: datetime.now(tz=UTC).date())
+    # When the candidate answered "no" to this fact as written. It stays in
+    # the store, unconfirmed, and is not offered again unless asked for.
+    declined_on: date | None = None
+    # When the candidate took this fact out of use. Its provenance is kept:
+    # that it was once confirmed is part of what earlier documents rest on.
+    retired_on: date | None = None
+
+    def was_confirmed(self) -> bool:
+        """Whether the candidate ever called this fact true, in use or retired."""
+        return self.provenance.trust is Trust.USER_CONFIRMED
 
     def selectable(self) -> bool:
-        """Only confirmed facts may back generated text."""
-        return self.provenance.trust is Trust.USER_CONFIRMED
+        """Only confirmed facts the candidate has not retired may back generated text."""
+        return self.was_confirmed() and self.retired_on is None

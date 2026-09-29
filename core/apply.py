@@ -32,6 +32,7 @@ from core.draft import ORIGIN
 from core.export.text import to_text
 from core.finalize import record_event
 from core.paths import private_dir, resolve_inside, write_private, write_private_bytes
+from core.profile.store import facts_sha256
 from core.resume.io import DocumentError, parse_doc
 from core.resume.models import ResumeDoc
 
@@ -235,6 +236,23 @@ def _read_record(path: Path, what: str, fields: tuple[str, ...]) -> dict[str, st
     return {f: cast("str", record[f]) for f in fields}
 
 
+def _check_facts(record: Path, what: str, command: str) -> None:
+    """Refuse a record judged against a fact store other than today's.
+
+    A passed document is known to pass only against the facts it was checked
+    with. One retired since backs nothing, and the packet would carry its
+    claim all the same. A record that names no store matches only the absence
+    of one.
+    """
+    judged = cast("dict[str, object]", json.loads(record.read_text(encoding="utf-8"))).get(
+        "facts_sha256"
+    )
+    if judged != facts_sha256():
+        raise ApplyError(
+            f"the facts have changed since the {what} was checked: run `callback {command}` again"
+        )
+
+
 def _check_draft(draft: Path, *, accept_warnings: bool) -> tuple[Path, Path | None]:
     """The resume and letter PDFs to send, once their reports say they may be."""
     report_path = draft / "report.json"
@@ -253,6 +271,7 @@ def _check_draft(draft: Path, *, accept_warnings: bool) -> tuple[Path, Path | No
     if not document.is_file() or _sha256(document) != report["doc_sha256"]:
         # The packet's plain text and form fields come from this file.
         raise ApplyError("resume.yaml has changed since it was gated: run `callback build` again")
+    _check_facts(report_path, "resume", "build")
 
     letter = draft / "cover-letter.pdf"
     if not letter.is_file():
@@ -266,6 +285,7 @@ def _check_draft(draft: Path, *, accept_warnings: bool) -> tuple[Path, Path | No
         raise ApplyError(
             "cover-letter.pdf has changed since it was checked: run `callback letter` again"
         )
+    _check_facts(draft / "letter-report.json", "cover letter", "letter")
     return resume, letter
 
 
@@ -282,6 +302,7 @@ def _check_answers(draft: Path) -> str | None:
         raise ApplyError(
             "answers.md has changed since it was checked: run `callback answers` again"
         )
+    _check_facts(draft / "answers-report.json", "form answers", "answers")
     return text
 
 

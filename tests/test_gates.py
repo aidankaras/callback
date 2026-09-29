@@ -61,6 +61,11 @@ FACTS = {
 }
 
 
+_NOT_SHOWN = (
+    "is listed but no grounded bullet names it and no confirmed fact under an entry on the "
+    "page lists it"
+)
+
 # Two more grounded bullets, so a clean document meets the three-per-role floor.
 EXTRA_BULLETS = [
     Bullet(text="Shipped the loader", sources=["loader"]),
@@ -149,18 +154,20 @@ def test_a_skill_only_listed_is_a_skills_warning(tmp_path: Path) -> None:
     report = run_gates(doc, facts_with_sql, pdf)
     skills = next(o for o in report.outcomes if o.gate == "skills")
     assert skills.verdict == "warn"
-    assert "skill 'SQL' is listed but no grounded bullet shows it" in skills.findings
+    assert skills.findings == (f"skill 'SQL' {_NOT_SHOWN}",)
 
 
 @pytest.mark.slow
 def test_a_bullet_that_failed_grounding_is_not_evidence_for_a_skill(tmp_path: Path) -> None:
-    """Mutation: pass every bullet to the skills gate -- this test fails."""
-    doc = _doc()
+    """The skill is backed by a fact of its own and named only in a bullet
+    that failed; no fact under the entry lists it. Mutation: pass every bullet
+    to the skills gate -- this test fails."""
+    doc = _doc(skills=["SQL"])
     entry = doc.sections[0].entries[0]
     wrong = entry.model_copy(
         update={
             "bullets": [
-                Bullet(text="Cut the review queue to 999 items using Python", sources=["queue"])
+                Bullet(text="Cut the review queue to 999 items using SQL", sources=["queue"])
             ]
         }
     )
@@ -173,7 +180,7 @@ def test_a_bullet_that_failed_grounding_is_not_evidence_for_a_skill(tmp_path: Pa
     by_gate = {o.gate: o for o in report.outcomes}
     assert by_gate["grounding"].verdict == "fail"
     assert by_gate["skills"].verdict == "warn"
-    assert "skill 'Python' is listed but no grounded bullet shows it" in by_gate["skills"].findings
+    assert f"skill 'SQL' {_NOT_SHOWN}" in by_gate["skills"].findings
 
 
 @pytest.mark.slow
@@ -248,3 +255,165 @@ def test_a_layout_lint_makes_an_otherwise_clean_document_a_warning(tmp_path: Pat
     verdicts = {o.gate: o.verdict for o in report.outcomes}
     assert verdicts == {g: ("warn" if g == "lints" else "pass") for g in GATES}, report.outcomes
     assert report.verdict == "warn"
+
+
+def _detail(
+    fid: str, parent: str, entities: list[str], *, text: str = "Kept the warehouse"
+) -> Fact:
+    return Fact(
+        id=fid,
+        kind=FactKind.EXPERIENCE_DETAIL,
+        parent=parent,
+        text=text,
+        entities=entities,
+        provenance=CONFIRMED,
+    )
+
+
+def _skills_outcome(doc: ResumeDoc, facts: dict[str, Fact], tmp_path: Path) -> GateOutcome:
+    pdf = tmp_path / "resume.pdf"
+    render(doc, pdf)
+    assert not any("SQL" in b.text for s in doc.sections for e in s.entries for b in e.bullets)
+    return next(o for o in run_gates(doc, facts, pdf).outcomes if o.gate == "skills")
+
+
+@pytest.mark.slow
+def test_a_skill_a_fact_under_a_printed_entry_lists_is_shown_by_that_entry(
+    tmp_path: Path,
+) -> None:
+    """A bullet need not name every tool its role used. The role is on the
+    page, and a confirmed fact about that role lists the skill."""
+    facts = {**FACTS, "stack": _detail("stack", "role", ["SQL"])}
+
+    skills = _skills_outcome(_doc(skills=["Python", "SQL"]), facts, tmp_path)
+
+    assert (skills.verdict, skills.findings) == ("pass", ())
+
+
+@pytest.mark.slow
+def test_a_fact_beside_a_cited_one_belongs_to_the_same_entry(tmp_path: Path) -> None:
+    """The entry cites no header fact here; its bullets cite details of the
+    role, and another detail of that same role lists the skill."""
+    facts = {**FACTS, "stack": _detail("stack", "role", ["SQL"])}
+    doc = _doc(skills=["Python", "SQL"])
+    bare = doc.sections[0].entries[0].model_copy(update={"sources": []})
+    doc = doc.model_copy(
+        update={
+            "sections": [doc.sections[0].model_copy(update={"entries": [bare]}), doc.sections[1]]
+        }
+    )
+
+    skills = _skills_outcome(doc, facts, tmp_path)
+
+    assert (skills.verdict, skills.findings) == ("pass", ())
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize(
+    "extra",
+    [
+        pytest.param(
+            {
+                "other": Fact(
+                    id="other",
+                    kind=FactKind.EXPERIENCE,
+                    text="Analyst at Harbor Lab",
+                    organization="Harbor Lab",
+                    title="Analyst",
+                    provenance=CONFIRMED,
+                ),
+                "stack": _detail("stack", "other", ["SQL"]),
+            },
+            id="a-role-that-is-not-on-the-page",
+        ),
+        pytest.param(
+            {
+                "stack": _detail("stack", "role", ["SQL"]).model_copy(
+                    update={
+                        "provenance": Provenance(
+                            source="resume.pdf", trust=Trust.IMPORT_UNCONFIRMED
+                        )
+                    }
+                )
+            },
+            id="a-fact-nobody-confirmed",
+        ),
+        pytest.param(
+            {"stack": _detail("stack", "role", [], text="Migrated the warehouse off SQL")},
+            id="a-mention-in-text-that-entities-do-not-list",
+        ),
+    ],
+)
+def test_a_skill_no_printed_entry_shows_still_warns(tmp_path: Path, extra: dict[str, Fact]) -> None:
+    sql = Fact(id="sql", kind=FactKind.SKILL, text="SQL", provenance=CONFIRMED)
+
+    skills = _skills_outcome(
+        _doc(skills=["Python", "SQL"]), {**FACTS, "sql": sql, **extra}, tmp_path
+    )
+
+    assert (skills.verdict, skills.findings) == ("warn", (f"skill 'SQL' {_NOT_SHOWN}",))
+
+
+@pytest.mark.slow
+def test_a_skill_the_entry_shows_is_not_reported_for_a_bullet_that_failed(
+    tmp_path: Path,
+) -> None:
+    """The bullet that names Python fails grounding on its number, and the
+    grounding gate says so. The skill itself is shown by the role's own fact,
+    so the skills gate has nothing to add."""
+    doc = _doc()
+    entry = doc.sections[0].entries[0]
+    wrong = entry.model_copy(
+        update={
+            "bullets": [
+                Bullet(text="Cut the review queue to 999 items using Python", sources=["queue"])
+            ]
+        }
+    )
+    doc = doc.model_copy(
+        update={
+            "sections": [doc.sections[0].model_copy(update={"entries": [wrong]}), doc.sections[1]]
+        }
+    )
+
+    by_gate = {o.gate: o for o in _run(doc, tmp_path).outcomes}
+
+    assert by_gate["grounding"].verdict == "fail"
+    assert (by_gate["skills"].verdict, by_gate["skills"].findings) == ("pass", ())
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize(
+    "filed",
+    [
+        pytest.param(
+            Fact(
+                id="stack",
+                kind=FactKind.SKILL,
+                parent="role",
+                text="SQL",
+                provenance=CONFIRMED,
+                entities=["SQL"],
+            ),
+            id="a-skill-filed-under-the-role",
+        ),
+        pytest.param(
+            Fact(
+                id="stack",
+                kind=FactKind.PROJECT,
+                parent="role",
+                text="Ran a database on a home cluster of three laptops",
+                entities=["SQL"],
+                provenance=CONFIRMED,
+            ),
+            id="a-project-filed-under-the-role",
+        ),
+    ],
+)
+def test_only_a_detail_of_the_role_shows_a_skill_through_it(tmp_path: Path, filed: Fact) -> None:
+    """Filing a fact under a role does not make it something done in the role.
+    A detail of the role is; a skill or a project given the role as its parent
+    is a separate thing wearing the role's name."""
+    skills = _skills_outcome(_doc(skills=["Python", "SQL"]), {**FACTS, "stack": filed}, tmp_path)
+
+    assert (skills.verdict, skills.findings) == ("warn", (f"skill 'SQL' {_NOT_SHOWN}",))

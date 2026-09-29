@@ -11,6 +11,7 @@ has seen every failure; see `StoreError` for the full list this closes.
 
 from __future__ import annotations
 
+import hashlib
 import re
 from collections.abc import Iterator
 from typing import cast
@@ -20,7 +21,7 @@ from pydantic import ValidationError
 
 from core.aliases import canonicalize
 from core.paths import OutsideHomeError, resolve_inside, write_private
-from core.profile.models import Dates, Derivation, Fact, Provenance, Quantity
+from core.profile.models import Dates, Derivation, Fact, Provenance, Quantity, Trust
 
 FACTS_FILE = "facts.yaml"
 
@@ -215,6 +216,17 @@ def _yaml_problem(exc: yaml.YAMLError) -> str:
     return f"{where}: {problem}" if problem else where
 
 
+def facts_sha256() -> str | None:
+    """The hash of the fact store as it stands on disk, or None when there is none.
+
+    A report records it, and anything that acts on the report compares it: a
+    document that passed is only known to pass against the facts it was judged
+    with, and a fact confirmed, replaced or retired since changes them.
+    """
+    path = resolve_inside(FACTS_FILE)
+    return hashlib.sha256(path.read_bytes()).hexdigest() if path.exists() else None
+
+
 def save_facts(facts: dict[str, Fact]) -> None:
     """Write every fact to disk, keyed by id, in a stable (sorted) order.
 
@@ -235,13 +247,38 @@ def save_facts(facts: dict[str, Fact]) -> None:
         raise StoreError(f"could not write {path}: {exc}") from exc
 
 
-def add_fact(fact: Fact) -> None:
-    """Admit `fact` into the store after screening its free text and checking for a duplicate id."""
+def add_fact(fact: Fact, *, replace: bool = False) -> None:
+    """Admit `fact` into the store after screening its free text and checking for a duplicate id.
+
+    With `replace`, a stored fact of the same id gives way to `fact` while it
+    is still a draft: never confirmed and not retired. A confirmed fact is what
+    documents already sent rest on, so it is never rewritten in place.
+    """
     for field, value in _free_text_fields(fact):
         screen_sensitive(value, field)
     fact = fact.model_copy(update={"entities": [canonicalize(e) for e in fact.entities]})
     facts = load_facts()
     if fact.id in facts:
-        raise DuplicateFactError(f"fact {fact.id!r} already exists")
+        stored = facts[fact.id]
+        if not replace:
+            raise DuplicateFactError(f"fact {fact.id!r} already exists")
+        if stored.was_confirmed() or stored.retired_on is not None:
+            state = "retired" if stored.retired_on is not None else "confirmed"
+            raise DuplicateFactError(
+                f"fact {fact.id!r} is {state} and is not rewritten; retire it with "
+                "`callback facts retire` and add the change under a new id"
+            )
+        if stored.provenance.trust is Trust.WEB:
+            # Research about someone else can never be confirmed. A draft
+            # taking its id would turn the id into one that can.
+            raise DuplicateFactError(
+                f"fact {fact.id!r} is research from the web and is not replaced by a "
+                "claim; add the claim under a new id"
+            )
+        unanswered = stored.model_copy(update={"declined_on": None, "captured": fact.captured})
+        if stored.declined_on is not None and unanswered == fact:
+            raise DuplicateFactError(
+                f"fact {fact.id!r} was declined as written; change it before adding it again"
+            )
     facts[fact.id] = fact
     save_facts(facts)

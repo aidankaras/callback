@@ -11,7 +11,7 @@ from core.apply import Target, apply
 from core.interview import InterviewError, prepare
 from core.paths import ensure_home
 from core.profile.models import Fact, FactKind, Provenance, Trust
-from core.profile.store import save_facts
+from core.profile.store import facts_sha256, save_facts
 
 NOW = datetime(2026, 10, 1, 15, 0, tzinfo=UTC)
 CONFIRMED = Provenance(source="x", trust=Trust.USER_CONFIRMED)
@@ -52,6 +52,7 @@ def applied(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
         "verdict": "pass",
         "pdf_sha256": hashlib.sha256(pdf).hexdigest(),
         "doc_sha256": hashlib.sha256(RESUME.encode()).hexdigest(),
+        "facts_sha256": facts_sha256(),
     }
     (draft / "report.json").write_text(json.dumps(report), encoding="utf-8")
     apply(Target(job_id="acme-ml", company="Acme", title="ML Intern", source="greenhouse"), now=NOW)
@@ -163,3 +164,43 @@ def test_a_story_from_interview_practice_is_a_draft_fact_until_confirmed(
         "Led the rollback during the ingestion outage", [load_facts()["outage"]]
     )
     assert verdict is not Verdict.FAIL
+
+
+def test_a_fact_retired_since_sending_is_still_the_story_behind_the_claim(applied: Path) -> None:
+    """The document went out resting on this fact. Retiring it afterwards takes
+    it out of future documents; it does not unsay what was sent, and the
+    interviewer will ask about the claim as written."""
+    from datetime import UTC, datetime
+
+    from core.profile.store import load_facts
+
+    facts = load_facts()
+    assert facts["queue"].selectable()
+    retired_on = datetime(2026, 3, 1, tzinfo=UTC).date()
+    save_facts({**facts, "queue": facts["queue"].model_copy(update={"retired_on": retired_on})})
+
+    text = prepare("acme-ml").read_text(encoding="utf-8")
+
+    assert f"  - {facts['queue'].text} (retired 2026-03-01, after this was sent)" in text
+    assert "no longer confirmed" not in text
+
+
+def test_a_retired_fact_nobody_confirmed_tells_no_story(applied: Path) -> None:
+    from datetime import UTC, datetime
+
+    save_facts(
+        {
+            "queue": Fact(
+                id="queue",
+                kind=FactKind.EXPERIENCE_DETAIL,
+                text="UNCONFIRMED: also won a Turing Award",
+                provenance=Provenance(source="import:x.pdf", trust=Trust.IMPORT_UNCONFIRMED),
+                retired_on=datetime(2026, 3, 1, tzinfo=UTC).date(),
+            )
+        }
+    )
+
+    text = prepare("acme-ml").read_text(encoding="utf-8")
+
+    assert "Turing" not in text
+    assert "no longer confirmed" in text

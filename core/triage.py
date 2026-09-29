@@ -33,7 +33,7 @@ from datetime import datetime
 from typing import Literal
 
 import yaml
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel, Field, ValidationError
 
 from core.aliases import ALIAS_TABLE, canonicalize
 from core.checks.grounding import checkable_entity_tokens, iso_month_dates
@@ -91,13 +91,21 @@ _DEGREE_RANK = {"high school": 0, "associate": 1, "bachelor": 2, "master": 3, "p
 
 
 class Profile(BaseModel):
-    """What eligibility is judged against. Every field may be unknown."""
+    """What is known about the candidate apart from their facts: what
+    eligibility is judged against, each field of which may be unknown, and how
+    many pages their resume may run to.
+
+    One page is the default because it is the convention for a student or a
+    candidate early in a career, who are most of the people writing a resume
+    for the first time; someone with more roles than a page holds sets it
+    themselves."""
 
     model_config = {"extra": "forbid", "frozen": True}
 
     work_authorization: str | None = None
     graduation: str | None = None
     degree: DegreeLevel | None = None
+    resume_pages: int = Field(default=1, ge=1, le=10)
 
 
 @dataclass(frozen=True)

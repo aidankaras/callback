@@ -1083,3 +1083,215 @@ def test_an_entry_with_only_an_end_date_declares_it() -> None:
     )
     dates = [d for d in declared_fields(doc) if d.field.startswith("dates[")]
     assert [d.value for d in dates] == ["Aug 2025"]
+
+
+_ONE_ROW = "Cut the queue to 300 items"
+_TWO_ROWS = (
+    "Rebuilt the nightly ingestion job so that late records from every regional warehouse "
+    "are merged before the morning report instead of a day later"
+)
+_THREE_ROWS = (
+    "Documented the reconciliation procedure for the finance team, covering the export from "
+    "the ledger, the comparison against the warehouse totals, the handling of currency "
+    "rounding, the sign-off each close requires from two approvers, and the escalation path "
+    "when the totals disagree by more than the agreed tolerance"
+)
+
+
+def _doc_with_bullets(*texts: str, heading: str = "Northwind Analytics") -> ResumeDoc:
+    return ResumeDoc(
+        identity=Identity(name="Dana Vex", email="dana@example.com", phone="+1 555 0100"),
+        sections=[
+            Section(
+                title="Experience",
+                entries=[
+                    Entry(
+                        heading=heading,
+                        subheading="Data Engineer",
+                        location="Boston, MA",
+                        start="Jun 2024",
+                        end="Aug 2025",
+                        bullets=[Bullet(text=t, sources=["a"]) for t in texts],
+                    )
+                ],
+            )
+        ],
+    )
+
+
+def _bullet_line_counts(pdf: Path) -> list[int]:
+    from core.render.geometry import bullet_blocks, extract_lines
+
+    return [block.line_count for block in bullet_blocks(extract_lines(pdf))]
+
+
+@pytest.mark.slow
+def test_a_bullet_wrapped_across_rows_is_recovered(tmp_path: Path) -> None:
+    """A bullet long enough to wrap occupies consecutive full-width rows with
+    nothing interleaved, so a reader taking rows top to bottom meets its text
+    whole and in order. The layout lints accept a two-line bullet; a document
+    they accept must be able to pass this gate."""
+    doc = _doc_with_bullets(_ONE_ROW, _TWO_ROWS, _THREE_ROWS)
+    out = tmp_path / "wrapped.pdf"
+    render(doc, out)
+    assert _bullet_line_counts(out) == [1, 2, 3], "fixture no longer wraps as this test assumes"
+    for text in (_TWO_ROWS, _THREE_ROWS):
+        assert not any(normalize(text) in segment for row in naive_segments(out) for segment in row)
+
+    result = check_roundtrip(doc, out)
+
+    assert result.char_ratio == 1.0
+    assert result.verdict == "pass", result.findings
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize(
+    ("rendered_word", "declared_word"),
+    [("nightly", "weekly"), ("later", "sooner")],
+    ids=["differs-in-its-first-row", "differs-in-its-last-row"],
+)
+def test_a_wrapped_bullet_the_page_does_not_carry_is_not_recovered(
+    tmp_path: Path, rendered_word: str, declared_word: str
+) -> None:
+    """Joining rows must not turn "most of this bullet is on the page" into
+    "recovered": the declared bullet differs from the rendered one by a single
+    word, and exactly that bullet's characters are missing from the ratio.
+    The last-row case is the one a match on a bullet's opening words, or on
+    its first row alone, would let through."""
+    rendered = _doc_with_bullets(_ONE_ROW, _TWO_ROWS)
+    assert _TWO_ROWS.count(rendered_word) == 1
+    declared_text = _TWO_ROWS.replace(rendered_word, declared_word)
+    declared = _doc_with_bullets(_ONE_ROW, declared_text)
+    out = tmp_path / "other.pdf"
+    render(rendered, out)
+    assert _bullet_line_counts(out) == [1, 2], "fixture no longer wraps as this test assumes"
+    rows = [segment for row in naive_segments(out) for segment in row]
+    assert declared_word not in " ".join(rows)
+    first_row = next(r for r in rows if r.startswith("Rebuilt"))
+    assert (rendered_word in first_row) == (rendered_word == "nightly")
+
+    result = check_roundtrip(declared, out)
+
+    from core.checks.roundtrip import declared_fields
+
+    total = sum(len(normalize(d.value)) for d in declared_fields(declared))
+    assert result.char_ratio == pytest.approx((total - len(normalize(declared_text))) / total)
+    assert result.verdict == "fail"
+
+
+@pytest.mark.slow
+def test_a_heading_wrapped_across_rows_is_still_not_recovered(tmp_path: Path) -> None:
+    """Rejoining rows is for bullets only. A heading shares its row with the
+    location and dates column, so its fragments come back with another field's
+    text between them, and a reader taking rows in order cannot reassemble it."""
+    heading = (
+        "Northwind Analytics Extended International Holdings Group Corporation "
+        "Worldwide Services Division for Regional Warehouse Operations"
+    )
+    doc = _doc_with_bullets(_ONE_ROW, heading=heading)
+    out = tmp_path / "heading.pdf"
+    render(doc, out)
+    segments = [segment for row in naive_segments(out) for segment in row]
+    assert not any(normalize(heading) in segment for segment in segments)
+    assert any("Northwind Analytics Extended" in segment for segment in segments)
+
+    result = check_roundtrip(doc, out)
+
+    employer = next(f for f in result.critical if f.field == "employer[0]")
+    assert not employer.recovered
+    assert result.verdict == "fail"
+
+
+@pytest.mark.slow
+def test_a_bullet_broken_inside_a_hyphenated_word_is_recovered(tmp_path: Path) -> None:
+    """The renderer may end a row after a hyphen inside a compound. The
+    declared text has no space there, so joining rows with a space alone
+    would lose a bullet whose every character is on the page."""
+    text = (
+        "Reviewed the ledger with the finance team each quarter and then wrote the first "
+        "complete month-end-close-reconciliation-procedure documentation for every "
+        "regional office"
+    )
+    doc = _doc_with_bullets(text)
+    out = tmp_path / "hyphen.pdf"
+    render(doc, out)
+    segments = [segment for row in naive_segments(out) for segment in row]
+    assert _bullet_line_counts(out) == [2], "fixture no longer wraps as this test assumes"
+    assert any(s.endswith("reconciliation-") for s in segments), segments
+
+    result = check_roundtrip(doc, out)
+
+    assert result.char_ratio == 1.0
+    assert result.verdict == "pass", result.findings
+
+
+@pytest.mark.slow
+def test_a_bullet_whose_tail_never_rendered_is_not_recovered(tmp_path: Path) -> None:
+    """Every row the page carries belongs to the declared bullet, and the
+    bullet still is not on the page: its closing words were never rendered.
+    Rows that are only part of a value must not count as the value."""
+    rendered = _doc_with_bullets(_ONE_ROW, _TWO_ROWS)
+    declared_text = f"{_TWO_ROWS}, which the regional managers had asked for"
+    declared = _doc_with_bullets(_ONE_ROW, declared_text)
+    out = tmp_path / "clipped.pdf"
+    render(rendered, out)
+    rows = [segment for row in naive_segments(out) for segment in row]
+    assert _bullet_line_counts(out) == [1, 2], "fixture no longer wraps as this test assumes"
+    assert " ".join(rows[-2:]) == normalize(_TWO_ROWS), "the rendered bullet is the last two rows"
+    assert "regional managers" not in " ".join(rows)
+
+    result = check_roundtrip(declared, out)
+
+    from core.checks.roundtrip import declared_fields
+
+    total = sum(len(normalize(d.value)) for d in declared_fields(declared))
+    assert result.char_ratio == pytest.approx((total - len(normalize(declared_text))) / total)
+    assert result.verdict == "fail"
+
+
+def _two_entries(first_bullet: str) -> ResumeDoc:
+    def entry(heading: str, bullet: str) -> Entry:
+        return Entry(
+            heading=heading,
+            subheading="Data Engineer",
+            location="Boston, MA",
+            start="Jun 2024",
+            end="Aug 2025",
+            bullets=[Bullet(text=bullet, sources=["a"])],
+        )
+
+    return ResumeDoc(
+        identity=Identity(name="Dana Vex", email="dana@example.com", phone="+1 555 0100"),
+        sections=[
+            Section(
+                title="Experience",
+                entries=[
+                    entry("Northwind Analytics", first_bullet),
+                    entry("Southwind Logistics", "Moved the archive to cold storage"),
+                ],
+            )
+        ],
+    )
+
+
+@pytest.mark.slow
+def test_a_bullet_is_not_assembled_from_rows_of_the_next_entry(tmp_path: Path) -> None:
+    """Rows are rejoined inside the bullet's own entry and no further. The
+    declared bullet here equals the first entry's last row followed by the
+    second entry's heading, which are consecutive on the page and belong to
+    two different entries."""
+    rendered = _two_entries(_ONE_ROW)
+    declared_text = f"{_ONE_ROW} Southwind Logistics"
+    declared = _two_entries(declared_text)
+    out = tmp_path / "neighbour.pdf"
+    render(rendered, out)
+    rows = [segment for row in naive_segments(out) for segment in row]
+    at = rows.index(_ONE_ROW)
+    assert rows[at + 1] == "Southwind Logistics", rows
+
+    result = check_roundtrip(declared, out)
+
+    from core.checks.roundtrip import declared_fields
+
+    total = sum(len(normalize(d.value)) for d in declared_fields(declared))
+    assert result.char_ratio == pytest.approx((total - len(normalize(declared_text))) / total)
