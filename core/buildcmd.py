@@ -21,8 +21,8 @@ from pathlib import Path
 
 from core.draft import RESUME_ARTIFACTS
 from core.gates import GateOutcome, GateReport, run_gates
-from core.paths import private_dir, resolve_inside, write_private, write_private_bytes
-from core.profile.store import FACTS_FILE, load_facts
+from core.paths import private_dir, write_private, write_private_bytes
+from core.profile.store import facts_sha256, load_facts
 from core.render.typst import RenderError, render
 from core.resume.io import parse_doc
 from core.triage import ProfileError, load_profile
@@ -53,11 +53,6 @@ def _actions(outcomes: tuple[GateOutcome, ...]) -> list[str]:
         o for o in outcomes if o.verdict == "warn"
     ]
     return [f"{o.gate}: {f}" for o in ranked for f in o.findings][:_MAX_ACTIONS]
-
-
-def _facts_sha256() -> str | None:
-    path = resolve_inside(FACTS_FILE)
-    return hashlib.sha256(path.read_bytes()).hexdigest() if path.exists() else None
 
 
 def render_report(report: GateReport) -> str:
@@ -124,7 +119,7 @@ def build(doc_path: Path, job_id: str) -> BuildResult:
         "pdf_sha256": hashlib.sha256(pdf_bytes).hexdigest(),
         # The facts the gates judged against, so a later seal can refuse if
         # they have changed since.
-        "facts_sha256": _facts_sha256(),
+        "facts_sha256": facts_sha256(),
         "outcomes": [
             {"gate": o.gate, "verdict": o.verdict, "findings": list(o.findings)}
             for o in report.outcomes

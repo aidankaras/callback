@@ -338,3 +338,50 @@ def test_an_application_the_ledger_cannot_record_is_not_saved(home: Path) -> Non
         apply(_target(), now=NOW)
     assert load_applications() == []
     assert not (home / "outputs" / "acme-ml" / "packet").exists()
+
+
+def _judged_against(home: Path, record: Path, store: bytes | None) -> None:
+    """Rewrite `record` as one judged against a fact store holding `store`."""
+    body = json.loads(record.read_text(encoding="utf-8"))
+    body["facts_sha256"] = None if store is None else hashlib.sha256(store).hexdigest()
+    record.write_text(json.dumps(body), encoding="utf-8")
+
+
+@pytest.mark.parametrize("which", ["resume", "cover letter", "form answers"])
+def test_a_draft_judged_against_facts_that_have_since_changed_is_refused(
+    home: Path, which: str
+) -> None:
+    """A fact retired after the build backs nothing, and the report that
+    passed the document was written while it still did."""
+    _built(home, "acme-ml", letter="PASS")
+    draft = home / "outputs" / "acme-ml" / "draft"
+    text = "# answers\n\nWhy us? Because.\n"
+    (draft / "answers.md").write_text(text, encoding="utf-8")
+    answers = {"verdict": "pass", "sha256": hashlib.sha256(text.encode()).hexdigest()}
+    (draft / "answers-report.json").write_text(json.dumps(answers), encoding="utf-8")
+    records = {
+        "resume": draft / "report.json",
+        "cover letter": draft / "letter-report.json",
+        "form answers": draft / "answers-report.json",
+    }
+    then, now = b"queue: {text: in use}\n", b"queue: {text: in use, retired_on: 2026-09-29}\n"
+    for record in records.values():
+        _judged_against(home, record, then)
+    (home / "facts.yaml").write_bytes(then)
+    packet = apply(_target(), now=NOW)
+    assert (packet / "answers.md").is_file(), "premise: unchanged facts are accepted"
+
+    (home / "facts.yaml").write_bytes(now)
+    for name, record in records.items():
+        _judged_against(home, record, then if name == which else now)
+
+    with pytest.raises(ApplyError, match=f"the facts have changed since the {which} was"):
+        apply(_target(), now=NOW, refresh=True)
+
+
+def test_a_record_that_names_no_facts_is_refused_once_there_are_facts(home: Path) -> None:
+    _built(home, "acme-ml")
+    (home / "facts.yaml").write_bytes(b"queue: {text: in use}\n")
+
+    with pytest.raises(ApplyError, match="the facts have changed since the resume was"):
+        apply(_target(), now=NOW)

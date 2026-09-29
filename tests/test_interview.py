@@ -11,7 +11,7 @@ from core.apply import Target, apply
 from core.interview import InterviewError, prepare
 from core.paths import ensure_home
 from core.profile.models import Fact, FactKind, Provenance, Trust
-from core.profile.store import save_facts
+from core.profile.store import facts_sha256, save_facts
 
 NOW = datetime(2026, 10, 1, 15, 0, tzinfo=UTC)
 CONFIRMED = Provenance(source="x", trust=Trust.USER_CONFIRMED)
@@ -52,6 +52,7 @@ def applied(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
         "verdict": "pass",
         "pdf_sha256": hashlib.sha256(pdf).hexdigest(),
         "doc_sha256": hashlib.sha256(RESUME.encode()).hexdigest(),
+        "facts_sha256": facts_sha256(),
     }
     (draft / "report.json").write_text(json.dumps(report), encoding="utf-8")
     apply(Target(job_id="acme-ml", company="Acme", title="ML Intern", source="greenhouse"), now=NOW)

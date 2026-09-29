@@ -29,6 +29,7 @@ from core.letter.checks import check_sentence, context_for, heading_findings, qu
 from core.letter.models import Sentence
 from core.paths import private_dir, resolve_inside, write_private
 from core.profile.models import Fact
+from core.profile.store import facts_sha256
 from core.resume.io import DocumentError, load_doc
 
 
@@ -137,6 +138,7 @@ def build_answers(path: Path, facts: Mapping[str, Fact]) -> tuple[AnswersResult,
     record = {
         "verdict": result.verdict,
         "sha256": hashlib.sha256(rendered.encode("utf-8")).hexdigest(),
+        "facts_sha256": facts_sha256(),
         "findings": list(result.findings),
     }
     write_private(out_dir / "answers-report.json", json.dumps(record, indent=2) + "\n")

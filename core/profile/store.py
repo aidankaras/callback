@@ -11,6 +11,7 @@ has seen every failure; see `StoreError` for the full list this closes.
 
 from __future__ import annotations
 
+import hashlib
 import re
 from collections.abc import Iterator
 from typing import cast
@@ -213,6 +214,17 @@ def _yaml_problem(exc: yaml.YAMLError) -> str:
         where = f" at line {exc.problem_mark.line + 1}, column {exc.problem_mark.column + 1}"
     problem = re.sub(r"'[^']*'", "'...'", exc.problem or "")
     return f"{where}: {problem}" if problem else where
+
+
+def facts_sha256() -> str | None:
+    """The hash of the fact store as it stands on disk, or None when there is none.
+
+    A report records it, and anything that acts on the report compares it: a
+    document that passed is only known to pass against the facts it was judged
+    with, and a fact confirmed, replaced or retired since changes them.
+    """
+    path = resolve_inside(FACTS_FILE)
+    return hashlib.sha256(path.read_bytes()).hexdigest() if path.exists() else None
 
 
 def save_facts(facts: dict[str, Fact]) -> None:
