@@ -66,7 +66,7 @@ _NOT_SHOWN = (
     "page lists it"
 )
 
-# Two more grounded bullets, so a clean document meets the three-per-role floor.
+# Two more grounded bullets, so a clean document meets the two-per-role floor.
 EXTRA_BULLETS = [
     Bullet(text="Shipped the loader", sources=["loader"]),
     Bullet(text="Wrote the runbook", sources=["runbook"]),
@@ -241,7 +241,7 @@ def test_a_report_verdict_is_derived_from_its_outcomes() -> None:
 
 @pytest.mark.slow
 def test_a_layout_lint_makes_an_otherwise_clean_document_a_warning(tmp_path: Path) -> None:
-    """One bullet in a role is below the three-per-role floor. Mutation: make
+    """One bullet in a role is below the two-per-role floor. Mutation: make
     the lints gate always pass -- this test fails."""
     doc = _doc()
     entry = doc.sections[0].entries[0]
