@@ -262,6 +262,36 @@ def _abbreviation_letter(text: str, found: Sequence[re.Match[str]], position: in
     return bool(neighbours) and not any(n.rstrip(".").lower() in ALIAS_TABLE for n in neighbours)
 
 
+def _whole(name: str) -> re.Pattern[str]:
+    """`name` as a whole run of text: neither neighbour is a letter or a digit,
+    so "8-K" is not found inside "18-K" nor "SHA-256" inside "SHA-2560"."""
+    return re.compile(rf"(?<![A-Za-z0-9]){re.escape(name)}(?![A-Za-z0-9])", re.IGNORECASE)
+
+
+def _without_listed_names(text: str, sources: Sequence[Fact]) -> str:
+    """`text` with every name that carries its own digits blanked out, so the
+    digits in "SHA-256", "Form 4" or "Lorenz-96" are not read as quantities
+    the bullet claims.
+
+    A name counts only when a cited fact does both of two things: lists it in
+    `entities`, and states it in its own text. The first is what makes it a
+    name rather than a phrase that happens to hold a number; the second ties
+    it to words the candidate read when confirming the fact. It must also hold
+    a letter, so an entity of "256" excuses no number at all. Only the name's
+    own occurrence is blanked: the same digits standing elsewhere in the
+    bullet are a quantity like any other.
+    """
+    for fact in sources:
+        for entity in fact.entities:
+            name = entity.strip()
+            if not (any(c.isalpha() for c in name) and any(c.isdigit() for c in name)):
+                continue
+            pattern = _whole(name)
+            if pattern.search(fact.text):
+                text = pattern.sub(lambda found: " " * len(found.group()), text)
+    return text
+
+
 def _names_a_technology(token: str) -> bool:
     # "AWS-hosted" is neither a table entry nor identifier-shaped as a whole,
     # so without this a suffix would hide an uncited technology. Only a
@@ -546,7 +576,7 @@ def check_bullet(
 
     start, end = date_hull(sources)
 
-    for number in parse_numbers(text):
+    for number in parse_numbers(_without_listed_names(text, sources)):
         # A quantity recorded as a percent never backs a plain count, so
         # "42 direct reports" cannot rest on a fact that says 42%.
         # A percentage's direction is carried by its verb ("cut churn by 15%"),

@@ -1010,3 +1010,77 @@ def test_a_spaced_ampersand_is_a_list_whatever_stands_beside_it() -> None:
 
     assert verdict is Verdict.FAIL
     assert any("'R'" in finding.detail for finding in findings), findings
+
+
+@pytest.mark.parametrize(
+    ("text", "entities"),
+    [
+        ("Recorded each file with its SHA-256 hash", ["SHA-256"]),
+        ("Studied the Lorenz-96 system", ["Lorenz-96"]),
+        ("Parsed Form 4 and 8-K filings", ["Form 4", "8-K"]),
+        ("Built the service on Python 3.12", ["Python", "Python 3.12"]),
+    ],
+)
+def test_a_number_inside_a_name_the_fact_lists_is_not_a_quantity(
+    text: str, entities: list[str]
+) -> None:
+    """ "SHA-256" claims no count of 256. The fact states the name and lists
+    it, so the digits are part of what it is called."""
+    f = fact("d", text=text, entities=entities)
+
+    verdict, findings = check_bullet(text, [f])
+
+    assert verdict is not Verdict.FAIL, findings
+
+
+@pytest.mark.parametrize(
+    ("fact_text", "entities", "bullet", "number"),
+    [
+        pytest.param(
+            "Recorded each file with its hash",
+            ["SHA-256"],
+            "Recorded each file with its SHA-256 hash",
+            "256",
+            id="a-name-the-facts-text-never-states",
+        ),
+        pytest.param(
+            "Recorded each file with its SHA-256 hash",
+            ["256"],
+            "Recorded each file with its SHA-256 hash",
+            "256",
+            id="a-listed-entity-that-is-only-digits",
+        ),
+        pytest.param(
+            "Recorded each file with its SHA-256 hash",
+            ["SHA-256"],
+            "Recorded 256 files, each with its SHA-256 hash",
+            "256",
+            id="the-same-digits-standing-alone",
+        ),
+        pytest.param(
+            "Parsed 8-K filings",
+            ["8-K"],
+            "Parsed 18-K filings",
+            "18",
+            id="the-name-inside-a-longer-token",
+        ),
+        pytest.param(
+            "Did not reach 300 users",
+            [],
+            "Reached 300 users",
+            "300",
+            id="a-number-the-text-states-and-no-entity-names",
+        ),
+    ],
+)
+def test_a_number_outside_a_listed_name_is_still_a_quantity(
+    fact_text: str, entities: list[str], bullet: str, number: str
+) -> None:
+    f = fact("d", text=fact_text, entities=entities)
+
+    verdict, findings = check_bullet(bullet, [f])
+
+    assert verdict is Verdict.FAIL
+    assert [x.detail for x in findings if x.kind is FindingKind.UNRESOLVED_NUMBER] == [
+        f"'{number}' is not derivable from the cited facts"
+    ], findings
