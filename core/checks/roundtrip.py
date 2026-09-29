@@ -630,8 +630,8 @@ def _find_bullet(
     a heading: a heading's row carries the location and dates as well, so
     its fragments are never consecutive.
 
-    Rows are added only while the joined text is still shorter than the
-    value, so a search never reaches past the rows the value could occupy,
+    Rows are added only while their shortest reading is still shorter than
+    the value, so a search never reaches past the rows the value could occupy,
     and never past `end`, the boundary of the entry the bullet belongs to.
 
     What this cannot tell apart is one declared bullet from two rendered
@@ -647,12 +647,15 @@ def _find_bullet(
         if _matches(value, flat[i], declared_values):
             return i
         rows = [flat[i].casefold()]
-        length = len(rows[0])
+        # The length of the shortest reading `_joined` offers: a row ending in
+        # a hyphen may join the next with nothing between. Counting a space
+        # there would call the text long enough one row too soon.
+        shortest = len(rows[0])
         for j in range(i + 1, limit):
-            if length >= len(target):
+            if shortest >= len(target):
                 break
+            shortest += (0 if rows[-1].endswith("-") else 1) + len(flat[j])
             rows.append(flat[j].casefold())
-            length += 1 + len(rows[-1])
             if target in _joined(rows):
                 return i
     return None

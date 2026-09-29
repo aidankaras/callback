@@ -1135,3 +1135,16 @@ def test_a_letter_glued_to_a_word_is_not_an_abbreviation(bullet: str) -> None:
 )
 def test_letters_joined_by_an_ampersand_are_an_abbreviation(text: str) -> None:
     assert checkable_entity_tokens(text) == []
+
+
+@pytest.mark.parametrize(
+    "text",
+    ["Cut spend across M&R.", "Handed the budget to P&R. Then left.", "Reported to M&R."],
+)
+def test_an_abbreviation_that_ends_a_sentence_is_still_an_abbreviation(text: str) -> None:
+    """The full stop belongs to the sentence. The letter before it is one
+    letter, and in each case it is R, the one single letter the alias table
+    holds: a letter the table does not hold is never checked at all."""
+    assert checkable_entity_tokens(text.replace("&", " and ")) == ["R"]
+
+    assert checkable_entity_tokens(text) == []

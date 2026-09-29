@@ -257,7 +257,10 @@ def _abbreviation_letter(text: str, found: Sequence[re.Match[str]], position: in
     way: "C&R" reads as an abbreviation, and R goes unchecked there.
     """
     here = found[position]
-    if len(here.group()) != 1:
+    # The letter itself: a token keeps the full stop that ends its sentence
+    # ("M&R."), so it is split off here. The caller strips its own copy of
+    # the token, which never reaches this function.
+    if len(re.split(r"[-.]", here.group(), maxsplit=1)[0]) != 1:
         return False
     neighbours: list[str] = []
     if position > 0 and text[found[position - 1].end() : here.start()] == "&":

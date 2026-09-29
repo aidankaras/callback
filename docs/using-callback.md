@@ -204,7 +204,7 @@ sections:
 ```
 
 Built as written, this example gives `WARN`: one bullet is under the
-three-per-role layout floor. Warnings are advice, and every other gate passes.
+two-per-role layout floor. Warnings are advice, and every other gate passes.
 
 ## Cover letters
 

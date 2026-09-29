@@ -1295,3 +1295,19 @@ def test_a_bullet_is_not_assembled_from_rows_of_the_next_entry(tmp_path: Path) -
 
     total = sum(len(normalize(d.value)) for d in declared_fields(declared))
     assert result.char_ratio == pytest.approx((total - len(normalize(declared_text))) / total)
+
+
+def test_a_bullet_broken_at_two_hyphens_is_recovered() -> None:
+    """Each break inside a compound joins with nothing between, so the text is
+    shorter than its rows joined by spaces would be. Counting a space at every
+    break stops the search one row early when the last row is short."""
+    from core.checks.roundtrip import _find_bullet  # pyright: ignore[reportPrivateUsage]
+
+    rows = ["heading", "built a multi-", "tenant, enterprise-", "a", "next bullet"]
+    value = "Built a multi-tenant, enterprise-a"
+    assert len(normalize(value)) == len(rows[1]) + len(rows[2]) + 1
+
+    assert _find_bullet(value, rows, [value], start=1, end=4) == 1
+    assert _find_bullet(value, rows, [value], start=1, end=3) is None, (
+        "the last row is past the end"
+    )
