@@ -27,7 +27,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
-from core.checks.claims import check_claims
+from core.checks.claims import check_claims, skills_shown_by_entries
 from core.checks.grounding import Verdict, check_bullet
 from core.checks.hidden import check_hidden
 from core.checks.lints import check_lints
@@ -177,10 +177,14 @@ def run_gates(
 
     def skills() -> tuple[Outcome, tuple[str, ...]]:
         result = check_skills(doc, grounded)
+        by_entry = skills_shown_by_entries(result.listed_only, doc, facts)
+        unshown = [s for s in result.listed_only if s not in by_entry]
         texts = tuple(result.findings) + tuple(
-            f"skill {s!r} is listed but no grounded bullet shows it" for s in result.listed_only
+            f"skill {s!r} is listed but no grounded bullet names it and no confirmed fact "
+            "under an entry on the page lists it"
+            for s in unshown
         )
-        return ("warn" if result.listed_only else "pass"), texts
+        return ("warn" if texts else "pass"), texts
 
     def lints() -> tuple[Outcome, tuple[str, ...]]:
         # Layout is advice: a lint can warn, never fail a document.

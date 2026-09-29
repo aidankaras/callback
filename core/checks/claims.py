@@ -38,7 +38,7 @@ Every rule fails closed. Only confirmed facts count, matching `Fact.selectable`.
 from __future__ import annotations
 
 import re
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from typing import Literal
 
@@ -219,6 +219,51 @@ def _skill_backing(doc: ResumeDoc, facts: Mapping[str, Fact]) -> set[str]:
                     if fid in confirmed:
                         backed |= {_canon(e) for e in confirmed[fid].entities}
     return backed
+
+
+def skills_shown_by_entries(
+    skills: Iterable[str], doc: ResumeDoc, facts: Mapping[str, Fact]
+) -> set[str]:
+    """Those of `skills` a printed entry stands behind: the ones a confirmed
+    fact belonging to an entry on the page lists in its entities.
+
+    A fact belongs to an entry when the entry's header or one of its bullets
+    cites it, or when it shares an ancestor with a fact they cite: a bullet
+    that cites one detail of a role puts that role on the page, and the role's
+    other details are facts about the same entry. A role's stack is usually
+    recorded once, in a fact no bullet quotes, and a bullet written to name
+    every tool reads as a keyword list.
+
+    Entities only, never a fact's text: entities are where a fact records what
+    was used, and its text may name a tool it moved away from. A fact kept on
+    its own, under no entry, shows a skill nowhere on the page however true it
+    is, so it backs a listed skill (`_skill_backing`) without appearing here.
+    """
+    confirmed = {fid: f for fid, f in facts.items() if f.selectable()}
+
+    def lineage(fid: str) -> list[str]:
+        """`fid` and its ancestors, nearest first, among confirmed facts."""
+        seen: list[str] = []
+        current: str | None = fid
+        while current is not None and current in confirmed and current not in seen:
+            seen.append(current)
+            current = confirmed[current].parent
+        return seen
+
+    cited = {
+        fid
+        for section in doc.sections
+        for entry in section.entries
+        for fid in (*entry.sources, *(s for b in entry.bullets for s in b.sources))
+    }
+    on_page = {ancestor for fid in cited for ancestor in lineage(fid)}
+    listed = {
+        _canon(entity)
+        for fid, fact in confirmed.items()
+        if on_page.intersection(lineage(fid))
+        for entity in fact.entities
+    }
+    return {skill for skill in skills if _canon(skill) in listed}
 
 
 def check_claims(doc: ResumeDoc, facts: Mapping[str, Fact]) -> ClaimsResult:
