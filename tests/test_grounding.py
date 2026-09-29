@@ -1,6 +1,12 @@
 import pytest
 
-from core.checks.grounding import FindingKind, Verdict, check_bullet, check_document
+from core.checks.grounding import (
+    FindingKind,
+    Verdict,
+    check_bullet,
+    check_document,
+    checkable_entity_tokens,
+)
 from core.profile.models import Dates, Derivation, Fact, FactKind, Provenance, Quantity, Trust
 
 PROV = Provenance(source="onboarding_answer", trust=Trust.USER_CONFIRMED)
@@ -958,3 +964,49 @@ def test_the_fix_message_names_text_only_when_the_text_states_the_token() -> Non
     )
     _, findings = check_bullet("Ran pipelines across MA sites", [f])
     assert findings[0].detail.endswith("appears in no cited fact")
+
+
+def test_a_letter_in_an_ampersand_abbreviation_is_not_a_language() -> None:
+    """ "R&D" is a department, not the language R. The bullet repeats its
+    fact's own words and names no technology."""
+    f = fact("d", text="Built forecasting models for the R&D group", entities=[])
+    assert checkable_entity_tokens("Built forecasting models for the R&D group") == []
+
+    verdict, findings = check_bullet("Built forecasting models for the R&D group", [f])
+
+    assert verdict is Verdict.PASS, findings
+
+
+@pytest.mark.parametrize(
+    "bullet",
+    [
+        "Built forecasting models in R",
+        "Wrote the analysis in Python & R",
+        "Wrote the analysis in Python&R",
+        "Wrote the analysis in R&Python",
+    ],
+)
+def test_an_ampersand_does_not_hide_the_language(bullet: str) -> None:
+    """Beside a technology the letter is the language: an ampersand joining
+    two tools is a list of tools, and each still needs a fact behind it."""
+    f = fact("d", text="Wrote the analysis for the R&D group", entities=["Python"])
+    assert "R" in checkable_entity_tokens(bullet)
+
+    verdict, findings = check_bullet(bullet, [f])
+
+    assert verdict is Verdict.FAIL
+    assert any("'R'" in finding.detail for finding in findings), findings
+
+
+def test_a_spaced_ampersand_is_a_list_whatever_stands_beside_it() -> None:
+    """Written with spaces, "R & Stata" is two tools. The second is unknown to
+    the alias table, so nothing but the spacing says the first is a language."""
+    from core.aliases import ALIAS_TABLE
+
+    assert "stata" not in ALIAS_TABLE
+    f = fact("d", text="Wrote the analysis", entities=[])
+
+    verdict, findings = check_bullet("Wrote the analysis in R & Stata", [f])
+
+    assert verdict is Verdict.FAIL
+    assert any("'R'" in finding.detail for finding in findings), findings

@@ -231,12 +231,35 @@ def checkable_entity_tokens(text: str) -> list[str]:
     # A trailing full stop ends the sentence, not the token: "Python." is
     # Python, and would otherwise look identifier-shaped for its "." and
     # match no entity. Internal dots ("3.12", "Node.js") are kept.
-    tokens = (t.rstrip(".") for t in _TOKEN.findall(text))
+    found = list(_TOKEN.finditer(text))
+    tokens = [m.group().rstrip(".") for m in found]
     return [
         t
-        for t in tokens
-        if t and (t.lower() in ALIAS_TABLE or _SHAPED.match(t) or _names_a_technology(t))
+        for position, t in enumerate(tokens)
+        if t
+        and not _abbreviation_letter(text, found, position)
+        and (t.lower() in ALIAS_TABLE or _SHAPED.match(t) or _names_a_technology(t))
     ]
+
+
+def _abbreviation_letter(text: str, found: Sequence[re.Match[str]], position: int) -> bool:
+    """Whether the token at `position` is a single letter of an ampersand
+    abbreviation ("R&D", "M&A") rather than a word of its own.
+
+    Only a letter written against the ampersand counts, and only when what
+    stands on the ampersand's other side is not a table entry: "R&D" is a
+    department, while "Python&R" and "Python & R" are two tools, and the
+    one-letter entry "R" must still be cited there.
+    """
+    here = found[position]
+    if len(here.group()) != 1:
+        return False
+    neighbours: list[str] = []
+    if position > 0 and text[found[position - 1].end() : here.start()] == "&":
+        neighbours.append(found[position - 1].group())
+    if position + 1 < len(found) and text[here.end() : found[position + 1].start()] == "&":
+        neighbours.append(found[position + 1].group())
+    return bool(neighbours) and not any(n.rstrip(".").lower() in ALIAS_TABLE for n in neighbours)
 
 
 def _names_a_technology(token: str) -> bool:
