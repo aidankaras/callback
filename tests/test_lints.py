@@ -127,3 +127,40 @@ def test_a_bullet_that_wraps_onto_the_last_page_is_content_on_it() -> None:
     assert wrapped.page == 0  # premise: the block reports the page it started on
     assert carries_bullet([wrapped], 1)
     assert not carries_bullet([BulletBlock(page=0, lines=[line(0, "all on one page")])], 1)
+
+
+@pytest.mark.slow
+def test_two_bullets_are_enough_for_a_role(tmp_path: Path) -> None:
+    """A project or a short internship often has two things worth saying;
+    padding it to three costs the page a line that says nothing."""
+    assert _lints(_doc(_entry("Northwind", SHORT[:2])), tmp_path) == []
+
+    (lint,) = _lints(_doc(_entry("Northwind", SHORT[:1])), tmp_path)
+
+    assert lint.rule == "too_few_bullets"
+    assert "1 bullet(s); at least 2 per role" in lint.detail
+
+
+@pytest.mark.parametrize(
+    ("employers", "pages", "max_pages", "flagged"),
+    [(6, 2, 1, True), (6, 2, 2, False), (7, 3, 2, True)],
+)
+@pytest.mark.slow
+def test_the_page_limit_is_the_callers(
+    tmp_path: Path, employers: int, pages: int, max_pages: int, flagged: bool
+) -> None:
+    """How long a resume may run depends on whose it is: one page for a
+    student, two for someone with a decade of roles."""
+    from core.render.geometry import page_fill
+
+    doc = _doc(*(_entry(f"Employer {n}", [LONG[:150]] * 6) for n in range(employers)))
+    out = tmp_path / "resume.pdf"
+    render(doc, out)
+    assert len(page_fill(out)) == pages
+
+    lints = check_lints(doc, out, max_pages=max_pages)
+    found = [lint for lint in lints if lint.rule == "page_count"]
+
+    assert bool(found) is flagged
+    if flagged:
+        assert found[0].detail == f"{pages} pages; at most {max_pages}"

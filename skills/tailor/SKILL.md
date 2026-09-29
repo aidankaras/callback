@@ -120,8 +120,10 @@ Tailoring a resume to a posting needs only the section below.
      describing a responsibility; put the strongest one first in its entry,
      since a reader who stops reading stops at the top.
    - **Recency and relevance over completeness.** An entry the posting has no
-     use for is cut, not shortened. One page is the convention the layout
-     lints enforce, and cutting an entry is how it is met.
+     use for is cut, not shortened. The page limit the layout lints hold
+     the document to is the user's own (`callback profile --pages`, one page
+     unless they set it), and cutting an entry is how it is met. Never raise
+     it yourself to clear a warning.
    - **The posting's own word for a skill the user has** ("PyTorch" where the
      fact says PyTorch), never a skill no confirmed fact backs: the skills
      gate fails on it, and the interviewer will ask about it.

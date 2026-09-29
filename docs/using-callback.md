@@ -62,7 +62,7 @@ postings anyway.
 | `callback postings list [--days N]` | Stored postings, newest first | 0, 3 |
 | `callback postings resolve <url> --company "<company>"` | The canonical posting behind a Greenhouse, Lever or Ashby URL, or an employer careers page's `schema.org/JobPosting` data | 0, 3 |
 | `callback postings take <id> --job <job-id>` | Saves the posting's own text to `inbox/<job-id>.md` | 0, 3 |
-| `callback profile --work-authorization … --graduation … --degree …` | What eligibility is judged against | 0, 3 |
+| `callback profile --work-authorization … --graduation … --degree … --pages …` | What eligibility is judged against, and how many pages a resume may run to (1 unless set) | 0, 3 |
 | `callback agenda` | What to do next, most time-sensitive first: interviews recorded with no prep pack, drafts built but never sent, the five freshest eligible postings at companies not yet applied to, and applications silent for 21+ days. Each line names the command that acts; this one never does | 0, 3 |
 | `callback template save <job-id> --name <name>` / `list` / `use <name> --job <job-id> [--overwrite]` | Saves a document whose build passed under a name, and copies it into another job's draft as a starting point. The copy is an ordinary draft: every gate runs against it again, and its bullets still cite facts that must still be confirmed | 0, 3 |
 | `callback fit <job-id>` | The same knockouts, plus every technology the posting names that the alias table knows: which ones confirmed facts back (with the fact ids to cite) and which are missing | 0 eligible or stretch, 1 a question, 2 knockout, 3 |
@@ -297,9 +297,11 @@ For Bash it resolves the paths a command names, including after a `cd`. It
 guards against accidental writes; it is not a sandbox. A command that builds
 its path at run time is not caught.
 
-**Layout lints** (a bullet over two lines, fewer than 3 or more than 6
-bullets for a role, a second page, a near-empty last page) can only warn.
-They never fail a document.
+**Layout lints** (a bullet over two lines, fewer than 2 or more than 6
+bullets for a role, more pages than your profile allows, a near-empty last
+page) can only warn. They never fail a document. The page limit is one unless
+you raise it with `callback profile --pages 2`; it belongs to you, not to a
+draft, so a document cannot grant itself a second page.
 
 **Sealing.** `build` only ever writes a draft. `finalize` is the only
 writer of `final/`:

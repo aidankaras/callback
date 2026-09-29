@@ -66,7 +66,7 @@ def check_lints(
     pdf_path: Path,
     *,
     max_bullet_lines: int = 2,
-    min_bullets: int = 3,
+    min_bullets: int = 2,
     max_bullets: int = 6,
     max_pages: int = 1,
 ) -> list[Lint]:
@@ -107,7 +107,7 @@ def check_lints(
                 )
 
     if len(fills) > max_pages:
-        lints.append(Lint("page_count", f"{len(fills)} pages; convention allows {max_pages}"))
+        lints.append(Lint("page_count", f"{len(fills)} pages; at most {max_pages}"))
     if len(fills) > 1:
         tail_fill, last_page = fills[-1], len(fills) - 1
         if tail_fill < ORPHAN_TAIL_FILL:

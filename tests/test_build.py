@@ -222,3 +222,32 @@ def test_the_draft_holds_the_document_it_was_built_from(tmp_path: Path) -> None:
     assert stat.S_IMODE(staged.stat().st_mode) == 0o600
     report = json.loads((result.out_dir / "report.json").read_text())
     assert hashlib.sha256(staged.read_bytes()).hexdigest() == report["doc_sha256"]
+
+
+def _long_doc() -> ResumeDoc:
+    doc = sample_doc()
+    entry = doc.sections[0].entries[0]
+    bullets = [Bullet(text="Shipped the loader", sources=["loader"])] * 6
+    entries = [entry.model_copy(update={"bullets": bullets}) for _ in range(8)]
+    return doc.model_copy(
+        update={"sections": [doc.sections[0].model_copy(update={"entries": entries})]}
+    )
+
+
+@pytest.mark.parametrize(("allowed", "flagged"), [(None, True), (2, False)])
+@pytest.mark.slow
+def test_a_build_holds_the_resume_to_the_candidates_own_page_limit(
+    tmp_path: Path, home: Path, allowed: int | None, flagged: bool
+) -> None:
+    from core.render.geometry import page_fill
+    from core.triage import Profile, save_profile
+
+    if allowed is not None:
+        save_profile(Profile(resume_pages=allowed))
+
+    result = build(_write(tmp_path, _long_doc()), "northwind-de")
+
+    draft = home / "outputs" / "northwind-de" / "draft"
+    assert len(page_fill(draft / "resume.pdf")) == 2
+    lints = next(o for o in result.report.outcomes if o.gate == "lints")
+    assert any(f.startswith("page_count") for f in lints.findings) is flagged

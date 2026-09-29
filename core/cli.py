@@ -73,7 +73,9 @@ def build_parser() -> argparse.ArgumentParser:
     p_take.add_argument("--job", required=True)
     p_take.set_defaults(handler=_cmd_postings_take)
 
-    profile = sub.add_parser("profile", help="what eligibility is judged against")
+    profile = sub.add_parser(
+        "profile", help="what eligibility is judged against, and the resume's page limit"
+    )
     profile.add_argument(
         "--work-authorization", help='e.g. "US citizen", "F-1, will need sponsorship"'
     )
@@ -81,6 +83,7 @@ def build_parser() -> argparse.ArgumentParser:
     profile.add_argument(
         "--degree", choices=["high school", "associate", "bachelor", "master", "phd"]
     )
+    profile.add_argument("--pages", type=int, help="how many pages a resume may run to (default 1)")
     profile.set_defaults(handler=_cmd_profile)
 
     triage = sub.add_parser("triage", help="rank stored postings: eligibility, evidence, freshness")
@@ -405,7 +408,7 @@ def _cmd_postings_take(args: argparse.Namespace) -> int:
 
 def _cmd_profile(args: argparse.Namespace) -> int:
     from core.paths import ensure_home
-    from core.triage import load_profile, save_profile
+    from core.triage import Profile, load_profile, save_profile
 
     ensure_home()
     try:
@@ -416,10 +419,12 @@ def _cmd_profile(args: argparse.Namespace) -> int:
                 ("work_authorization", args.work_authorization),
                 ("graduation", args.graduation),
                 ("degree", args.degree),
+                ("resume_pages", args.pages),
             )
             if v is not None
         }
-        profile = current.model_copy(update=updates)
+        # Validated, not copied: `model_copy` would store a page limit of 0.
+        profile = Profile.model_validate({**current.model_dump(), **updates})
         save_profile(profile)
     except (ValueError, OSError) as exc:
         print(f"callback profile: {exc}", file=sys.stderr)

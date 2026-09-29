@@ -25,6 +25,7 @@ from core.paths import private_dir, resolve_inside, write_private, write_private
 from core.profile.store import FACTS_FILE, load_facts
 from core.render.typst import RenderError, render
 from core.resume.io import parse_doc
+from core.triage import ProfileError, load_profile
 
 _JOB_ID = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
 EXIT_CODES = {"pass": 0, "warn": 1, "fail": 2}
@@ -83,6 +84,12 @@ def build(doc_path: Path, job_id: str) -> BuildResult:
     doc_bytes = doc_path.read_bytes()
     doc = parse_doc(doc_bytes, origin=doc_path)
     facts = load_facts()
+    # The page limit is the candidate's, not the document's: a draft cannot
+    # grant itself a second page.
+    try:
+        max_pages = load_profile().resume_pages
+    except ProfileError as exc:
+        raise BuildError(str(exc)) from exc
 
     out_dir = private_dir(f"outputs/{job_id}/draft")
     # A previous build's report must never sit beside a PDF it did not judge,
@@ -100,7 +107,7 @@ def build(doc_path: Path, job_id: str) -> BuildResult:
             render(doc, staged)
         except RenderError as exc:
             raise BuildError(f"could not render {doc_path.name}: {exc}") from exc
-        report = run_gates(doc, facts, staged)
+        report = run_gates(doc, facts, staged, max_pages=max_pages)
         pdf_bytes = staged.read_bytes()
     finally:
         shutil.rmtree(staging, ignore_errors=True)

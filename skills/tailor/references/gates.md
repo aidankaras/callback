@@ -7,4 +7,4 @@
 | roundtrip | a naive ATS parser can't read back a critical field in order; warns on a skill it couldn't read |
 | hidden | text a human can't see: white or tiny text, off-page text, an unpainted rendering mode, odd Unicode, metadata |
 | skills | warns when a listed skill is backed but no grounded bullet shows it in use |
-| lints | warns on layout: a bullet over two lines, fewer than 3 or more than 6 bullets for a role, a second page, a near-empty last page |
+| lints | warns on layout: a bullet over two lines, fewer than 2 or more than 6 bullets for a role, more pages than the user's profile allows, a near-empty last page |

@@ -152,7 +152,9 @@ def _guarded(gate: GateName, run: Callable[[], tuple[Outcome, tuple[str, ...]]])
     return GateOutcome(gate, verdict, findings)
 
 
-def run_gates(doc: ResumeDoc, facts: Mapping[str, Fact], pdf_path: Path) -> GateReport:
+def run_gates(
+    doc: ResumeDoc, facts: Mapping[str, Fact], pdf_path: Path, *, max_pages: int = 1
+) -> GateReport:
     """Run every gate in `GATES` on `doc` and the PDF rendered from it."""
     try:
         grounding, grounded = _grounding(doc, facts)
@@ -182,7 +184,7 @@ def run_gates(doc: ResumeDoc, facts: Mapping[str, Fact], pdf_path: Path) -> Gate
 
     def lints() -> tuple[Outcome, tuple[str, ...]]:
         # Layout is advice: a lint can warn, never fail a document.
-        found = check_lints(doc, pdf_path)
+        found = check_lints(doc, pdf_path, max_pages=max_pages)
         return ("warn" if found else "pass"), tuple(f"{x.rule}: {x.detail}" for x in found)
 
     return GateReport(
