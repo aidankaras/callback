@@ -132,7 +132,7 @@ def facts_add(path: str, replace: bool = False) -> dict[str, object]:
     return {
         "added": added,
         "rejected": [{"id": i, "reason": r} for i, r in rejected],
-        "checks": check_facts(added) if added else {},
+        "checks": check_facts(added).problems if added else {},
     }
 
 
@@ -140,12 +140,19 @@ def facts_add(path: str, replace: bool = False) -> dict[str, object]:
 def facts_check(ids: list[str] | None = None) -> dict[str, object]:
     """What a bullet quoting each fact word for word would fail on, by fact id.
 
-    With no ids, every fact in use or waiting for an answer. An empty result
-    means every fact checked can be quoted as written.
+    With no ids, every detail and project fact in use or waiting for an
+    answer. `checked` lists the facts looked at, and `not_checked` gives the
+    reason for each named fact that never is: no problems among no facts
+    checked is not a pass.
     """
     from core.factscmd import check_facts
 
-    return {"problems": check_facts(list(ids or []))}
+    result = check_facts(list(ids or []))
+    return {
+        "problems": result.problems,
+        "checked": result.checked,
+        "not_checked": result.not_checked,
+    }
 
 
 @_tool

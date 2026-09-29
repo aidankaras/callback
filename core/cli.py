@@ -925,7 +925,7 @@ def _cmd_facts_add(args: argparse.Namespace) -> int:
     ensure_home()
     try:
         added, rejected = add_from_file(args.file, replace=args.replace)
-        problems = check_facts(added) if added else {}
+        problems = check_facts(added).problems if added else {}
     except (StoreError, OSError) as exc:
         print(f"callback facts add: {exc}", file=sys.stderr)
         return 3
@@ -943,14 +943,22 @@ def _cmd_facts_check(args: argparse.Namespace) -> int:
     from core.profile.store import StoreError
 
     try:
-        problems = check_facts(list(args.ids))
+        result = check_facts(list(args.ids))
     except (FactsError, StoreError) as exc:
         print(f"callback facts check: {exc}", file=sys.stderr)
         return 3
-    if not problems:
-        print("every fact checked can be quoted as written")
+    for fid, reason in result.not_checked.items():
+        print(f"  {fid}: not checked: {reason}")
+    count = len(result.checked)
+    if not count:
+        print("no fact was checked")
         return 0
-    _print_fact_problems(problems, to=sys.stdout)
+    noun = "fact" if count == 1 else "facts"
+    if not result.problems:
+        print(f"{count} {noun} checked: each can be quoted as written")
+        return 0
+    print(f"{count} {noun} checked, {len(result.problems)} with findings:")
+    _print_fact_problems(result.problems, to=sys.stdout)
     return 1
 
 

@@ -209,7 +209,7 @@ def test_a_fact_is_checked_against_its_own_text_before_anyone_confirms_it(
     draft than after it is confirmed."""
     add_from_file(_file(tmp_path, [SCHOOL, GPA]))
 
-    problems = check_facts([])
+    problems = check_facts([]).problems
 
     assert list(problems) == ["gpa"]
     assert "'GPA'" in problems["gpa"][0] and "entities" in problems["gpa"][0]
@@ -217,7 +217,7 @@ def test_a_fact_is_checked_against_its_own_text_before_anyone_confirms_it(
 
     fixed = {**GPA, "entities": ["GPA"]}
     add_from_file(_file(tmp_path, [fixed], "fixed.yaml"), replace=True)
-    assert check_facts([]) == {}
+    assert check_facts([]).problems == {}
 
 
 def test_a_fact_that_is_never_a_bullet_is_not_checked_as_one(tmp_path: Path) -> None:
@@ -229,8 +229,40 @@ def test_a_fact_that_is_never_a_bullet_is_not_checked_as_one(tmp_path: Path) -> 
     detail = _draft("detail", "Analyst at Harbor Lab in Boston, MA")
     add_from_file(_file(tmp_path, [contact, skill, role, SCHOOL, detail]))
 
-    assert list(check_facts([])) == ["detail"]
-    assert check_facts(["contact", "skill", "role", "school"]) == {}
+    everything = check_facts([])
+    assert list(everything.problems) == ["detail"]
+    assert everything.checked == ["detail"]
+    assert everything.not_checked == {}, "nobody asked about the others by name"
+
+
+def test_a_fact_named_and_not_checked_is_said_to_be_not_checked(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Naming a fact asks a question about it. "No findings" must mean it was
+    looked at, so a fact that is never checked is reported as exactly that."""
+    contact = {**_draft("contact", "Dana Vex, GPA Consulting LLC"), "kind": "links"}
+    web = {
+        **_draft("acme", "Acme runs on AWS and GCP"),
+        "provenance": {"source": "https://x.test", "trust": "web"},
+    }
+    clean = _draft("clean", "Wrote the runbook")
+    add_from_file(_file(tmp_path, [contact, web, clean]))
+
+    named = check_facts(["contact", "acme", "clean"])
+
+    assert named.problems == {}
+    assert named.checked == ["clean"]
+    assert list(named.not_checked) == ["contact", "acme"]
+    assert "links" in named.not_checked["contact"] and "web" in named.not_checked["acme"]
+
+    assert main(["facts", "check", "contact", "acme"]) == 0
+    out = capsys.readouterr().out
+    assert "can be quoted" not in out, "nothing was checked, so nothing was found to pass"
+    assert out.count("not checked") == 2 and "no fact was checked" in out
+
+    assert main(["facts", "check", "contact", "clean"]) == 0
+    out = capsys.readouterr().out
+    assert "1 fact checked" in out and out.count("not checked") == 1
     with pytest.raises(FactsError, match="no such fact"):
         check_facts(["zzz"])
 

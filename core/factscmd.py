@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import cast
@@ -146,15 +147,41 @@ def _unknown(ids: list[str], facts: dict[str, Fact]) -> list[str]:
 _QUOTED_BY_BULLETS = frozenset({FactKind.EXPERIENCE_DETAIL, FactKind.PROJECT})
 
 
-def check_facts(ids: list[str]) -> dict[str, list[str]]:
+@dataclass(frozen=True)
+class FactsChecked:
+    """What `check_facts` looked at, and what it found.
+
+    `problems` being empty says nothing by itself: it is what a check that
+    looked at no fact returns too. `checked` is what was looked at, and
+    `not_checked` gives the reason for each fact that was asked about by name
+    and is never checked, so "no findings" can be told from "not looked at".
+    """
+
+    problems: dict[str, list[str]]
+    checked: list[str]
+    not_checked: dict[str, str]
+
+
+def _never_checked(fact: Fact) -> str | None:
+    """Why `fact` is not checked against its own text, or None if it is."""
+    if fact.provenance.trust is Trust.WEB:
+        return "research from the web never backs a bullet"
+    if fact.kind not in _QUOTED_BY_BULLETS:
+        return f"a {fact.kind.value} fact is never quoted by a bullet"
+    return None
+
+
+def check_facts(ids: list[str]) -> FactsChecked:
     """What a bullet quoting each fact word for word would fail on, by fact id.
 
     A fact's text is grounded against the fact itself and its parent, exactly
     as `build` grounds a bullet that cites them, so a token the text states
-    and `entities` omits is found while the fact is still a draft. With no
-    `ids`, every fact in use or still waiting for an answer is checked:
-    retired and declined ones are skipped, as are web-sourced ones, which can
-    never back a bullet.
+    and `entities` omits is found while the fact is still a draft.
+
+    With no `ids`, every detail and project fact in use or still waiting for
+    an answer is checked, and the rest are passed over without comment:
+    nobody asked about them. A fact named in `ids` that is never checked is
+    reported in `not_checked` with the reason.
 
     Facts are treated as confirmed for the comparison only. Nothing is saved.
     """
@@ -162,20 +189,25 @@ def check_facts(ids: list[str]) -> dict[str, list[str]]:
     unknown = _unknown(ids, facts)
     if unknown:
         raise FactsError(f"no such fact(s): {unknown}")
-    targets = [facts[i] for i in ids] or [
-        f for f in facts.values() if f.retired_on is None and f.declined_on is None
-    ]
+    named = [facts[i] for i in dict.fromkeys(ids)]
+    targets = named or [f for f in facts.values() if f.retired_on is None and f.declined_on is None]
     problems: dict[str, list[str]] = {}
+    checked: list[str] = []
+    not_checked: dict[str, str] = {}
     for fact in targets:
-        if fact.kind not in _QUOTED_BY_BULLETS or fact.provenance.trust is Trust.WEB:
+        reason = _never_checked(fact)
+        if reason is not None:
+            if named:
+                not_checked[fact.id] = reason
             continue
         parent = facts.get(fact.parent) if fact.parent else None
         sources = [fact] if parent is None else [fact, parent]
         as_confirmed = [_confirmed(s).model_copy(update={"retired_on": None}) for s in sources]
         verdict, findings = check_bullet(fact.text, as_confirmed)
+        checked.append(fact.id)
         if verdict is Verdict.FAIL:
             problems[fact.id] = [f.detail for f in findings]
-    return problems
+    return FactsChecked(problems=problems, checked=checked, not_checked=not_checked)
 
 
 def confirm(
