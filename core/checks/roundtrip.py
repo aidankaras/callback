@@ -112,12 +112,20 @@ A value long enough to wrap across several rows is reported unrecovered,
 and that is correct, not a bug to chase away: matching only ever looks
 inside one segment at a time (see `_matches`), and a naive, position-based
 reader has no more ability to reassemble a heading split across rows than
-this gate does. A skill is the one deliberate exception, and only across
-one row boundary at a time -- see `_find_skill`'s docstring for why a
+this gate does. Two kinds of value are deliberate exceptions, each for a
+reason a heading does not share. A skill is rejoined across one row
+boundary at a time -- see `_find_skill`'s docstring for why a
 comma-delimited run tolerates being reassembled where a heading must not:
 a skills run's own structure (each item bounded by a comma the renderer
 put there) is what a naive reader can lean on that free prose has no
-equivalent of. Checked against its own render, a heading that wraps across
+equivalent of. A bullet is rejoined across the consecutive rows it
+occupies -- see `_find_bullet`: a wrapped bullet fills whole rows of its
+own with nothing from another field between them, so reading rows top to
+bottom already yields its text intact, and the layout lints accept a
+bullet of two lines, which a gate that refused every wrapped bullet would
+contradict. Measured on a three-bullet fixture (one, two and three rows):
+single-row matching recovers 22% of declared characters, all of it outside
+the two wrapped bullets. Checked against its own render, a heading that wraps across
 three rows with the location column interleaved between its fragments
 (`'Company 12 Extended International A Truly Extremely Long City Name
 Metropolitan Area, Massachusetts March 2021 - April 2022'` /
@@ -277,7 +285,8 @@ class _Declared:
     `declared_fields` ever needs it -- unlike `scope`, there is no fifth
     kind of value that could silently default into the wrong choice here,
     since every other field in this module is still `False` and always
-    will be.
+    will be. `is_bullet` selects `_find_bullet`'s row-rejoining rule on the
+    same terms, and the two are never both set.
     """
 
     field: str
@@ -286,6 +295,7 @@ class _Declared:
     scope: _Scope
     region_index: int | None = None
     is_skill: bool = False
+    is_bullet: bool = False
 
 
 def declared_fields(doc: ResumeDoc) -> list[_Declared]:
@@ -366,6 +376,7 @@ def declared_fields(doc: ResumeDoc) -> list[_Declared]:
                         critical=False,
                         scope=_Scope.ENTRY,
                         region_index=index,
+                        is_bullet=True,
                     )
                 )
             index += 1
@@ -576,6 +587,74 @@ def _find_skill(
             and f"{items[-1]} {following[0]}" == target
         ):
             return i
+    return None
+
+
+def _joined(rows: Sequence[str]) -> list[str]:
+    """Every reading of `rows` as one run of text.
+
+    Rows are joined with a space, which is where the renderer broke the line.
+    A row ending in a hyphen is also read joined to the next with nothing
+    between, because a line may break inside a hyphenated compound
+    ("month-" / "end") and the declared text has no space there; both
+    readings are offered since a trailing hyphen can equally be a dash
+    standing between two words.
+    """
+    readings = [rows[0]]
+    for row in rows[1:]:
+        spaced = [f"{r} {row}" for r in readings]
+        glued = [f"{r}{row}" for r in readings if r.endswith("-")]
+        readings = spaced + glued
+    return readings
+
+
+def _find_bullet(
+    value: str,
+    flat: list[str],
+    declared_values: Sequence[str],
+    *,
+    start: int = 0,
+    end: int | None = None,
+) -> int | None:
+    """The position of the first segment in `[start, end)` where `value`
+    begins, read either from that one segment (`_matches`, exactly as every
+    other field is) or as the whole text of that segment and the consecutive
+    segments after it.
+
+    The second reading is equality, not containment: a wrapped bullet
+    occupies entire rows, so the rows it spans, joined, are its text and
+    nothing else. That is what keeps a column layout failing -- a row split
+    into two columns comes back as two segments, the neighbouring column's
+    text lands between a bullet's fragments, and no run of consecutive
+    segments equals the bullet. It is also why this rule cannot be given to
+    a heading: a heading's row carries the location and dates as well, so
+    its fragments are never consecutive.
+
+    Rows are added only while the joined text is still shorter than the
+    value, so a search never reaches past the rows the value could occupy,
+    and never past `end`, the boundary of the entry the bullet belongs to.
+
+    What this cannot tell apart is one declared bullet from two rendered
+    ones whose texts, joined, equal it: a position-based reader has rows,
+    not bullet markers, and both read the same. The characters are on the
+    page in order either way, which is the property `char_ratio` measures.
+    """
+    target = normalize(value).casefold()
+    if not target:
+        return None
+    limit = len(flat) if end is None else end
+    for i in range(start, limit):
+        if _matches(value, flat[i], declared_values):
+            return i
+        rows = [flat[i].casefold()]
+        length = len(rows[0])
+        for j in range(i + 1, limit):
+            if length >= len(target):
+                break
+            rows.append(flat[j].casefold())
+            length += 1 + len(rows[-1])
+            if target in _joined(rows):
+                return i
     return None
 
 
@@ -803,6 +882,8 @@ def check_roundtrip(doc: ResumeDoc, pdf_path: Path) -> RoundTripResult:
             if end is None:
                 end = _skills_region_end(doc, d.region_index, positions, anchors)
             positions[d.field] = _find_skill(d.value, flat, start=start, end=end)
+        elif d.is_bullet:
+            positions[d.field] = _find_bullet(d.value, flat, declared_values, start=start, end=end)
         else:
             positions[d.field] = _find(d.value, flat, declared_values, start=start, end=end)
 
