@@ -319,6 +319,62 @@ def test_an_uncited_course_detail_does_not_back_a_skill() -> None:
     assert "skill 'R' is backed by no confirmed fact" not in findings_for(cited, facts)
 
 
+def test_a_roles_own_entities_do_not_back_a_skill() -> None:
+    """`role` names its client, Goldman Sachs, which is no skill.
+    Mutation: let the work fact itself back -- this fails."""
+    assert "Goldman Sachs" in ROLE.entities
+    assert findings_for(doc(skills=["Goldman Sachs"])) == (
+        "skill 'Goldman Sachs' is backed by no confirmed fact",
+    )
+
+
+@pytest.mark.parametrize(
+    "extra",
+    [
+        # A record that the skill is missing.
+        {
+            "ab": fact(
+                "ab",
+                "No Terraform here",
+                kind=FactKind.ABSENT,
+                parent="role",
+                entities=["Terraform"],
+            )
+        },
+        # A links fact filed under a role.
+        {
+            "ln": fact(
+                "ln",
+                "Lead: Terraform Jones",
+                kind=FactKind.LINKS,
+                parent="role",
+                entities=["Terraform"],
+            )
+        },
+        # A course detail under a degree that is filed under a role.
+        {
+            "degree": DEGREE.model_copy(update={"parent": "role"}),
+            "ab": fact(
+                "ab",
+                "Coursework: Terraform",
+                kind=FactKind.EXPERIENCE_DETAIL,
+                parent="degree",
+                entities=["Terraform"],
+            ),
+        },
+    ],
+    ids=["absent", "links", "course-under-a-reparented-degree"],
+)
+def test_only_a_chain_of_details_reaches_a_role(extra: dict[str, Fact]) -> None:
+    """Mutation: accept any kind under a role, checking only the ancestor --
+    every case fails."""
+    facts = {**FACTS, **extra}
+    assert all(f.selectable() for f in extra.values())
+    assert findings_for(doc(skills=["Terraform"]), facts) == (
+        "skill 'Terraform' is backed by no confirmed fact",
+    )
+
+
 def test_a_skill_fact_that_is_unconfirmed_does_not_back_a_skill() -> None:
     imported = SKILLS.model_copy(update={"provenance": IMPORTED})
     assert findings_for(doc(skills=["Kubernetes"]), {**FACTS, "skills": imported}) != ()

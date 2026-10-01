@@ -30,17 +30,25 @@ as "and". A title is rendered in bold capitals, and "Experience - Forbes 30
 Under 30" is a claim.
 
 **Skills**: every listed skill must be backed by a confirmed fact -- a
-`skill` fact naming it, an entity of a fact a bullet cites, or an entity of a
-confirmed experience or project or of a detail under one, cited or not --
-compared through the alias table, so "k8s" and "Kubernetes" are one skill.
-The last route exists so the skills line does not depend on what the bullets
-happen to quote: requiring a citation made the only way to list a tool a
-bullet written to name it. It stops at work, not everything confirmed: a
-course detail's entities are what a course covered ("Data Science in R"),
-and an honour's or a mentor's are names, so those back a skill only where a
-bullet visibly cites them. A wrongly confirmed fact now reaches the skills
-line without appearing in a bullet; retiring it is the remedy, and a retired
-fact backs nothing.
+`skill` fact naming it, an entity of a fact a bullet cites, or an entity of
+a detail of a role or project, cited or not -- compared through the alias
+table, so "k8s" and "Kubernetes" are one skill. The last route exists so the
+skills line does not depend on what the bullets happen to quote: requiring a
+citation made the only way to list a tool a bullet written to name it.
+
+That route takes an `experience_detail` whose chain of parents reaches a
+confirmed experience or project through details only. Not the role or
+project itself, whose entities are an employer or a client; not an absent or
+declined fact, which records the skill as missing; not a course detail,
+whose entities are what a course covered ("Data Science in R"), even when
+its degree is filed under a role. Those back a skill only where a bullet
+visibly cites them.
+
+It rests on the premise `skills_shown_by_entries` already makes: a detail's
+entities record what the candidate used. A detail that names something else
+-- the company's own platforms, a mentor -- breaks that premise silently, and
+the remedy is to correct its entities. A fact that is false is retired, and
+a retired fact, or a detail under a retired role, backs nothing.
 
 Every rule fails closed. Only confirmed facts count, matching `Fact.selectable`.
 """
@@ -229,6 +237,17 @@ def _lineage(fid: str, confirmed: Mapping[str, Fact]) -> list[str]:
 _WORK_KINDS = frozenset({FactKind.EXPERIENCE, FactKind.PROJECT})
 
 
+def _detail_of_work(fid: str, confirmed: Mapping[str, Fact]) -> bool:
+    """Whether `fid` is a detail reaching a role or project through details only."""
+    for ancestor in _lineage(fid, confirmed):
+        kind = confirmed[ancestor].kind
+        if kind in _WORK_KINDS:
+            return ancestor != fid
+        if kind is not FactKind.EXPERIENCE_DETAIL:
+            return False
+    return False
+
+
 def _skill_backing(doc: ResumeDoc, facts: Mapping[str, Fact]) -> set[str]:
     """Canonical forms of every skill a confirmed fact supports."""
     confirmed = {fid: f for fid, f in facts.items() if f.selectable()}
@@ -237,7 +256,7 @@ def _skill_backing(doc: ResumeDoc, facts: Mapping[str, Fact]) -> set[str]:
         if f.kind is FactKind.SKILL:
             backed.add(_canon(f.text))
             backed |= {_canon(e) for e in f.entities}
-        elif any(confirmed[a].kind in _WORK_KINDS for a in _lineage(fid, confirmed)):
+        elif _detail_of_work(fid, confirmed):
             backed |= {_canon(e) for e in f.entities}
     for section in doc.sections:
         for entry in section.entries:
@@ -266,9 +285,10 @@ def skills_shown_by_entries(
     only where an entry cites it.
 
     Entities only, never a fact's text: entities are where a fact records what
-    was used, and its text may name a tool it moved away from. A fact kept on
-    its own, under no entry, shows a skill nowhere on the page however true it
-    is, so it backs a listed skill (`_skill_backing`) without appearing here.
+    was used, and its text may name a tool it moved away from. A skill fact,
+    or a detail of a role that is not on the page, shows a skill nowhere on the
+    page however true it is, so it backs a listed skill (`_skill_backing`)
+    without appearing here.
     """
     confirmed = {fid: f for fid, f in facts.items() if f.selectable()}
 
