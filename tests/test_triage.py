@@ -121,6 +121,9 @@ def test_several_years_of_experience_is_a_stretch() -> None:
         ("At least 0-2 years experience in trading or trade support role", []),
         ("1\u20133 years of experience with SQL.", []),
         ("2-3 years of experience in research.", [("experience", "stretch")]),
+        ("0 to 2 years of experience.", []),
+        ("Between 1 and 3 years of experience.", []),
+        ("0\u20142 years of experience.", []),
     ],
 )
 def test_a_range_of_years_counts_from_its_low_end(
@@ -135,40 +138,82 @@ def test_a_range_of_years_counts_from_its_low_end(
     [
         "Currently pursuing a bachelor\u2019s, master\u2019s, or PhD in a quantitative field.",
         "Are pursuing a Bachelor\u2019s, Master\u2019s or PhD in a technical discipline.",
+        "Currently pursuing a BS, MS, or PhD in Computer Science",
+        "Currently pursuing a BSc, MSc or PhD in Computer Science",
+        "Must be currently enrolled as a junior, senior, or PhD student",
+        "Current students (BS/MS/PhD) welcome",
+        "Currently enrolled in a four-year university or PhD program",
         "We welcome PhD students and undergraduates.",
     ],
 )
 def test_a_degree_sentence_naming_the_candidates_level_admits_them(text: str) -> None:
-    """Mutation: flag any sentence naming a graduate degree -- these fail."""
+    """Mutation: drop the year-of-study and BS/BSc forms -- several of these
+    become findings."""
     assert kinds(text) == []
+
+
+def test_a_sentence_that_admits_the_candidate_clears_one_that_mentions_phds() -> None:
+    """Mutation: keep the first degree finding -- the team sentence wins."""
+    text = (
+        "You'll join our team of PhD students and engineers. "
+        "Requirements: Currently pursuing a Bachelor's, Master's or PhD in CS."
+    )
+    assert kinds(text) == []
+
+
+def test_a_year_of_study_word_alone_admits_no_one() -> None:
+    """ "senior" in a sentence about colleagues is not a degree list.
+    Mutation: let a sentence naming only the candidate's level admit --
+    the PhD finding is cleared."""
+    text = "Open to current PhD students only. You will work with senior researchers."
+    assert kinds(text) == [("degree", "knockout")]
 
 
 @pytest.mark.parametrize(
     "text",
     [
-        "We are seeking exceptional PhD candidates to join our Quant Resource team.",
-        "Students enrolled in a PhD program in machine learning, computer science, or statistics.",
-        "Currently enrolled in a Master\u2019s or PhD program.",
+        "Open to current PhD students only.",
+        "Must be enrolled in a PhD program.",
+        "Only Ph.D. students in Computer Science are eligible.",
+        "Candidates must be currently enrolled in a Master\u2019s or PhD program.",
     ],
 )
-def test_a_role_for_current_graduate_students_is_a_knockout(text: str) -> None:
-    """Mutation: drop the student-of check -- these become stretches."""
+def test_a_stated_requirement_for_current_graduate_students_is_a_knockout(text: str) -> None:
+    """Mutation: drop the requirement check -- the mentions below become knockouts."""
     assert kinds(text) == [("degree", "knockout")]
     assert kinds(text, US_JUNIOR.model_copy(update={"degree": "phd"})) == []
 
 
 @pytest.mark.parametrize(
-    "text",
+    ("text", "reason"),
     [
-        "Master's degree or equivalent experience preferred; candidates should be curious.",
-        "PhD preferred.",
-        "M.S. or PhD in Statistics.",
-        # Hedged: a description of who usually applies, not a requirement.
-        "Our typical intern candidates come from quantitative PhD programs of top US universities.",
+        # Mentions, refusals and preferences: a knockout would hide the posting.
+        ("Join our team of PhD students and researchers working on LLMs", "students"),
+        ("This role is not open to current PhD students", "students"),
+        ("We are not looking for PhD candidates for this role", "students"),
+        ("Currently enrolled; PhD students not eligible.", "students"),
+        ("PhD students are encouraged to apply.", "students"),
+        ("Ideal for students currently pursuing a PhD only", "students"),
+        ("We are seeking exceptional PhD candidates to join our Quant Resource team.", "students"),
+        ("Students enrolled in a PhD program in machine learning or statistics.", "students"),
+        ("Our typical intern candidates come from quantitative PhD programs.", "students"),
+        (
+            "Master's degree or equivalent experience preferred; candidates should be curious.",
+            "degree",
+        ),
+        ("PhD preferred.", "degree"),
+        ("M.S. or PhD in Statistics.", "degree"),
     ],
 )
-def test_a_graduate_degree_asked_of_a_holder_stays_a_stretch(text: str) -> None:
-    assert kinds(text) == [("degree", "stretch")]
+def test_a_graduate_degree_that_is_not_a_stated_requirement_is_a_stretch(
+    text: str, reason: str
+) -> None:
+    """Mutation: drop the negation or the hedge check -- a refusal or a
+    preference that also says "only" or "eligible" becomes a knockout."""
+    found = check_eligibility(text, US_JUNIOR).findings
+    assert [(f.rule, f.level) for f in found] == [("degree", "stretch")]
+    expected = "for current phd students" if reason == "students" else "asks for a graduate degree"
+    assert found[0].reason == expected
 
 
 def test_a_bare_citizen_profile_is_asked_not_knocked_out() -> None:

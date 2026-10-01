@@ -13,12 +13,15 @@ has one of three levels:
   reachable, and worth knowing before spending effort.
 
 A degree sentence that names the candidate's own level among others
-("pursuing a Bachelor's, Master's or PhD") admits them and is no finding.
-One that names only higher levels and asks for a current student of them
-("PhD candidates", "enrolled in a PhD program") is a knockout: no one
-becomes a PhD student by the start date. Only higher levels otherwise
-("Master's preferred"), or any hedged sentence ("our typical interns
-come from PhD programs"), stays a stretch.
+("pursuing a BS, MS or PhD", "juniors, seniors or PhD students") admits
+them, and clears any degree finding from another sentence: postings also
+mention degrees in passing ("join our team of PhD students"). One naming
+only higher levels is a stretch, with its own reason when it is about
+current students of them ("PhD candidates"). It is a knockout only when it
+also states a requirement ("must", "only", "eligible") with no negation and
+no hedge ("Open to current PhD students only"): a knockout hides a posting,
+so a mention, a refusal ("not open to PhD students") or a preference must
+never be read as one.
 
 The rules read negation: "we do sponsor visas" is not a refusal, and on a
 live board it was the only sponsorship sentence present. This is advice.
@@ -31,9 +34,9 @@ posting, backed by the candidate's confirmed facts, so it is a signal, not a
 judgement of fit; the skill weighs the rest. For ranking it is shrunk
 toward zero by `COVERAGE_PRIOR` phantom technologies the candidate lacks:
 most postings name zero to two recognised technologies, so a plain ratio put
-every posting that named one the candidate has at a perfect score, and 67
-of 169 stored postings tied at the top. Shrunk, "4 of 4" (0.67) outranks
-"1 of 1" (0.33).
+every posting that named one the candidate has at a perfect score, and on a
+real board most of the list tied at the top. Shrunk, "4 of 4" (0.67)
+outranks "1 of 1" (0.33).
 """
 
 from __future__ import annotations
@@ -98,26 +101,37 @@ _BETWEEN = re.compile(r"\bbetween\b", re.IGNORECASE)
 _LATEST = re.compile(r"\b(?:by|before|no later than|prior to|on or before)\b", re.IGNORECASE)
 _EARLIEST = re.compile(r"\b(?:after|on or after|from|starting|since)\b", re.IGNORECASE)
 _YEAR = re.compile(r"\b(20\d\d)\b")
+# Year-of-study words count as undergraduate: "juniors, seniors or PhD
+# students" admits a junior. Matching one by accident only ever admits.
 _DEGREE_LEVELS: dict[DegreeLevel, re.Pattern[str]] = {
-    "bachelor": re.compile(r"\b(?:bachelor|undergrad)", re.I),
-    "master": re.compile(r"\bmaster[\u2019']?s\b|\bm\.?s\.?(?=/|\s+or)|\bgraduate degree\b", re.I),
+    "bachelor": re.compile(
+        r"\b(?:bachelor|undergrad|b\.?\s?sc?\b|juniors?\b|seniors?\b|college|four-year|university)",
+        re.I,
+    ),
+    "master": re.compile(
+        r"\bmaster[\u2019']?s\b|\bm\.?\s?sc\b|\bm\.?s\.?(?=/|,|\s+or|\s+students?)"
+        r"|\bgraduate degree\b",
+        re.I,
+    ),
     "phd": re.compile(r"\bph\.?\s?d\b", re.I),
 }
 # A current student of a degree, not a holder of one: "enrolled in a PhD
-# program", "PhD candidates". Adjacent to the degree, so a later "candidates
-# should..." in the same sentence does not count.
+# program", "PhD candidates", each adjacent to the degree.
 _STUDENT_OF = re.compile(
-    r"\b(?:enrolled in|pursuing|current(?:ly)?)\b[^.!?]{0,40}?\b(?:ph\.?\s?d|master)"
-    r"|\b(?:ph\.?\s?d|master[\u2019']?s)\s+(?:candidates?|students?|program)",
+    r"\b(?:enrolled in|pursuing)\s+(?:an?\s+)?(?:ph\.?\s?d|master)"
+    r"|\b(?:ph\.?\s?d\.?|master[\u2019']?s)\s+(?:candidates?|students?|programs?)",
     re.I,
 )
-# A preference, not a requirement: a hedged sentence is never a knockout.
+_REQUIRED = re.compile(r"\b(?:must|required|only|eligible)\b", re.I)
+_NEGATED = re.compile(r"\b(?:not|no|never|ineligible)\b", re.I)
 _HEDGED = re.compile(
-    r"\b(?:typical(?:ly)?|usually|often|preferred|ideally|a plus|nice to have)\b", re.I
+    r"\b(?:typical(?:ly)?|usually|often|preferred|preferably|ideal(?:ly)?|a plus"
+    r"|nice to have|encouraged|welcome)\b",
+    re.I,
 )
 # A range counts from its low end: "0-2 years" admits someone with none.
 _YEARS = re.compile(
-    r"\b(\d{1,2})(?:\s*[-\u2013]\s*\d{1,2})?\+?\s*(?:or more\s+)?years?\b"
+    r"\b(\d{1,2})(?:\s*(?:[-\u2013\u2014]|to|and)\s*\d{1,2})?\+?\s*(?:or more\s+)?years?\b"
     r"[^.!?]{0,40}\bexperience\b",
     re.I,
 )
@@ -261,6 +275,7 @@ def check_eligibility(text: str, profile: Profile) -> Eligibility:
     # A posting that says it sponsors and also that it cannot always is a
     # question for someone who needs sponsorship, not a refusal.
     offers = _OFFERS_SPONSORSHIP.search(normalised) is not None
+    admitted = False
     for sentence in (s for s in _SENTENCE_BREAK.split(normalised) if s.strip()):
         if _refuses(sentence):
             needs = auth is not None and _NEEDS_SPONSORSHIP.search(auth) and not _is_citizen(auth)
@@ -309,18 +324,27 @@ def check_eligibility(text: str, profile: Profile) -> Eligibility:
         named = [level for level, pattern in _DEGREE_LEVELS.items() if pattern.search(sentence)]
         my_rank = _DEGREE_RANK[profile.degree] if profile.degree is not None else None
         above = [level for level in named if my_rank is None or _DEGREE_RANK[level] > my_rank]
-        if named and above == named and above != ["bachelor"]:
-            if (
-                my_rank is not None
-                and _STUDENT_OF.search(sentence)
+        if my_rank is not None and above and len(above) < len(named):
+            admitted = True
+        elif above and above == named and above != ["bachelor"]:
+            students = _STUDENT_OF.search(sentence) is not None
+            required = (
+                _REQUIRED.search(sentence) is not None
+                and not _NEGATED.search(sentence)
                 and not _HEDGED.search(sentence)
-            ):
-                add("degree", "knockout", sentence, f"for current {' or '.join(above)} students")
+            )
+            who = f"for current {' or '.join(above)} students"
+            if my_rank is not None and students and required:
+                add("degree", "knockout", sentence, who)
             else:
-                add("degree", "stretch", sentence, "asks for a graduate degree")
+                add(
+                    "degree", "stretch", sentence, who if students else "asks for a graduate degree"
+                )
         years = [int(y) for y in _YEARS.findall(sentence)]
         if years and max(years) >= STRETCH_YEARS:
             add("experience", "stretch", sentence, f"asks for {max(years)}+ years of experience")
+    if admitted:
+        findings = [f for f in findings if f.rule != "degree"]
     return Eligibility(findings=tuple(findings))
 
 

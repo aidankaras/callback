@@ -485,7 +485,11 @@ def void_application(job_id: str, *, now: datetime) -> None:
     keeps the `apply` entry and gains a `void` one, so the history survives.
 
     Refused once an outcome is recorded: a reply means it was submitted.
+    Nothing else can tell a silent submitted application from an unsent one,
+    so the candidate's word decides, and a voided application stops counting
+    toward the volume rules.
     """
+    _aware(now)
     applications = load_applications()
     match = [a for a in applications if a.job_id == job_id]
     if not match:
@@ -498,7 +502,13 @@ def void_application(job_id: str, *, now: datetime) -> None:
         record_event({"event": "void", "job_id": job_id, "at": now.isoformat()})
     except (OSError, ValueError, KeyError) as exc:
         raise ApplyError(f"cannot record the void in the ledger: {exc}") from exc
-    _save([a for a in applications if a.job_id != job_id])
+    try:
+        _save([a for a in applications if a.job_id != job_id])
+    except OSError as exc:
+        raise ApplyError(
+            f"the ledger records the void but the record could not be removed: {exc}; "
+            "run `callback void` again"
+        ) from exc
 
 
 def record_outcome(job_id: str, kind: OutcomeKind, *, now: datetime) -> None:

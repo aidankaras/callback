@@ -771,7 +771,7 @@ def _cmd_void(args: argparse.Namespace) -> int:
 
     try:
         void_application(args.job, now=datetime.now(tz=UTC))
-    except ApplyError as exc:
+    except (ApplyError, OSError) as exc:
         print(f"callback void: {exc}", file=sys.stderr)
         return 3
     return 0

@@ -198,6 +198,23 @@ def test_an_application_with_an_outcome_cannot_be_voided(home: Path) -> None:
     assert main(["void", "acme-ml"]) == 3
 
 
+def test_a_void_whose_save_fails_says_so(home: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Mutation: let the OSError escape -- the CLI exits with a traceback."""
+    import core.apply
+
+    _built(home, "acme-ml")
+    apply(_target(), now=NOW)
+
+    def full(_applications: object) -> None:
+        raise OSError(28, "No space left on device")
+
+    monkeypatch.setattr(core.apply, "_save", full)
+    with pytest.raises(ApplyError, match="ledger records the void"):
+        void_application("acme-ml", now=NOW + timedelta(hours=1))
+    with pytest.raises(ValueError, match="timezone"):
+        void_application("acme-ml", now=datetime(2026, 10, 1, 18, 0))  # noqa: DTZ001
+
+
 def test_a_source_must_be_one_of_the_known_channels() -> None:
     with pytest.raises(ValueError, match="source"):
         _target(source="scraper")
