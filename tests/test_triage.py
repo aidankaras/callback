@@ -226,6 +226,18 @@ def test_ranking_puts_knockouts_last_and_prefers_fresh_postings_you_can_evidence
     assert ranked[2].coverage == ([], ["Kubernetes", "PyTorch"])
 
 
+def test_ranking_prefers_more_evidence_over_a_perfect_ratio_on_one() -> None:
+    """Both postings are fully evidenced; one names two technologies, one names
+    one. Mutation: set `COVERAGE_PRIOR` to 0 -- they tie, and input order wins."""
+    postings = [
+        _posting("one", "Data Science Intern", "Python.", days_old=1),
+        _posting("two", "Data Science Intern", "Python and SQL.", days_old=1),
+    ]
+    ranked = rank(postings, US_JUNIOR, FACTS, now=NOW)
+    assert [r.posting.id for r in ranked] == ["two", "one"]
+    assert ranked[0].score > ranked[1].score
+
+
 def test_the_triage_commands(
     tmp_path: object, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:

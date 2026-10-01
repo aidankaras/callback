@@ -28,7 +28,12 @@ Nothing here gates a document.
 candidate can evidence, and by how fresh they are, with knockouts last.
 Coverage counts only technologies the alias table recognises in the
 posting, backed by the candidate's confirmed facts, so it is a signal, not a
-judgement of fit; the skill weighs the rest.
+judgement of fit; the skill weighs the rest. For ranking it is shrunk
+toward zero by `COVERAGE_PRIOR` phantom technologies the candidate lacks:
+most postings name zero to two recognised technologies, so a plain ratio put
+every posting that named one the candidate has at a perfect score, and 67
+of 169 stored postings tied at the top. Shrunk, "4 of 4" (0.67) outranks
+"1 of 1" (0.33).
 """
 
 from __future__ import annotations
@@ -54,6 +59,7 @@ Level = Literal["knockout", "unknown", "stretch"]
 DegreeLevel = Literal["high school", "associate", "bachelor", "master", "phd"]
 FRESH_DAYS = 30
 STRETCH_YEARS = 2
+COVERAGE_PRIOR = 2
 
 # A sentence ends at a stop followed by a capital, or at a line break, so an
 # abbreviation such as "U.S." does not split one; "U.S." is also folded to
@@ -342,7 +348,7 @@ def rank(
         asked = _technologies(posting.text)
         have = sorted(asked & evidenced)
         missing = sorted(asked - evidenced)
-        coverage = len(have) / len(asked) if asked else 0.0
+        coverage = len(have) / (len(asked) + COVERAGE_PRIOR)
         age = max(0, (now - posting.first_seen).days)
         freshness = max(0.0, 1 - age / FRESH_DAYS)
         score = 0.6 * coverage + 0.4 * freshness
