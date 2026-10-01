@@ -195,6 +195,10 @@ def build_parser() -> argparse.ArgumentParser:
     )
     outcome.set_defaults(handler=_cmd_outcome)
 
+    void = sub.add_parser("void", help="remove the record of an application never submitted")
+    void.add_argument("job")
+    void.set_defaults(handler=_cmd_void)
+
     applications = sub.add_parser("applications", help="list recorded applications")
     applications.set_defaults(handler=_cmd_applications)
 
@@ -756,6 +760,19 @@ def _cmd_outcome(args: argparse.Namespace) -> int:
         record_outcome(args.job, args.kind, now=datetime.now(tz=UTC))
     except ApplyError as exc:
         print(f"callback outcome: {exc}", file=sys.stderr)
+        return 3
+    return 0
+
+
+def _cmd_void(args: argparse.Namespace) -> int:
+    from datetime import UTC, datetime
+
+    from core.apply import ApplyError, void_application
+
+    try:
+        void_application(args.job, now=datetime.now(tz=UTC))
+    except ApplyError as exc:
+        print(f"callback void: {exc}", file=sys.stderr)
         return 3
     return 0
 

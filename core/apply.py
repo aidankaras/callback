@@ -474,6 +474,33 @@ def apply(
     return packet
 
 
+def void_application(job_id: str, *, now: datetime) -> None:
+    """Remove the record of an application that was never submitted.
+
+    `apply` records the packet when it is handed over, before the candidate
+    submits it; a posting that closes in between leaves a record of an
+    application nobody received, which `withdrew` would still count in the
+    funnel and the volume rules. Removing the record is what keeps every
+    reader of it correct without each one learning to skip it. The ledger
+    keeps the `apply` entry and gains a `void` one, so the history survives.
+
+    Refused once an outcome is recorded: a reply means it was submitted.
+    """
+    applications = load_applications()
+    match = [a for a in applications if a.job_id == job_id]
+    if not match:
+        raise ApplyError(f"no application recorded for {job_id!r}")
+    if match[0].outcomes:
+        raise ApplyError(
+            f"{job_id!r} has recorded outcomes, so it was submitted; use `outcome withdrew`"
+        )
+    try:
+        record_event({"event": "void", "job_id": job_id, "at": now.isoformat()})
+    except (OSError, ValueError, KeyError) as exc:
+        raise ApplyError(f"cannot record the void in the ledger: {exc}") from exc
+    _save([a for a in applications if a.job_id != job_id])
+
+
 def record_outcome(job_id: str, kind: OutcomeKind, *, now: datetime) -> None:
     """Record what happened to the application for `job_id`."""
     applications = load_applications()
