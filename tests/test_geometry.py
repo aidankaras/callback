@@ -10,13 +10,21 @@ either.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import pytest
 
 from core.profile.models import Identity
-from core.render.geometry import Line, Word, bullet_blocks, extract_lines, page_fill
-from core.render.typst import render
+from core.render.geometry import (
+    TEMPLATE_Y_MARGIN,
+    Line,
+    Word,
+    bullet_blocks,
+    extract_lines,
+    page_fill,
+)
+from core.render.typst import DEFAULT_FONT, REPO_ROOT, compile_source, render
 from core.resume.models import Bullet, Entry, ResumeDoc, Section
 
 LONG = (
@@ -57,19 +65,35 @@ def pdf(tmp_path_factory: pytest.TempPathFactory) -> Path:
 
 
 @pytest.mark.slow
-def test_mixed_style_runs_are_one_line(pdf: Path) -> None:
-    """The heading (bold, default size) and its right-aligned date/location
-    run (9pt) share a baseline but land at slightly different `top`
-    values because of font-metric differences between sizes. Rounding
-    those tops to one decimal is exactly the failure mode this module's
-    docstring warns about — it would split this single visual line into
-    two. Mutation: setting `tolerance_ratio=0.0` on this call reproduces
-    that split and fails the second assertion below.
+def test_mixed_size_runs_are_one_line(tmp_path: Path) -> None:
+    """A bold 10.5pt heading and a 9pt right-hand run share a baseline but
+    land 0.28pt apart in `top`, because the two sizes have different ascents.
+    Clustering on exact (or rounded) tops splits that one visual line in two.
+
+    The template no longer sets two sizes on one row, so this builds the row
+    directly; any template that brings one back is covered. The premise is
+    asserted first: with no tolerance, the row does split. Mutation: default
+    `tolerance_ratio` to 0.0 in `extract_lines` -- this fails.
     """
-    lines = extract_lines(pdf)
-    heading = [ln for ln in lines if "Northwind" in ln.text]
-    assert len(heading) == 1, f"employer/location split across lines: {[h.text for h in heading]}"
-    assert "Boston, MA" in heading[0].text
+    out = tmp_path / "mixed.pdf"
+    compile_source(
+        '#set page(paper: "us-letter")\n'
+        f'#set text(font: "{DEFAULT_FONT}", size: 10.5pt)\n'
+        '#grid(columns: (1fr, auto), text(weight: "bold")[Northwind Analytics],'
+        " text(size: 9pt)[Boston, MA])\n",
+        out,
+    )
+    assert len(extract_lines(out, tolerance_ratio=0.0)) == 2, "fixture no longer splits"
+
+    assert [ln.text for ln in extract_lines(out)] == ["Northwind Analytics Boston, MA"]
+
+
+@pytest.mark.slow
+def test_a_two_row_header_is_two_lines(pdf: Path) -> None:
+    """Employer and dates on one row, title and place on the next."""
+    texts = [ln.text for ln in extract_lines(pdf)]
+    assert "Northwind Analytics Jun 2024 \u2013 Aug 2025" in texts, texts
+    assert "Data Engineer Boston, MA" in texts, texts
 
 
 @pytest.mark.slow
@@ -88,34 +112,34 @@ def test_bullet_blocks_count_their_own_lines(pdf: Path) -> None:
 
 @pytest.mark.slow
 def test_last_line_words_support_widow_detection(pdf: Path) -> None:
-    """The long bullet's wrapped second line reads "teams and their
-    release calendars" against the current render — five words — so the
+    """The long bullet's wrapped second line reads "separate teams and their
+    release calendars" against the current render — six words — so the
     exact count is asserted rather than a `>= 1` bound: a bound that
     loose would pass just as well if `last_line_words` indexed the
-    wrong line. Mutation: indexing `self.lines[0]` (the 17-word first
+    wrong line. Mutation: indexing `self.lines[0]` (the 18-word first
     line) instead of `self.lines[-1]` fails this exact-value assertion,
     where it would not have failed a `>= 1` check.
 
-    This 5 is a measured golden, not an invariant. Re-baseline it only after
+    This 6 is a measured golden, not an invariant. Re-baseline it only after
     inspecting the rendered PDF and confirming the new wrap point is
     correct — never by loosening it back toward a bound, which would restore
     exactly the unfalsifiable check this replaced.
     """
     blocks = bullet_blocks(extract_lines(pdf))
-    assert blocks[1].last_line_words == 5
+    assert blocks[1].last_line_words == 6
 
 
 @pytest.mark.slow
 def test_page_fill_is_a_fraction(pdf: Path) -> None:
     """A loose `0 < fill < 1` bound would pass even if `usable` were
     computed from the full page height instead of the margin-trimmed
-    one: on this fixture that wrong denominator gives 0.1948, still
+    one: on this fixture that wrong denominator gives 0.1571, still
     inside `(0, 1)`. Measuring the real render puts the correct fraction
-    at 0.2142 (`(bottom - top) / (792 - 72)` in Typst points for a
-    US-letter page with the template's 0.5in y-margins), so the interval
-    below is tight enough to separate the two. Mutation: dropping the
-    `2 * 36.0` margin subtraction in `page_fill` reliably lands outside
-    this range.
+    at 0.1711 (`(bottom - top) / (792 - 64.8)` in Typst points for a
+    US-letter page with the template's 0.45in y-margins), and a stale
+    0.5in margin gives 0.1728, so the interval below separates all three.
+    Mutation: dropping the margin subtraction in `page_fill`, or setting
+    `TEMPLATE_Y_MARGIN` back to 36.0, lands outside this range.
 
     This interval is a measured golden, not an invariant. Re-baseline it
     only after inspecting the rendered PDF and confirming the new fill is
@@ -124,7 +148,16 @@ def test_page_fill_is_a_fraction(pdf: Path) -> None:
     """
     fills = page_fill(pdf)
     assert len(fills) == 1
-    assert 0.20 < fills[0] < 0.23
+    assert 0.170 < fills[0] < 0.172
+
+
+def test_page_fill_margin_matches_the_template() -> None:
+    """`page_fill` cannot read margins from a PDF, so it carries a copy of the
+    template's. Mutation: change the template's y margin -- this fails."""
+    template = (REPO_ROOT / "templates" / "resume.typ").read_text()
+    match = re.search(r"set page\([^)]*margin: \(x: [\d.]+in, y: ([\d.]+)in\)", template)
+    assert match, "the template's page margin is no longer written as this test expects"
+    assert float(match.group(1)) * 72 == pytest.approx(TEMPLATE_Y_MARGIN)
 
 
 @pytest.mark.slow

@@ -217,14 +217,18 @@ def bullet_blocks(
     return blocks
 
 
+# The template's top and bottom page margin, in points (0.45in).
+TEMPLATE_Y_MARGIN = 0.45 * 72
+
+
 def page_fill(pdf_path: Path) -> list[float]:
     """The fraction of each page's usable vertical space that carries text.
 
-    "Usable" excludes a fixed 0.5in margin (36pt) top and bottom, matching
-    this project's own resume template (`set page(margin: (x: 0.6in, y:
-    0.5in))` in `templates/resume.typ`); it is not read from the PDF's own
-    page geometry, so a template that changes its margins would silently
-    change what "usable" means here without this function noticing. Pages
+    "Usable" excludes `TEMPLATE_Y_MARGIN` top and bottom, the template's own
+    `set page(margin: (..., y: 0.45in))`. A PDF does not record its margins,
+    so this is a copy, kept in step by
+    `tests/test_geometry.py::test_page_fill_margin_matches_the_template`:
+    when the copy went stale once, a full page measured 1.003. Pages
     with no extracted words fill 0.0 rather than raising, since an empty
     page is a legitimate (if unusual) input, not an error.
     """
@@ -237,6 +241,6 @@ def page_fill(pdf_path: Path) -> list[float]:
                 continue
             top = min(float(w["top"]) for w in words)
             bottom = max(float(w["bottom"]) for w in words)
-            usable = float(page.height) - 2 * 36.0
+            usable = float(page.height) - 2 * TEMPLATE_Y_MARGIN
             fills.append((bottom - top) / usable)
     return fills
