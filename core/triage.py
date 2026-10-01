@@ -12,6 +12,14 @@ has one of three levels:
 - `stretch` -- a graduate degree or several years of experience asked for;
   reachable, and worth knowing before spending effort.
 
+A degree sentence that names the candidate's own level among others
+("pursuing a Bachelor's, Master's or PhD") admits them and is no finding.
+One that names only higher levels and asks for a current student of them
+("PhD candidates", "enrolled in a PhD program") is a knockout: no one
+becomes a PhD student by the start date. Only higher levels otherwise
+("Master's preferred"), or any hedged sentence ("our typical interns
+come from PhD programs"), stays a stretch.
+
 The rules read negation: "we do sponsor visas" is not a refusal, and on a
 live board it was the only sponsorship sentence present. This is advice.
 Nothing here gates a document.
@@ -84,8 +92,29 @@ _BETWEEN = re.compile(r"\bbetween\b", re.IGNORECASE)
 _LATEST = re.compile(r"\b(?:by|before|no later than|prior to|on or before)\b", re.IGNORECASE)
 _EARLIEST = re.compile(r"\b(?:after|on or after|from|starting|since)\b", re.IGNORECASE)
 _YEAR = re.compile(r"\b(20\d\d)\b")
-_GRAD_DEGREE = re.compile(r"\b(?:ph\.?d|master'?s|m\.?s\.?(?=/|\s+or)|graduate degree)\b", re.I)
-_YEARS = re.compile(r"\b(\d{1,2})\+?\s*(?:or more\s+)?years?\b[^.!?]{0,40}\bexperience\b", re.I)
+_DEGREE_LEVELS: dict[DegreeLevel, re.Pattern[str]] = {
+    "bachelor": re.compile(r"\b(?:bachelor|undergrad)", re.I),
+    "master": re.compile(r"\bmaster[\u2019']?s\b|\bm\.?s\.?(?=/|\s+or)|\bgraduate degree\b", re.I),
+    "phd": re.compile(r"\bph\.?\s?d\b", re.I),
+}
+# A current student of a degree, not a holder of one: "enrolled in a PhD
+# program", "PhD candidates". Adjacent to the degree, so a later "candidates
+# should..." in the same sentence does not count.
+_STUDENT_OF = re.compile(
+    r"\b(?:enrolled in|pursuing|current(?:ly)?)\b[^.!?]{0,40}?\b(?:ph\.?\s?d|master)"
+    r"|\b(?:ph\.?\s?d|master[\u2019']?s)\s+(?:candidates?|students?|program)",
+    re.I,
+)
+# A preference, not a requirement: a hedged sentence is never a knockout.
+_HEDGED = re.compile(
+    r"\b(?:typical(?:ly)?|usually|often|preferred|ideally|a plus|nice to have)\b", re.I
+)
+# A range counts from its low end: "0-2 years" admits someone with none.
+_YEARS = re.compile(
+    r"\b(\d{1,2})(?:\s*[-\u2013]\s*\d{1,2})?\+?\s*(?:or more\s+)?years?\b"
+    r"[^.!?]{0,40}\bexperience\b",
+    re.I,
+)
 _NEEDS_SPONSORSHIP = re.compile(r"\b(?:f-?1|opt|h-?1b|visa|sponsor\w*|work permit)\b", re.I)
 _DEGREE_RANK = {"high school": 0, "associate": 1, "bachelor": 2, "master": 3, "phd": 4}
 
@@ -150,6 +179,11 @@ def save_profile(profile: Profile) -> None:
 
 def _is_citizen(auth: str) -> bool:
     return re.search(r"\b(?:us|u\.s\.|united states)\s+citizen\b", auth, re.I) is not None
+
+
+def _unsure_citizen(auth: str) -> bool:
+    """A bare "citizen" says whose citizenship nowhere, so it is a question."""
+    return " ".join(auth.casefold().split()) in {"citizen", "citizenship"}
 
 
 def _grad_bounds(sentence: str) -> tuple[str | None, str | None] | None:
@@ -236,14 +270,14 @@ def check_eligibility(text: str, profile: Profile) -> Eligibility:
             elif _NEEDS_SPONSORSHIP.search(auth) and not _is_citizen(auth):
                 add("sponsorship", "knockout", sentence, f"will not sponsor; profile: {auth}")
         if _CITIZENSHIP.search(sentence):
-            if auth is None:
+            if auth is None or _unsure_citizen(auth):
                 add("citizenship", "unknown", sentence, "are you a US citizen?")
             elif not _is_citizen(auth):
                 add(
                     "citizenship", "knockout", sentence, f"requires US citizenship; profile: {auth}"
                 )
         if _CLEARANCE.search(sentence):
-            if auth is not None and not _is_citizen(auth):
+            if auth is not None and not _is_citizen(auth) and not _unsure_citizen(auth):
                 add("clearance", "knockout", sentence, "a US clearance requires US citizenship")
             else:
                 add(
@@ -266,10 +300,18 @@ def check_eligibility(text: str, profile: Profile) -> Eligibility:
                     sentence,
                     f"graduation {window}; profile: {profile.graduation}",
                 )
-        if _GRAD_DEGREE.search(sentence) and (
-            profile.degree is None or _DEGREE_RANK[profile.degree] < _DEGREE_RANK["master"]
-        ):
-            add("degree", "stretch", sentence, "asks for a graduate degree")
+        named = [level for level, pattern in _DEGREE_LEVELS.items() if pattern.search(sentence)]
+        my_rank = _DEGREE_RANK[profile.degree] if profile.degree is not None else None
+        above = [level for level in named if my_rank is None or _DEGREE_RANK[level] > my_rank]
+        if named and above == named and above != ["bachelor"]:
+            if (
+                my_rank is not None
+                and _STUDENT_OF.search(sentence)
+                and not _HEDGED.search(sentence)
+            ):
+                add("degree", "knockout", sentence, f"for current {' or '.join(above)} students")
+            else:
+                add("degree", "stretch", sentence, "asks for a graduate degree")
         years = [int(y) for y in _YEARS.findall(sentence)]
         if years and max(years) >= STRETCH_YEARS:
             add("experience", "stretch", sentence, f"asks for {max(years)}+ years of experience")

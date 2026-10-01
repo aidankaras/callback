@@ -115,6 +115,70 @@ def test_several_years_of_experience_is_a_stretch() -> None:
     assert kinds("1+ year of experience with SQL.") == []
 
 
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("At least 0-2 years experience in trading or trade support role", []),
+        ("1\u20133 years of experience with SQL.", []),
+        ("2-3 years of experience in research.", [("experience", "stretch")]),
+    ],
+)
+def test_a_range_of_years_counts_from_its_low_end(
+    text: str, expected: list[tuple[str, str]]
+) -> None:
+    """Mutation: read the range's high end -- "0-2 years" becomes a stretch."""
+    assert kinds(text) == expected
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Currently pursuing a bachelor\u2019s, master\u2019s, or PhD in a quantitative field.",
+        "Are pursuing a Bachelor\u2019s, Master\u2019s or PhD in a technical discipline.",
+        "We welcome PhD students and undergraduates.",
+    ],
+)
+def test_a_degree_sentence_naming_the_candidates_level_admits_them(text: str) -> None:
+    """Mutation: flag any sentence naming a graduate degree -- these fail."""
+    assert kinds(text) == []
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "We are seeking exceptional PhD candidates to join our Quant Resource team.",
+        "Students enrolled in a PhD program in machine learning, computer science, or statistics.",
+        "Currently enrolled in a Master\u2019s or PhD program.",
+    ],
+)
+def test_a_role_for_current_graduate_students_is_a_knockout(text: str) -> None:
+    """Mutation: drop the student-of check -- these become stretches."""
+    assert kinds(text) == [("degree", "knockout")]
+    assert kinds(text, US_JUNIOR.model_copy(update={"degree": "phd"})) == []
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Master's degree or equivalent experience preferred; candidates should be curious.",
+        "PhD preferred.",
+        "M.S. or PhD in Statistics.",
+        # Hedged: a description of who usually applies, not a requirement.
+        "Our typical intern candidates come from quantitative PhD programs of top US universities.",
+    ],
+)
+def test_a_graduate_degree_asked_of_a_holder_stays_a_stretch(text: str) -> None:
+    assert kinds(text) == [("degree", "stretch")]
+
+
+def test_a_bare_citizen_profile_is_asked_not_knocked_out() -> None:
+    """ "citizen" names no country. Mutation: drop the bare-citizen check --
+    a citizenship requirement knocks the candidate out."""
+    bare = Profile(work_authorization="citizen")
+    assert kinds("Applicants must be US citizens.", bare) == [("citizenship", "unknown")]
+    assert kinds("Must hold an active TS/SCI clearance.", bare) == [("clearance", "unknown")]
+
+
 def test_every_finding_quotes_the_posting() -> None:
     (finding,) = check_eligibility("We are unable to sponsor visas.", Profile()).findings
     assert "unable to sponsor" in finding.quote
