@@ -29,8 +29,17 @@ as a "link" is the first thing a reader sees.
 rendered in bold capitals, and "Experience - Forbes 30 Under 30" is a claim.
 
 **Skills**: every listed skill must be backed by a confirmed fact -- a
-`skill` fact naming it, or an entity of a fact a bullet cites -- compared
-through the alias table, so "k8s" and "Kubernetes" are one skill.
+`skill` fact naming it, an entity of a fact a bullet cites, or an entity of a
+confirmed experience or project or of a detail under one, cited or not --
+compared through the alias table, so "k8s" and "Kubernetes" are one skill.
+The last route exists so the skills line does not depend on what the bullets
+happen to quote: requiring a citation made the only way to list a tool a
+bullet written to name it. It stops at work, not everything confirmed: a
+course detail's entities are what a course covered ("Data Science in R"),
+and an honour's or a mentor's are names, so those back a skill only where a
+bullet visibly cites them. A wrongly confirmed fact now reaches the skills
+line without appearing in a bullet; retiring it is the remedy, and a retired
+fact backs nothing.
 
 Every rule fails closed. Only confirmed facts count, matching `Fact.selectable`.
 """
@@ -204,13 +213,28 @@ def identity_findings(identity: Identity, facts: Mapping[str, Fact]) -> list[str
     ]
 
 
+def _lineage(fid: str, confirmed: Mapping[str, Fact]) -> list[str]:
+    """`fid` and its ancestors, nearest first, among `confirmed` facts."""
+    seen: list[str] = []
+    current: str | None = fid
+    while current is not None and current in confirmed and current not in seen:
+        seen.append(current)
+        current = confirmed[current].parent
+    return seen
+
+
+_WORK_KINDS = frozenset({FactKind.EXPERIENCE, FactKind.PROJECT})
+
+
 def _skill_backing(doc: ResumeDoc, facts: Mapping[str, Fact]) -> set[str]:
     """Canonical forms of every skill a confirmed fact supports."""
     confirmed = {fid: f for fid, f in facts.items() if f.selectable()}
     backed: set[str] = set()
-    for f in confirmed.values():
+    for fid, f in confirmed.items():
         if f.kind is FactKind.SKILL:
             backed.add(_canon(f.text))
+            backed |= {_canon(e) for e in f.entities}
+        elif any(confirmed[a].kind in _WORK_KINDS for a in _lineage(fid, confirmed)):
             backed |= {_canon(e) for e in f.entities}
     for section in doc.sections:
         for entry in section.entries:
@@ -246,13 +270,7 @@ def skills_shown_by_entries(
     confirmed = {fid: f for fid, f in facts.items() if f.selectable()}
 
     def lineage(fid: str) -> list[str]:
-        """`fid` and its ancestors, nearest first, among confirmed facts."""
-        seen: list[str] = []
-        current: str | None = fid
-        while current is not None and current in confirmed and current not in seen:
-            seen.append(current)
-            current = confirmed[current].parent
-        return seen
+        return _lineage(fid, confirmed)
 
     cited = {
         fid

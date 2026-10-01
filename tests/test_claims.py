@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from datetime import date
 
 import pytest
 from pydantic import ValidationError
@@ -252,6 +253,70 @@ def test_a_skill_fact_stored_as_an_alias_backs_the_canonical_name() -> None:
 
 def test_a_skill_evidenced_by_a_cited_fact_passes_without_a_skill_fact() -> None:
     assert findings_for(doc(skills=["Kafka"])) == ()
+
+
+# An uncited detail of the role: true, confirmed, and quoted by no bullet.
+EXCEL = fact(
+    "excel",
+    "Used Excel for the weekly capacity report",
+    kind=FactKind.EXPERIENCE_DETAIL,
+    parent="role",
+    entities=["Excel"],
+)
+
+
+def test_an_uncited_detail_of_a_role_backs_a_skill() -> None:
+    """A confirmed fact is true whether or not a bullet quotes it, so the
+    skills line does not have to be bought with a bullet naming the tool.
+    Mutation: drop the work-lineage route in `_skill_backing` -- this fails."""
+    document = doc(skills=["Excel"])
+    assert "excel" not in {
+        s for e in document.sections[0].entries for b in e.bullets for s in b.sources
+    }
+    assert findings_for(document, {**FACTS, "excel": EXCEL}) == ()
+
+
+@pytest.mark.parametrize(
+    "update",
+    [{"provenance": IMPORTED}, {"retired_on": date(2026, 9, 30)}],
+    ids=["unconfirmed", "retired"],
+)
+def test_an_uncited_detail_that_is_not_selectable_backs_nothing(update: dict[str, object]) -> None:
+    excel = EXCEL.model_copy(update=update)
+    assert not excel.selectable()
+    assert findings_for(doc(skills=["Excel"]), {**FACTS, "excel": excel}) == (
+        "skill 'Excel' is backed by no confirmed fact",
+    )
+
+
+def test_a_detail_under_a_retired_role_backs_nothing() -> None:
+    """The route runs through work the candidate still stands behind."""
+    retired_role = ROLE.model_copy(update={"retired_on": date(2026, 9, 30)})
+    found = findings_for(doc(skills=["Excel"]), {**FACTS, "role": retired_role, "excel": EXCEL})
+    assert "skill 'Excel' is backed by no confirmed fact" in found
+
+
+def test_an_uncited_course_detail_does_not_back_a_skill() -> None:
+    """A course's entities are what it covered, not what the candidate can do:
+    a course taught in R is not R on the skills line. Cited by a bullet, it is
+    visible on the page and backs the skill as before.
+    Mutation: let any confirmed fact's entities back a skill -- this fails."""
+    course = fact(
+        "course",
+        "Coursework: Data Science in R",
+        kind=FactKind.EXPERIENCE_DETAIL,
+        parent="degree",
+        entities=["R"],
+    )
+    facts = {**FACTS, "course": course}
+    assert course.selectable() and DEGREE.selectable()
+    assert findings_for(doc(skills=["R"]), facts) == ("skill 'R' is backed by no confirmed fact",)
+
+    cited = doc(
+        skills=["R"],
+        entry={"bullets": [Bullet(text="Coursework: Data Science in R", sources=["course"])]},
+    )
+    assert "skill 'R' is backed by no confirmed fact" not in findings_for(cited, facts)
 
 
 def test_a_skill_fact_that_is_unconfirmed_does_not_back_a_skill() -> None:
