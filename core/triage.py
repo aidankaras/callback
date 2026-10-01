@@ -18,7 +18,7 @@ them, and clears any degree finding from another sentence: postings also
 mention degrees in passing ("join our team of PhD students"). One naming
 only higher levels is a stretch, with its own reason when it is about
 current students of them ("PhD candidates"). It is a knockout only when it
-also states a requirement ("must", "only", "eligible") with no negation and
+also states a requirement ("must", "required", "only") with no negation and
 no hedge ("Open to current PhD students only"): a knockout hides a posting,
 so a mention, a refusal ("not open to PhD students") or a preference must
 never be read as one.
@@ -101,11 +101,15 @@ _BETWEEN = re.compile(r"\bbetween\b", re.IGNORECASE)
 _LATEST = re.compile(r"\b(?:by|before|no later than|prior to|on or before)\b", re.IGNORECASE)
 _EARLIEST = re.compile(r"\b(?:after|on or after|from|starting|since)\b", re.IGNORECASE)
 _YEAR = re.compile(r"\b(20\d\d)\b")
-# Year-of-study words count as undergraduate: "juniors, seniors or PhD
-# students" admits a junior. Matching one by accident only ever admits.
+# Year-of-study and college words count as undergraduate only in a list
+# ("juniors, seniors or PhD students", "a four-year university or PhD
+# program"): an admitting match clears every degree finding in the posting,
+# so "a PhD program at an accredited university" or "senior engineers" must
+# not count.
 _DEGREE_LEVELS: dict[DegreeLevel, re.Pattern[str]] = {
     "bachelor": re.compile(
-        r"\b(?:bachelor|undergrad|b\.?\s?sc?\b|juniors?\b|seniors?\b|college|four-year|university)",
+        r"\b(?:bachelor|undergrad|b\.?\s?sc?\b|(?:juniors?|seniors?)(?=\s*(?:,|/|or\b))"
+        r"|four-year (?:college|university)|of college\b|college (?:students?|juniors?|seniors?))",
         re.I,
     ),
     "master": re.compile(
@@ -122,7 +126,8 @@ _STUDENT_OF = re.compile(
     r"|\b(?:ph\.?\s?d\.?|master[\u2019']?s)\s+(?:candidates?|students?|programs?)",
     re.I,
 )
-_REQUIRED = re.compile(r"\b(?:must|required|only|eligible)\b", re.I)
+# Not "eligible": "Masters students are also eligible" widens who may apply.
+_REQUIRED = re.compile(r"\b(?:must|required|only)\b", re.I)
 _NEGATED = re.compile(r"\b(?:not|no|never|ineligible)\b", re.I)
 _HEDGED = re.compile(
     r"\b(?:typical(?:ly)?|usually|often|preferred|preferably|ideal(?:ly)?|a plus"
@@ -198,12 +203,14 @@ def save_profile(profile: Profile) -> None:
 
 
 def _is_citizen(auth: str) -> bool:
-    return re.search(r"\b(?:us|u\.s\.|united states)\s+citizen\b", auth, re.I) is not None
+    us = r"(?:us|u\.s\.|usa|u\.s\.a\.|united states|american)"
+    found = re.search(rf"\b{us}\s+citizen\b|\bcitizen of the {us}(?!\w)", auth, re.I)
+    return found is not None
 
 
 def _unsure_citizen(auth: str) -> bool:
     """A bare "citizen" says whose citizenship nowhere, so it is a question."""
-    return " ".join(auth.casefold().split()) in {"citizen", "citizenship"}
+    return " ".join(auth.casefold().strip(" .").split()) in {"citizen", "citizenship"}
 
 
 def _grad_bounds(sentence: str) -> tuple[str | None, str | None] | None:

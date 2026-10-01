@@ -143,6 +143,7 @@ def test_a_range_of_years_counts_from_its_low_end(
         "Must be currently enrolled as a junior, senior, or PhD student",
         "Current students (BS/MS/PhD) welcome",
         "Currently enrolled in a four-year university or PhD program",
+        "Currently in your third year of college or in a PhD program",
         "We welcome PhD students and undergraduates.",
     ],
 )
@@ -175,6 +176,9 @@ def test_a_year_of_study_word_alone_admits_no_one() -> None:
         "Open to current PhD students only.",
         "Must be enrolled in a PhD program.",
         "Only Ph.D. students in Computer Science are eligible.",
+        # A college word outside a list of levels admits no one.
+        "Must be enrolled in a PhD program at an accredited university.",
+        "Must be a PhD student working with senior engineers.",
         "Candidates must be currently enrolled in a Master\u2019s or PhD program.",
     ],
 )
@@ -192,6 +196,7 @@ def test_a_stated_requirement_for_current_graduate_students_is_a_knockout(text: 
         ("This role is not open to current PhD students", "students"),
         ("We are not looking for PhD candidates for this role", "students"),
         ("Currently enrolled; PhD students not eligible.", "students"),
+        ("Masters program students are also eligible.", "master"),
         ("PhD students are encouraged to apply.", "students"),
         ("Ideal for students currently pursuing a PhD only", "students"),
         ("We are seeking exceptional PhD candidates to join our Quant Resource team.", "students"),
@@ -212,13 +217,28 @@ def test_a_graduate_degree_that_is_not_a_stated_requirement_is_a_stretch(
     preference that also says "only" or "eligible" becomes a knockout."""
     found = check_eligibility(text, US_JUNIOR).findings
     assert [(f.rule, f.level) for f in found] == [("degree", "stretch")]
-    expected = "for current phd students" if reason == "students" else "asks for a graduate degree"
+    expected = {
+        "students": "for current phd students",
+        "master": "for current master students",
+        "degree": "asks for a graduate degree",
+    }[reason]
     assert found[0].reason == expected
+
+
+@pytest.mark.parametrize(
+    "auth", ["American citizen", "USA citizen", "Citizen of the United States", "U.S. citizen"]
+)
+def test_a_us_citizen_written_any_common_way_is_a_citizen(auth: str) -> None:
+    """Mutation: drop the American/USA/"citizen of" forms -- these knock out."""
+    assert kinds("Applicants must be US citizens.", Profile(work_authorization=auth)) == []
 
 
 def test_a_bare_citizen_profile_is_asked_not_knocked_out() -> None:
     """ "citizen" names no country. Mutation: drop the bare-citizen check --
     a citizenship requirement knocks the candidate out."""
+    assert kinds("Must be a US citizen.", Profile(work_authorization="citizen.")) == [
+        ("citizenship", "unknown")
+    ]
     bare = Profile(work_authorization="citizen")
     assert kinds("Applicants must be US citizens.", bare) == [("citizenship", "unknown")]
     assert kinds("Must hold an active TS/SCI clearance.", bare) == [("clearance", "unknown")]

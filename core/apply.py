@@ -484,8 +484,10 @@ def void_application(job_id: str, *, now: datetime) -> None:
     reader of it correct without each one learning to skip it. The ledger
     keeps the `apply` entry and gains a `void` one, so the history survives.
 
-    Refused once an outcome is recorded: a reply means it was submitted.
-    Nothing else can tell a silent submitted application from an unsent one,
+    Refused once any outcome but `withdrew` is recorded: a reply, or
+    `ghosted`, means it was submitted. `withdrew` is allowed because it was
+    the only way to mark an unsent application before this existed. Nothing
+    else can tell a silent submitted application from an unsent one,
     so the candidate's word decides, and a voided application stops counting
     toward the volume rules.
     """
@@ -494,9 +496,9 @@ def void_application(job_id: str, *, now: datetime) -> None:
     match = [a for a in applications if a.job_id == job_id]
     if not match:
         raise ApplyError(f"no application recorded for {job_id!r}")
-    if match[0].outcomes:
+    if any(o.kind != "withdrew" for o in match[0].outcomes):
         raise ApplyError(
-            f"{job_id!r} has recorded outcomes, so it was submitted; use `outcome withdrew`"
+            f"{job_id!r} has a recorded outcome, so it was submitted; use `outcome withdrew`"
         )
     try:
         record_event({"event": "void", "job_id": job_id, "at": now.isoformat()})

@@ -183,6 +183,16 @@ def test_an_application_never_submitted_can_be_voided(home: Path) -> None:
     apply(_target(), now=NOW + timedelta(hours=2))  # the same job is no longer a duplicate
 
 
+def test_an_application_marked_withdrew_can_still_be_voided(home: Path) -> None:
+    """`withdrew` was the only way to mark an unsent application before `void`.
+    Mutation: refuse on any outcome -- this fails."""
+    _built(home, "acme-ml")
+    apply(_target(), now=NOW)
+    record_outcome("acme-ml", "withdrew", now=NOW + timedelta(hours=1))
+    void_application("acme-ml", now=NOW + timedelta(hours=2))
+    assert load_applications() == []
+
+
 def test_an_application_with_an_outcome_cannot_be_voided(home: Path) -> None:
     """Mutation: drop the outcome check -- a replied-to application vanishes."""
     _built(home, "acme-ml")
