@@ -12,7 +12,7 @@
 // geometry pass can find a bullet's start by looking for that character
 // directly instead of interpreting Typst's own list layout.
 //
-// `leading` (0.62em) is looser than the first version's 0.55em, never
+// `leading` (0.63em) is looser than the first version's 0.55em, never
 // tighter: the naive extractor clusters rows with a 3.0pt tolerance measured
 // against the line pitch, and a larger pitch only widens that margin. Block
 // spacing (the gap between two bullets, or between an entry and the next)

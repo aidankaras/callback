@@ -186,10 +186,11 @@ def bullet_blocks(
     `extract_lines`'s vertical tolerance, which is proportional — the two
     are separate mechanisms and neither default is derived from the other.
     Its 1.0pt default is safe here only because of a specific template
-    fact: `templates/resume.typ` puts the marker in its own 10pt grid
-    column (`grid(columns: (10pt, 1fr), [•], ...)`), so bullet bodies begin
-    10pt right of the flush-left x-position that section headings and
-    subheadings are typeset at. That is a 10x margin against the nearest
+    fact: `templates/resume.typ` pads each bullet 4pt and puts the marker in
+    its own 10pt grid column (`grid(columns: (10pt, 1fr), [•], ...)`), so
+    bullet bodies begin 14pt right of the flush-left x-position that section
+    headings and subheadings are typeset at (39.6pt against 53.6pt, measured
+    on a render). That is a 14x margin against the nearest
     thing this test could confuse a continuation with. A template that
     indented headings to near the bullet body column, or narrowed that grid
     column, would need this re-measured rather than re-guessed — the
