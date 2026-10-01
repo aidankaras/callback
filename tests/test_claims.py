@@ -6,7 +6,7 @@ from datetime import date
 import pytest
 from pydantic import ValidationError
 
-from core.checks.claims import check_claims
+from core.checks.claims import check_claims, omitted_current_roles
 from core.profile.models import Dates, Fact, FactKind, Identity, Provenance, Trust
 from core.resume.models import Bullet, Entry, ResumeDoc, Section
 
@@ -322,3 +322,51 @@ def test_an_uncited_course_detail_does_not_back_a_skill() -> None:
 def test_a_skill_fact_that_is_unconfirmed_does_not_back_a_skill() -> None:
     imported = SKILLS.model_copy(update={"provenance": IMPORTED})
     assert findings_for(doc(skills=["Kubernetes"]), {**FACTS, "skills": imported}) != ()
+
+
+# --- current roles ------------------------------------------------------------------
+
+
+def test_a_current_role_no_entry_cites_is_named() -> None:
+    """`current` (Harbor Lab, no end date) is confirmed and nothing cites it.
+    Mutation: drop the `end is None` condition -- the ended `role` is named too."""
+    assert omitted_current_roles(doc(), FACTS) == ["Harbor Lab"]
+
+
+def test_a_cited_detail_puts_its_current_role_on_the_page() -> None:
+    task = fact("task", "Ran the lab's intake", kind=FactKind.EXPERIENCE_DETAIL, parent="current")
+    cited = doc(entry={"bullets": [Bullet(text="Ran the lab's intake", sources=["task"])]})
+    assert omitted_current_roles(cited, {**FACTS, "task": task}) == []
+
+
+def test_a_second_header_for_the_same_current_role_is_not_an_omission() -> None:
+    """A retitled role is a second current header fact; citing either one shows it."""
+    retitled = CURRENT.model_copy(update={"id": "current-2", "title": "Research Scientist"})
+    shown = doc(entry={"sources": ["current-2"], "bullets": []})
+    assert omitted_current_roles(shown, {**FACTS, "current-2": retitled}) == []
+
+
+def test_an_ended_role_at_the_same_organization_does_not_hide_a_current_one() -> None:
+    """`intern` is Harbor Lab too, but it ended. Mutation: count any on-page
+    fact's organization as shown -- this fails."""
+    assert INTERN.organization == CURRENT.organization and INTERN.dates is not None
+    assert INTERN.dates.end is not None
+    assert omitted_current_roles(doc(entry={"sources": ["intern"]}), FACTS) == ["Harbor Lab"]
+
+
+def test_a_retired_current_role_is_not_an_omission() -> None:
+    retired = CURRENT.model_copy(update={"retired_on": date(2026, 9, 30)})
+    assert omitted_current_roles(doc(), {**FACTS, "current": retired}) == []
+
+
+@pytest.mark.parametrize(
+    "title", ["Teaching & Mentoring", "Honors & Awards", "Leadership and Activities"]
+)
+def test_common_section_titles_and_their_ampersand_forms_pass(title: str) -> None:
+    assert findings_for(doc(title=title)) == ()
+
+
+def test_an_ampersand_does_not_launder_an_unlisted_title() -> None:
+    assert findings_for(doc(title="Experience & Forbes 30 Under 30")) == (
+        "section title 'Experience & Forbes 30 Under 30' is not a recognised section name",
+    )

@@ -111,6 +111,7 @@ def test_fix_order_is_total_and_starts_with_line_count() -> None:
         "bullet_too_long",
         "too_many_bullets",
         "too_few_bullets",
+        "current_role_omitted",
         "page_count",
         "widow_line",
         "orphan_tail_page",

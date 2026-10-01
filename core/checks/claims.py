@@ -25,8 +25,9 @@ entity of a confirmed `links` fact. It is otherwise free text rendered at the
 top of the page, where a credential appended to a name or a clearance listed
 as a "link" is the first thing a reader sees.
 
-**Section titles** come from a fixed list (`SECTION_TITLES`). A title is
-rendered in bold capitals, and "Experience - Forbes 30 Under 30" is a claim.
+**Section titles** come from a fixed list (`SECTION_TITLES`), with "&" read
+as "and". A title is rendered in bold capitals, and "Experience - Forbes 30
+Under 30" is a claim.
 
 **Skills**: every listed skill must be backed by a confirmed fact -- a
 `skill` fact naming it, an entity of a fact a bullet cites, or an entity of a
@@ -67,6 +68,7 @@ SECTION_TITLES = frozenset(
         "research experience",
         "relevant experience",
         "teaching experience",
+        "teaching and mentoring",
         "leadership experience",
         "volunteer experience",
         "education",
@@ -81,6 +83,7 @@ SECTION_TITLES = frozenset(
         "publications",
         "leadership",
         "activities",
+        "leadership and activities",
         "awards",
         "honors",
         "honors and awards",
@@ -289,12 +292,49 @@ def skills_shown_by_entries(
     return {skill for skill in skills if _canon(skill) in listed}
 
 
+def omitted_current_roles(doc: ResumeDoc, facts: Mapping[str, Fact]) -> list[str]:
+    """Organizations of confirmed current roles that nothing on the page cites.
+
+    A role is current when its dates have a start and no end. It is on the
+    page when a cited fact is the role or descends from it, or when another
+    current role at the same organization is: a retitled role is often a
+    second header fact beside the first, both current, one cited. An ended
+    role at the same organization does not count -- last summer's internship
+    on the page says nothing about this year's job. A role with no dates is
+    not judged; nothing says it is current.
+    """
+    confirmed = {fid: f for fid, f in facts.items() if f.selectable()}
+    current = {
+        fid: f
+        for fid, f in confirmed.items()
+        if f.kind is FactKind.EXPERIENCE
+        and f.dates is not None
+        and f.dates.start is not None
+        and f.dates.end is None
+    }
+    cited = {
+        fid
+        for section in doc.sections
+        for entry in section.entries
+        for fid in (*entry.sources, *(s for b in entry.bullets for s in b.sources))
+    }
+    on_page = {a for fid in cited for a in _lineage(fid, confirmed)}
+    shown = {_norm(current[a].organization or a) for a in on_page if a in current}
+    return sorted(
+        {
+            f.organization or fid
+            for fid, f in current.items()
+            if _norm(f.organization or fid) not in shown
+        }
+    )
+
+
 def check_claims(doc: ResumeDoc, facts: Mapping[str, Fact]) -> ClaimsResult:
     """Check identity, section titles, every entry header and every listed skill."""
     findings = identity_findings(doc.identity, facts)
     index = 0
     for section in doc.sections:
-        if _norm(section.title) not in SECTION_TITLES:
+        if _norm(section.title).replace(" & ", " and ") not in SECTION_TITLES:
             findings.append(f"section title {section.title!r} is not a recognised section name")
         for entry in section.entries:
             findings.extend(_check_entry(f"entry {index} ({entry.heading})", entry, facts))

@@ -27,10 +27,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
-from core.checks.claims import check_claims, skills_shown_by_entries
+from core.checks.claims import check_claims, omitted_current_roles, skills_shown_by_entries
 from core.checks.grounding import Verdict, check_bullet
 from core.checks.hidden import check_hidden
-from core.checks.lints import check_lints
+from core.checks.lints import Lint, check_lints
 from core.checks.roundtrip import check_roundtrip
 from core.checks.skills import check_skills
 from core.profile.models import Fact
@@ -191,8 +191,17 @@ def run_gates(
         return ("warn" if texts else "pass"), texts
 
     def lints() -> tuple[Outcome, tuple[str, ...]]:
-        # Layout is advice: a lint can warn, never fail a document.
-        found = check_lints(doc, pdf_path, max_pages=max_pages)
+        # Layout is advice: a lint can warn, never fail a document. So is
+        # selection: leaving a current role off the page is the candidate's
+        # call, but never a silent one.
+        omitted = [
+            Lint("current_role_omitted", f"{org} is a current role and no entry cites it")
+            for org in omitted_current_roles(doc, facts)
+        ]
+        found = sorted(
+            [*check_lints(doc, pdf_path, max_pages=max_pages), *omitted],
+            key=lambda lint: lint.priority,
+        )
         return ("warn" if found else "pass"), tuple(f"{x.rule}: {x.detail}" for x in found)
 
     return GateReport(

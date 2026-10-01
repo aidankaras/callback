@@ -30,6 +30,7 @@ FIX_ORDER: tuple[str, ...] = (
     "bullet_too_long",
     "too_many_bullets",
     "too_few_bullets",
+    "current_role_omitted",
     "page_count",
     "widow_line",
     "orphan_tail_page",
