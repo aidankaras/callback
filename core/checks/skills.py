@@ -141,7 +141,7 @@ def _all_skills(doc: ResumeDoc) -> list[str]:
     seen: set[str] = set()
     out: list[str] = []
     for section in doc.sections:
-        for skill in section.skills:
+        for skill in section.all_skills:
             canonical = canonicalize(skill)
             if canonical in seen:
                 continue

@@ -316,7 +316,7 @@ def declared_fields(doc: ResumeDoc) -> list[_Declared]:
                 region_index=section_index,
             )
         )
-        for skill_index, skill in enumerate(section.skills):
+        for skill_index, skill in enumerate(section.all_skills):
             out.append(
                 _Declared(
                     f"skill[{section_index}][{skill_index}]",
@@ -529,8 +529,15 @@ def _row_items(segment: str) -> list[str]:
     identically to the two values `"Tableau"` and `"Looker"`), which no
     splitting rule applied after the fact could ever recover -- so that
     case is closed at the model boundary rather than guarded against here.
+
+    A grouped row reads `Label: a, b, c`, so the part of an item up to its
+    last colon is dropped before comparing: that is the label, never a
+    skill, because no declared skill may contain a colon
+    (`core.resume.models._check_skill_names`). Dropping it also keeps a
+    label from ever standing in for a skill of the same name the render
+    lost.
     """
-    return [normalize(item).casefold() for item in segment.split(",")]
+    return [normalize(item.rpartition(":")[2]).casefold() for item in segment.split(",")]
 
 
 def _find_skill(

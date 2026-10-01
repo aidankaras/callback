@@ -283,7 +283,7 @@ def check_claims(doc: ResumeDoc, facts: Mapping[str, Fact]) -> ClaimsResult:
             index += 1
     backed = _skill_backing(doc, facts)
     for section in doc.sections:
-        for skill in section.skills:
+        for skill in section.all_skills:
             if _canon(skill) not in backed:
                 findings.append(f"skill {skill!r} is backed by no confirmed fact")
     return ClaimsResult(findings=tuple(findings))

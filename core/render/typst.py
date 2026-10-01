@@ -80,8 +80,11 @@ def _contact_line(doc: ResumeDoc) -> str:
 
 
 def _dates(start: str | None, end: str | None) -> str:
+    # An en dash, the typographic range mark. The round-trip gate still
+    # declares the span with a hyphen: its extractor folds every dash to one
+    # (`core.checks.naive_extract._DASHES`) before comparing.
     if start and end:
-        return f"{start} - {end}"
+        return f"{start} \u2013 {end}"
     return start or end or ""
 
 
@@ -92,6 +95,9 @@ def _payload(doc: ResumeDoc) -> dict[str, object]:
             {
                 "title": section.title,
                 "skills": section.skills,
+                "skill_groups": [
+                    {"label": group.label, "skills": group.skills} for group in section.skill_groups
+                ],
                 "entries": [
                     {
                         "heading": entry.heading,
@@ -99,6 +105,8 @@ def _payload(doc: ResumeDoc) -> dict[str, object]:
                         "right_line": "  ".join(
                             p for p in [entry.location, _dates(entry.start, entry.end)] if p
                         ),
+                        "location": entry.location,
+                        "dates": _dates(entry.start, entry.end),
                         "bullets": [b.text for b in entry.bullets],
                     }
                     for entry in section.entries

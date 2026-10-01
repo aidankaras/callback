@@ -82,9 +82,67 @@ class Entry(BaseModel):
     sources: list[str] = Field(default_factory=list)
 
 
+def _check_skill_names(skills: list[str]) -> list[str]:
+    """Refuse a blank skill, and a skill containing a comma or a colon.
+
+    The reasons are `Section._skills_are_single_names`'s. The colon joins
+    the comma because a grouped skills row renders as `Label: a, b, c`, and
+    the round-trip gate (`core.checks.roundtrip._row_items`) strips
+    everything up to an item's last colon to separate a label from the
+    first skill after it. That strip is sound only while no skill's own
+    name can contain a colon, on a flat run as well as in a group, since
+    the matcher cannot tell which kind of row it is reading.
+    """
+    for skill in skills:
+        if not skill.strip():
+            raise ValueError("a skill cannot be blank")
+        if "," in skill:
+            raise ValueError(
+                f"skill {skill!r} contains a comma; split it into separate skills "
+                "-- a skills section renders as one comma-delimited line, so a comma "
+                "inside a single skill's own name cannot be told apart from the "
+                "boundary between two skills"
+            )
+        if ":" in skill:
+            raise ValueError(
+                f"skill {skill!r} contains a colon; a colon in a skills row is what "
+                "separates a group's label from its first skill"
+            )
+    return skills
+
+
+class SkillGroup(BaseModel):
+    """One labelled row of a skills section: `Languages & Tools: Python, SQL`.
+
+    The label is a heading for the reader, not a claim: only the skills are
+    checked against facts. It may contain neither a comma nor a colon, for
+    the reason `_check_skill_names` gives for skills.
+    """
+
+    model_config = {"extra": "forbid"}
+
+    label: str
+    skills: list[str] = Field(min_length=1)
+
+    @field_validator("label")
+    @classmethod
+    def _label_is_plain(cls, label: str) -> str:
+        if not label.strip():
+            raise ValueError("a skill group's label cannot be blank")
+        if "," in label or ":" in label:
+            raise ValueError(f"skill group label {label!r} cannot contain a comma or a colon")
+        return label
+
+    @field_validator("skills")
+    @classmethod
+    def _skills_are_single_names(cls, skills: list[str]) -> list[str]:
+        return _check_skill_names(skills)
+
+
 class Section(BaseModel):
     """A titled group of entries (e.g. "Experience", "Education"), or a
-    titled list of skills — never both.
+    titled list of skills, flat (`skills`) or in labelled rows
+    (`skill_groups`) — only ever one of the three.
 
     The two are mutually exclusive because they render differently and are
     checked differently. An entry has a heading a parser can anchor on; a
@@ -99,6 +157,14 @@ class Section(BaseModel):
     title: str
     entries: list[Entry] = Field(default_factory=list[Entry])
     skills: list[str] = Field(default_factory=list[str])
+    skill_groups: list[SkillGroup] = Field(default_factory=list[SkillGroup])
+
+    @property
+    def all_skills(self) -> list[str]:
+        """Every skill the section lists, flat or grouped, in reading order.
+        Every check reads skills through this, so a grouped skill is held to
+        exactly the rules a flat one is."""
+        return [*self.skills, *(skill for group in self.skill_groups for skill in group.skills)]
 
     @field_validator("skills")
     @classmethod
@@ -128,22 +194,15 @@ class Section(BaseModel):
         matcher can recover which one the author meant; only rejecting the
         value before it is ever rendered can.
         """
-        for skill in skills:
-            if not skill.strip():
-                raise ValueError("a skill cannot be blank")
-            if "," in skill:
-                raise ValueError(
-                    f"skill {skill!r} contains a comma; split it into separate skills "
-                    "-- a skills section renders as one comma-delimited line, so a comma "
-                    "inside a single skill's own name cannot be told apart from the "
-                    "boundary between two skills"
-                )
-        return skills
+        return _check_skill_names(skills)
 
     @model_validator(mode="after")
     def _entries_or_skills(self) -> Section:
-        if self.entries and self.skills:
-            raise ValueError(f"section {self.title!r} has both entries and skills; pick one")
+        used = [name for name in ("entries", "skills", "skill_groups") if getattr(self, name)]
+        if len(used) > 1:
+            raise ValueError(
+                f"section {self.title!r} has {' and '.join(used)}; a section holds only one"
+            )
         return self
 
 
