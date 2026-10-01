@@ -46,6 +46,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     criteria = sub.add_parser("criteria", help="which posting titles a watch keeps")
     criteria.add_argument("--include", required=True, help="comma-separated title terms")
+    criteria.add_argument(
+        "--require", default="", help="comma-separated terms a title must also contain one of"
+    )
     criteria.add_argument("--exclude", default="", help="comma-separated title terms to skip")
     criteria.set_defaults(handler=_cmd_criteria)
 
@@ -360,7 +363,13 @@ def _cmd_criteria(args: argparse.Namespace) -> int:
 
     ensure_home()
     try:
-        save_criteria(Criteria(include=terms(args.include), exclude=terms(args.exclude)))
+        save_criteria(
+            Criteria(
+                include=terms(args.include),
+                require=terms(args.require),
+                exclude=terms(args.exclude),
+            )
+        )
     except _discovery_errors() as exc:
         print(f"callback criteria: {exc}", file=sys.stderr)
         return 3

@@ -67,7 +67,7 @@ postings anyway.
 | Command | What it does | Exit codes |
 |---|---|---|
 | `callback targets add "<company>" --ats <ats> --board <name>` / `targets list` | Choose the companies to watch | 0, 3 |
-| `callback criteria --include "…" --exclude "…"` | Title terms a watch keeps: whole words, with a trailing `*` for a prefix | 0, 3 |
+| `callback criteria --include "…" [--require "…"] --exclude "…"` | Title terms a watch keeps: an include term, a require term if given, no exclude term; whole words, with a trailing `*` for a prefix | 0, 3 |
 | `callback watch` | Polls every target and stores new matching postings with when they were first seen | 0, 1 if a board could not be read, 3 |
 | `callback postings list [--days N]` | Stored postings, newest first | 0, 3 |
 | `callback postings resolve <url> --company "<company>"` | The canonical posting behind a Greenhouse, Lever or Ashby URL, or an employer careers page's `schema.org/JobPosting` data | 0, 3 |

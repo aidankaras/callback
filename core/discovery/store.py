@@ -71,23 +71,33 @@ def _term(term: str) -> re.Pattern[str]:
 class Criteria(BaseModel):
     """Which posting titles are worth seeing.
 
-    A title matches when it contains an `include` term and no `exclude`
-    term. Terms are case-insensitive whole words -- "intern" matches "ML
-    Intern" but not "International", and "ml" does not match "HTML" -- and a
-    trailing `*` makes a term a prefix: "intern*" also matches "Internship",
-    "data scien*" matches "Data Science".
+    A title matches when it contains an `include` term, a `require` term if
+    any are given, and no `exclude` term: `include=["intern", "internship"]`
+    with `require=["data", "ml"]` is "intern AND (data OR ML)".
+
+    Terms are case-insensitive whole words -- "intern" matches "ML Intern"
+    but not "International", and "ml" does not match "HTML" -- and a trailing
+    `*` makes a term a prefix of a word: "data scien*" matches "Data
+    Science" and "Data Scientist". A prefix matches every word that starts
+    that way, so "intern*" matches "International" as well as "Internship";
+    list "intern" and "internship" instead.
     """
 
     model_config = {"extra": "forbid"}
 
     include: list[str] = Field(min_length=1)
+    require: list[str] = Field(default_factory=list)
     exclude: list[str] = Field(default_factory=list)
 
     def _hit(self, terms: list[str], title: str) -> bool:
         return any(_term(t).search(title.casefold()) for t in terms if t.strip(" *"))
 
     def matches(self, title: str) -> bool:
-        return self._hit(self.include, title) and not self._hit(self.exclude, title)
+        return (
+            self._hit(self.include, title)
+            and (not self.require or self._hit(self.require, title))
+            and not self._hit(self.exclude, title)
+        )
 
 
 class Found(Posting):
