@@ -101,7 +101,7 @@ def test_a_graduation_window_with_no_graduation_on_file_is_a_question() -> None:
     assert kinds(text, Profile(work_authorization="US citizen")) == [("graduation", "unknown")]
 
 
-# --- degree and experience (stretches, never knockouts) ---------------------------------
+# --- degree and experience ------------------------------------------------------------
 
 
 def test_a_graduate_degree_requirement_is_a_stretch_for_an_undergraduate() -> None:
@@ -113,6 +113,184 @@ def test_a_graduate_degree_requirement_is_a_stretch_for_an_undergraduate() -> No
 def test_several_years_of_experience_is_a_stretch() -> None:
     assert kinds("8+ years of hands-on data science experience.") == [("experience", "stretch")]
     assert kinds("1+ year of experience with SQL.") == []
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("At least 0-2 years experience in trading or trade support role", []),
+        ("1\u20133 years of experience with SQL.", []),
+        ("2-3 years of experience in research.", [("experience", "stretch")]),
+        ("0 to 2 years of experience.", []),
+        ("Between 1 and 3 years of experience.", []),
+        ("0\u20142 years of experience.", []),
+    ],
+)
+def test_a_range_of_years_counts_from_its_low_end(
+    text: str, expected: list[tuple[str, str]]
+) -> None:
+    """Mutation: read the range's high end -- "0-2 years" becomes a stretch."""
+    assert kinds(text) == expected
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Currently pursuing a bachelor\u2019s, master\u2019s, or PhD in a quantitative field.",
+        "Are pursuing a Bachelor\u2019s, Master\u2019s or PhD in a technical discipline.",
+        "Currently pursuing a BS, MS, or PhD in Computer Science",
+        "Currently pursuing a BSc, MSc or PhD in Computer Science",
+        "Must be currently enrolled as a junior, senior, or PhD student",
+        "Open to rising juniors, seniors or PhD candidates.",
+        "Candidates must be a rising junior or senior, or a current PhD student.",
+        "Must be enrolled as a junior or senior in college or a PhD student.",
+        "Must be a current sophomore, junior or senior, or a master's or PhD student.",
+        "Rising Junior or Senior (Class of 2028 or 2029), or Master's/PhD student.",
+        "Students entering their junior or senior year, or PhD students, are eligible.",
+        "Open only to rising juniors and PhD students.",
+        "Open to junior or senior engineering students, or PhD students.",
+        "Junior or senior data science majors or PhD candidates are eligible.",
+        "Must be a junior or senior software engineering major or a PhD student.",
+        "Current students (BS/MS/PhD) welcome",
+        "Currently enrolled in a four-year university or PhD program",
+        "Currently in your third year of college or in a PhD program",
+        "We welcome PhD students and undergraduates.",
+    ],
+)
+def test_a_degree_sentence_naming_the_candidates_level_admits_them(text: str) -> None:
+    """Mutation: drop the year-of-study and BS/BSc forms -- several of these
+    become findings."""
+    assert kinds(text) == []
+
+
+def test_a_sentence_that_admits_the_candidate_clears_one_that_mentions_phds() -> None:
+    """Mutation: keep the first degree finding -- the team sentence wins."""
+    text = (
+        "You'll join our team of PhD students and engineers. "
+        "Requirements: Currently pursuing a Bachelor's, Master's or PhD in CS."
+    )
+    assert kinds(text) == []
+
+
+def test_a_year_of_study_word_alone_admits_no_one() -> None:
+    """ "senior" in a sentence about colleagues is not a degree list.
+    Mutation: let a sentence naming only the candidate's level admit --
+    the PhD finding is cleared."""
+    text = "Open to current PhD students only. You will work with senior researchers."
+    assert kinds(text) == [("degree", "knockout")]
+
+
+@pytest.mark.parametrize(
+    "colleagues",
+    [
+        "You will work with junior or senior engineers and PhD researchers.",
+        "You will work with junior and senior engineers and PhD researchers.",
+        "Collaborate with junior, senior and staff engineers and PhD researchers.",
+        "Senior or staff engineers and PhD researchers mentor every intern.",
+    ],
+)
+def test_year_words_describing_colleagues_admit_no_one(colleagues: str) -> None:
+    """A singular year word followed by a colleague noun is an adjective.
+    Mutation: drop the colleague-noun lookahead -- the sentence admits the
+    candidate and clears the knockout."""
+    assert kinds(colleagues) == [("degree", "stretch")]  # premise: names no level of ours
+    assert kinds(f"Open to current PhD students only. {colleagues}") == [("degree", "knockout")]
+
+
+def test_a_knockout_after_a_stretch_for_the_same_rule_is_kept() -> None:
+    """Sentences are read in document order; the most severe finding per rule
+    wins. Mutation: keep the first finding per rule -- the stretch hides the
+    knockout."""
+    stretch = "We are seeking exceptional PhD candidates to join our Quant Resource team."
+    knockout = "Open to current PhD students only."
+    assert kinds(stretch) == [("degree", "stretch")]  # premise
+    assert kinds(knockout) == [("degree", "knockout")]  # premise
+    assert kinds(f"{stretch} {knockout}") == [("degree", "knockout")]
+    assert kinds(f"{knockout} {stretch}") == [("degree", "knockout")]
+
+
+def test_a_replaced_finding_keeps_findings_in_document_order() -> None:
+    """Mutation: replace the stretch in its own slot -- the degree finding,
+    quoting the last sentence, is listed before the experience one."""
+    text = (
+        "We are seeking exceptional PhD candidates. Requires 3+ years of experience"
+        " in Python. Open to current PhD students only."
+    )
+    assert kinds(text) == [("experience", "stretch"), ("degree", "knockout")]
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Open to current PhD students only.",
+        "Must be enrolled in a PhD program.",
+        "Only Ph.D. students in Computer Science are eligible.",
+        # A college word outside a list of levels admits no one.
+        "Must be enrolled in a PhD program at an accredited university.",
+        "Must be a PhD student working with senior engineers.",
+        "Candidates must be currently enrolled in a Master\u2019s or PhD program.",
+    ],
+)
+def test_a_stated_requirement_for_current_graduate_students_is_a_knockout(text: str) -> None:
+    """Mutation: drop the requirement check -- the mentions below become knockouts."""
+    assert kinds(text) == [("degree", "knockout")]
+    assert kinds(text, US_JUNIOR.model_copy(update={"degree": "phd"})) == []
+
+
+@pytest.mark.parametrize(
+    ("text", "reason"),
+    [
+        # Mentions, refusals and preferences: a knockout would hide the posting.
+        ("Join our team of PhD students and researchers working on LLMs", "students"),
+        ("This role is not open to current PhD students", "students"),
+        ("We are not looking for PhD candidates for this role", "students"),
+        ("Currently enrolled; PhD students not eligible.", "students"),
+        ("Masters program students are also eligible.", "master"),
+        ("PhD students are encouraged to apply.", "students"),
+        ("Ideal for students currently pursuing a PhD only", "students"),
+        ("We are seeking exceptional PhD candidates to join our Quant Resource team.", "students"),
+        ("Students enrolled in a PhD program in machine learning or statistics.", "students"),
+        ("Our typical intern candidates come from quantitative PhD programs.", "students"),
+        (
+            "Master's degree or equivalent experience preferred; candidates should be curious.",
+            "degree",
+        ),
+        ("PhD preferred.", "degree"),
+        ("M.S. or PhD in Statistics.", "degree"),
+    ],
+)
+def test_a_graduate_degree_that_is_not_a_stated_requirement_is_a_stretch(
+    text: str, reason: str
+) -> None:
+    """Mutation: drop the negation or the hedge check -- a refusal or a
+    preference that also says "only" or "eligible" becomes a knockout."""
+    found = check_eligibility(text, US_JUNIOR).findings
+    assert [(f.rule, f.level) for f in found] == [("degree", "stretch")]
+    expected = {
+        "students": "for current phd students",
+        "master": "for current master students",
+        "degree": "asks for a graduate degree",
+    }[reason]
+    assert found[0].reason == expected
+
+
+@pytest.mark.parametrize(
+    "auth", ["American citizen", "USA citizen", "Citizen of the United States", "U.S. citizen"]
+)
+def test_a_us_citizen_written_any_common_way_is_a_citizen(auth: str) -> None:
+    """Mutation: drop the American/USA/"citizen of" forms -- these knock out."""
+    assert kinds("Applicants must be US citizens.", Profile(work_authorization=auth)) == []
+
+
+def test_a_bare_citizen_profile_is_asked_not_knocked_out() -> None:
+    """ "citizen" names no country. Mutation: drop the bare-citizen check --
+    a citizenship requirement knocks the candidate out."""
+    assert kinds("Must be a US citizen.", Profile(work_authorization="citizen.")) == [
+        ("citizenship", "unknown")
+    ]
+    bare = Profile(work_authorization="citizen")
+    assert kinds("Applicants must be US citizens.", bare) == [("citizenship", "unknown")]
+    assert kinds("Must hold an active TS/SCI clearance.", bare) == [("clearance", "unknown")]
 
 
 def test_every_finding_quotes_the_posting() -> None:
@@ -160,6 +338,18 @@ def test_ranking_puts_knockouts_last_and_prefers_fresh_postings_you_can_evidence
     assert fresh.coverage == (["Python", "SQL"], [])
     # Only technologies the alias table recognises count; it has no "Rust".
     assert ranked[2].coverage == ([], ["Kubernetes", "PyTorch"])
+
+
+def test_ranking_prefers_more_evidence_over_a_perfect_ratio_on_one() -> None:
+    """Both postings are fully evidenced; one names two technologies, one names
+    one. Mutation: set `COVERAGE_PRIOR` to 0 -- they tie, and input order wins."""
+    postings = [
+        _posting("one", "Data Science Intern", "Python.", days_old=1),
+        _posting("two", "Data Science Intern", "Python and SQL.", days_old=1),
+    ]
+    ranked = rank(postings, US_JUNIOR, FACTS, now=NOW)
+    assert [r.posting.id for r in ranked] == ["two", "one"]
+    assert ranked[0].score > ranked[1].score
 
 
 def test_the_triage_commands(

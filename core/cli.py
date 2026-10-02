@@ -46,6 +46,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     criteria = sub.add_parser("criteria", help="which posting titles a watch keeps")
     criteria.add_argument("--include", required=True, help="comma-separated title terms")
+    criteria.add_argument(
+        "--require", default="", help="comma-separated terms a title must also contain one of"
+    )
     criteria.add_argument("--exclude", default="", help="comma-separated title terms to skip")
     criteria.set_defaults(handler=_cmd_criteria)
 
@@ -191,6 +194,10 @@ def build_parser() -> argparse.ArgumentParser:
         choices=["viewed", "callback", "interview", "offer", "rejected", "ghosted", "withdrew"],
     )
     outcome.set_defaults(handler=_cmd_outcome)
+
+    void = sub.add_parser("void", help="remove the record of an application never submitted")
+    void.add_argument("job")
+    void.set_defaults(handler=_cmd_void)
 
     applications = sub.add_parser("applications", help="list recorded applications")
     applications.set_defaults(handler=_cmd_applications)
@@ -360,7 +367,13 @@ def _cmd_criteria(args: argparse.Namespace) -> int:
 
     ensure_home()
     try:
-        save_criteria(Criteria(include=terms(args.include), exclude=terms(args.exclude)))
+        save_criteria(
+            Criteria(
+                include=terms(args.include),
+                require=terms(args.require),
+                exclude=terms(args.exclude),
+            )
+        )
     except _discovery_errors() as exc:
         print(f"callback criteria: {exc}", file=sys.stderr)
         return 3
@@ -747,6 +760,19 @@ def _cmd_outcome(args: argparse.Namespace) -> int:
         record_outcome(args.job, args.kind, now=datetime.now(tz=UTC))
     except ApplyError as exc:
         print(f"callback outcome: {exc}", file=sys.stderr)
+        return 3
+    return 0
+
+
+def _cmd_void(args: argparse.Namespace) -> int:
+    from datetime import UTC, datetime
+
+    from core.apply import ApplyError, void_application
+
+    try:
+        void_application(args.job, now=datetime.now(tz=UTC))
+    except (ApplyError, OSError) as exc:
+        print(f"callback void: {exc}", file=sys.stderr)
         return 3
     return 0
 

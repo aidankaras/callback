@@ -120,6 +120,26 @@ def test_a_trailing_star_makes_a_term_a_prefix() -> None:
     assert criteria.matches("Data Scientist")
 
 
+def test_a_prefix_matches_every_word_it_begins() -> None:
+    """The documented trap: "intern*" matches "International"."""
+    assert Criteria(include=["intern*"]).matches("Engineering Manager, International")
+    assert not Criteria(include=["intern", "internship"]).matches(
+        "Engineering Manager, International"
+    )
+
+
+def test_require_is_an_and_over_include() -> None:
+    """intern AND (data OR ML). Mutation: ignore `require` -- the first
+    refusal fails; treat an empty `require` as matching nothing -- the last
+    assertion fails."""
+    criteria = Criteria(include=["intern", "internship"], require=["data", "ml"])
+    assert criteria.matches("Data Science Intern")
+    assert criteria.matches("ML Engineering Internship")
+    assert not criteria.matches("Software Engineering Intern")
+    assert not criteria.matches("Senior Data Engineer")
+    assert Criteria(include=["intern"]).matches("Software Engineering Intern")
+
+
 def test_a_posting_url_resolves_to_the_canonical_posting(home: Path) -> None:
     fetcher = FakeFetcher({"acme": _greenhouse("Office Manager", "Data Science Intern")})
     posting = resolve(
@@ -183,3 +203,7 @@ def test_the_discovery_commands_end_to_end(
         main(["postings", "resolve", "https://www.linkedin.com/jobs/view/1", "--company", "X"]) == 3
     )
     assert "does not allow automated access" in capsys.readouterr().err
+    assert main(["criteria", "--include", "intern", "--require", "data, ml"]) == 0
+    from core.discovery.store import load_criteria
+
+    assert load_criteria().require == ["data", "ml"]
