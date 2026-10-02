@@ -25,12 +25,30 @@ entity of a confirmed `links` fact. It is otherwise free text rendered at the
 top of the page, where a credential appended to a name or a clearance listed
 as a "link" is the first thing a reader sees.
 
-**Section titles** come from a fixed list (`SECTION_TITLES`). A title is
-rendered in bold capitals, and "Experience - Forbes 30 Under 30" is a claim.
+**Section titles** come from a fixed list (`SECTION_TITLES`), with "&" read
+as "and". A title is rendered in bold capitals, and "Experience - Forbes 30
+Under 30" is a claim.
 
 **Skills**: every listed skill must be backed by a confirmed fact -- a
-`skill` fact naming it, or an entity of a fact a bullet cites -- compared
-through the alias table, so "k8s" and "Kubernetes" are one skill.
+`skill` fact naming it, an entity of a fact a bullet cites, or an entity of
+a detail of a role or project, cited or not -- compared through the alias
+table, so "k8s" and "Kubernetes" are one skill. The last route exists so the
+skills line does not depend on what the bullets happen to quote: requiring a
+citation made the only way to list a tool a bullet written to name it.
+
+That route takes an `experience_detail` whose chain of parents reaches a
+confirmed experience or project through details only. Not the role or
+project itself, whose entities are an employer or a client; not an absent or
+declined fact, which records the skill as missing; not a course detail,
+whose entities are what a course covered ("Data Science in R"), even when
+its degree is filed under a role. Those back a skill only where a bullet
+visibly cites them.
+
+It rests on the premise `skills_shown_by_entries` already makes: a detail's
+entities record what the candidate used. A detail that names something else
+-- the company's own platforms, a mentor -- breaks that premise silently, and
+the remedy is to correct its entities. A fact that is false is retired, and
+a retired fact, or a detail under a retired role, backs nothing.
 
 Every rule fails closed. Only confirmed facts count, matching `Fact.selectable`.
 """
@@ -48,6 +66,9 @@ from core.profile.models import Fact, FactKind, Identity
 from core.resume.models import Entry, ResumeDoc
 
 _YEAR = re.compile(r"^\d{4}$")
+# A header date is the date alone: one month and year, nothing around it,
+# since the cell renders bold and "Aug 2025 · Promoted to Lead" holds one date.
+_MONTH_YEAR = re.compile(r"[A-Za-z]{3,9}\.?\s+\d{4}")
 _HEADER_KINDS = frozenset({FactKind.EXPERIENCE, FactKind.EDUCATION, FactKind.PROJECT})
 
 SECTION_TITLES = frozenset(
@@ -58,6 +79,7 @@ SECTION_TITLES = frozenset(
         "research experience",
         "relevant experience",
         "teaching experience",
+        "teaching and mentoring",
         "leadership experience",
         "volunteer experience",
         "education",
@@ -72,11 +94,46 @@ SECTION_TITLES = frozenset(
         "publications",
         "leadership",
         "activities",
+        "leadership and activities",
         "awards",
         "honors",
         "honors and awards",
         "coursework",
         "relevant coursework",
+    }
+)
+
+# A skill group's label renders bold beside its skills, and bold text reads as a
+# claim, yet no fact can back a heading. So a label is a category name from this
+# list, never free text: "Certified Cloud Architect: Python" would otherwise pass
+# every gate. Compared casefolded, with "&" read as "and", and only when the
+# label is printable ASCII: casefolding maps the long s (U+017F) to "s" and the Kelvin sign to
+# "k", so "Tools" spelled with it would otherwise pass and print as something off the list.
+SKILL_GROUP_LABELS = frozenset(
+    {
+        "languages",
+        "programming languages",
+        "tools",
+        "languages and tools",
+        "libraries",
+        "frameworks",
+        "libraries and frameworks",
+        "databases",
+        "data",
+        "data engineering",
+        "cloud",
+        "cloud and devops",
+        "devops",
+        "platforms",
+        "machine learning",
+        "ai engineering",
+        "statistics",
+        "mathematics",
+        "quantitative methods",
+        "methods",
+        "software engineering",
+        "engineering practices",
+        "web development",
     }
 )
 
@@ -109,7 +166,11 @@ def _date_ok(value: str, fact_date: str | None, *, is_end: bool) -> bool:
     if _YEAR.match(value.strip()):
         return value.strip() == fact_date[:4]
     parsed = iso_month_dates(value)
-    return len(parsed) == 1 and parsed[0] == fact_date[:7]
+    return (
+        _MONTH_YEAR.fullmatch(value.strip()) is not None
+        and len(parsed) == 1
+        and parsed[0] == fact_date[:7]
+    )
 
 
 def _mismatches(entry: Entry, fact: Fact) -> list[str]:
@@ -204,13 +265,39 @@ def identity_findings(identity: Identity, facts: Mapping[str, Fact]) -> list[str
     ]
 
 
+def _lineage(fid: str, confirmed: Mapping[str, Fact]) -> list[str]:
+    """`fid` and its ancestors, nearest first, among `confirmed` facts."""
+    seen: list[str] = []
+    current: str | None = fid
+    while current is not None and current in confirmed and current not in seen:
+        seen.append(current)
+        current = confirmed[current].parent
+    return seen
+
+
+_WORK_KINDS = frozenset({FactKind.EXPERIENCE, FactKind.PROJECT})
+
+
+def _detail_of_work(fid: str, confirmed: Mapping[str, Fact]) -> bool:
+    """Whether `fid` is a detail reaching a role or project through details only."""
+    for ancestor in _lineage(fid, confirmed):
+        kind = confirmed[ancestor].kind
+        if kind in _WORK_KINDS:
+            return ancestor != fid
+        if kind is not FactKind.EXPERIENCE_DETAIL:
+            return False
+    return False
+
+
 def _skill_backing(doc: ResumeDoc, facts: Mapping[str, Fact]) -> set[str]:
     """Canonical forms of every skill a confirmed fact supports."""
     confirmed = {fid: f for fid, f in facts.items() if f.selectable()}
     backed: set[str] = set()
-    for f in confirmed.values():
+    for fid, f in confirmed.items():
         if f.kind is FactKind.SKILL:
             backed.add(_canon(f.text))
+            backed |= {_canon(e) for e in f.entities}
+        elif _detail_of_work(fid, confirmed):
             backed |= {_canon(e) for e in f.entities}
     for section in doc.sections:
         for entry in section.entries:
@@ -239,20 +326,15 @@ def skills_shown_by_entries(
     only where an entry cites it.
 
     Entities only, never a fact's text: entities are where a fact records what
-    was used, and its text may name a tool it moved away from. A fact kept on
-    its own, under no entry, shows a skill nowhere on the page however true it
-    is, so it backs a listed skill (`_skill_backing`) without appearing here.
+    was used, and its text may name a tool it moved away from. A skill fact,
+    or a detail of a role that is not on the page, shows a skill nowhere on the
+    page however true it is, so it backs a listed skill (`_skill_backing`)
+    without appearing here.
     """
     confirmed = {fid: f for fid, f in facts.items() if f.selectable()}
 
     def lineage(fid: str) -> list[str]:
-        """`fid` and its ancestors, nearest first, among confirmed facts."""
-        seen: list[str] = []
-        current: str | None = fid
-        while current is not None and current in confirmed and current not in seen:
-            seen.append(current)
-            current = confirmed[current].parent
-        return seen
+        return _lineage(fid, confirmed)
 
     cited = {
         fid
@@ -271,19 +353,64 @@ def skills_shown_by_entries(
     return {skill for skill in skills if _canon(skill) in listed}
 
 
+def omitted_current_roles(doc: ResumeDoc, facts: Mapping[str, Fact]) -> list[str]:
+    """Confirmed current roles that nothing on the page cites, each named by its
+    organization, else its title: the name reaches a lint message, so it is
+    never the fact's id.
+
+    A role is current when its dates have a start and no end. It is on the
+    page when a cited fact is the role or descends from it, or when another
+    current role at the same organization is: a retitled role is often a
+    second header fact beside the first, both current, one cited. An ended
+    role at the same organization does not count -- last summer's internship
+    on the page says nothing about this year's job. A role with no dates is
+    not judged; nothing says it is current.
+    """
+    confirmed = {fid: f for fid, f in facts.items() if f.selectable()}
+    current = {
+        fid: f
+        for fid, f in confirmed.items()
+        if f.kind is FactKind.EXPERIENCE
+        and f.dates is not None
+        and f.dates.start is not None
+        and f.dates.end is None
+    }
+    cited = {
+        fid
+        for section in doc.sections
+        for entry in section.entries
+        for fid in (*entry.sources, *(s for b in entry.bullets for s in b.sources))
+    }
+    on_page = {a for fid in cited for a in _lineage(fid, confirmed)}
+    shown = {_norm(current[a].organization or a) for a in on_page if a in current}
+    return sorted(
+        {
+            f.organization or f.title or "a role with no organization or title"
+            for fid, f in current.items()
+            if _norm(f.organization or fid) not in shown
+        }
+    )
+
+
 def check_claims(doc: ResumeDoc, facts: Mapping[str, Fact]) -> ClaimsResult:
     """Check identity, section titles, every entry header and every listed skill."""
     findings = identity_findings(doc.identity, facts)
     index = 0
     for section in doc.sections:
-        if _norm(section.title) not in SECTION_TITLES:
+        if _norm(section.title).replace(" & ", " and ") not in SECTION_TITLES:
             findings.append(f"section title {section.title!r} is not a recognised section name")
+        findings.extend(
+            f"skill group label {group.label!r} is not a recognised category name"
+            for group in section.skill_groups
+            if not (group.label.isascii() and group.label.isprintable())
+            or _norm(group.label).replace(" & ", " and ") not in SKILL_GROUP_LABELS
+        )
         for entry in section.entries:
             findings.extend(_check_entry(f"entry {index} ({entry.heading})", entry, facts))
             index += 1
     backed = _skill_backing(doc, facts)
     for section in doc.sections:
-        for skill in section.skills:
+        for skill in section.all_skills:
             if _canon(skill) not in backed:
                 findings.append(f"skill {skill!r} is backed by no confirmed fact")
     return ClaimsResult(findings=tuple(findings))

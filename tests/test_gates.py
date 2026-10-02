@@ -257,6 +257,27 @@ def test_a_layout_lint_makes_an_otherwise_clean_document_a_warning(tmp_path: Pat
     assert report.verdict == "warn"
 
 
+def test_a_current_role_left_off_the_page_is_a_lint_warning(tmp_path: Path) -> None:
+    """Mutation: drop the omitted roles from the lints gate -- this fails."""
+    current = Fact(
+        id="now",
+        kind=FactKind.EXPERIENCE,
+        text="Research Assistant at Harbor Lab",
+        organization="Harbor Lab",
+        title="Research Assistant",
+        dates=Dates(start="2025-09"),
+        provenance=CONFIRMED,
+    )
+    pdf = tmp_path / "resume.pdf"
+    render(_doc(), pdf)
+    report = run_gates(_doc(), {**FACTS, "now": current}, pdf)
+    lints = next(o for o in report.outcomes if o.gate == "lints")
+    assert lints.verdict == "warn"
+    assert lints.findings == (
+        "current_role_omitted: Harbor Lab is a current role and no entry cites it",
+    )
+
+
 def _detail(
     fid: str, parent: str, entities: list[str], *, text: str = "Kept the warehouse"
 ) -> Fact:

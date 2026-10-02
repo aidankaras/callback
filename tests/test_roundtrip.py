@@ -1217,7 +1217,7 @@ def test_a_bullet_broken_inside_a_hyphenated_word_is_recovered(tmp_path: Path) -
     render(doc, out)
     segments = [segment for row in naive_segments(out) for segment in row]
     assert _bullet_line_counts(out) == [2], "fixture no longer wraps as this test assumes"
-    assert any(s.endswith("reconciliation-") for s in segments), segments
+    assert any(s.endswith("month-end-close-") for s in segments), segments
 
     result = check_roundtrip(doc, out)
 

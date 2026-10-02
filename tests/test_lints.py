@@ -6,13 +6,14 @@ import pytest
 
 from core.checks.lints import FIX_ORDER, Lint, check_lints
 from core.profile.models import Identity
+from core.render.geometry import bullet_blocks, extract_lines
 from core.render.typst import render
 from core.resume.models import Bullet, Entry, ResumeDoc, Section
 
 LONG = (
     "Owned the migration of the nightly reporting pipeline to a partitioned columnar store, "
     "coordinating the cutover across three separate teams, their release calendars, and the "
-    "downstream consumers who depended on the previous schema remaining available"
+    "downstream consumers who depended on the previous schema remaining"
 )
 SHORT = ["Cut the queue to 300 items", "Shipped the loader", "Wrote the runbook"]
 
@@ -42,8 +43,11 @@ def test_a_clean_single_page_resume_has_no_lints(tmp_path: Path) -> None:
 @pytest.mark.slow
 def test_a_three_line_bullet_is_flagged(tmp_path: Path) -> None:
     lints = _lints(_doc(_entry("Northwind", [LONG, *SHORT[:2]])), tmp_path)
-    # This render also leaves one word on the bullet's last line, which is a
-    # real widow; what matters here is that line count is flagged and sorts first.
+    # LONG is sized so its third line holds one word, a real widow: one word
+    # shorter and it fits on two lines. What matters most is that line count
+    # is flagged and sorts first.
+    (block, *_) = bullet_blocks(extract_lines(tmp_path / "resume.pdf"))
+    assert (block.line_count, block.last_line_words) == (3, 1), "fixture no longer widows"
     assert lints[0].rule == "bullet_too_long", lints
     # Mutation: disable the widow rule -- this fails.
     assert "widow_line" in [lint.rule for lint in lints], lints
@@ -82,11 +86,12 @@ def test_an_entry_with_no_bullets_is_not_a_role_short_of_bullets(tmp_path: Path)
     assert _lints(doc, tmp_path) == []
 
 
-@pytest.mark.parametrize(("employers", "orphan"), [(6, False), (7, True)])
+@pytest.mark.parametrize(("employers", "orphan"), [(6, False), (9, True)])
 @pytest.mark.slow
 def test_page_count_and_an_orphan_tail_page(tmp_path: Path, employers: int, orphan: bool) -> None:
-    """Measured: six employers fill 98% and 82% of two pages; seven spill onto
-    a third page 12% full. Mutation: disable the orphan rule -- (7, True) fails."""
+    """Measured: six employers fill 99% and 57% of two pages; nine fill 99%,
+    99% and 32% of three. Both tails sit near the 0.5 threshold, one on each
+    side. Mutation: disable the orphan rule -- (9, True) fails."""
     from core.render.geometry import page_fill
 
     doc = _doc(*(_entry(f"Employer {n}", [LONG[:150]] * 6) for n in range(employers)))
@@ -106,6 +111,7 @@ def test_fix_order_is_total_and_starts_with_line_count() -> None:
         "bullet_too_long",
         "too_many_bullets",
         "too_few_bullets",
+        "current_role_omitted",
         "page_count",
         "widow_line",
         "orphan_tail_page",
@@ -143,7 +149,7 @@ def test_two_bullets_are_enough_for_a_role(tmp_path: Path) -> None:
 
 @pytest.mark.parametrize(
     ("employers", "pages", "max_pages", "flagged"),
-    [(6, 2, 1, True), (6, 2, 2, False), (7, 3, 2, True)],
+    [(6, 2, 1, True), (6, 2, 2, False), (9, 3, 2, True)],
 )
 @pytest.mark.slow
 def test_the_page_limit_is_the_callers(

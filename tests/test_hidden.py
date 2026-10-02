@@ -672,9 +672,9 @@ def test_clean_render_passes(tmp_path: Path) -> None:
 
     # The premise this test depends on, enforced rather than assumed: a
     # real render of this template stays comfortably clear of every
-    # threshold this gate checks. Mutation: lower MIN_FONT_SIZE past 16.0
-    # -- the size assertion below fails, because the template's own 16pt
-    # name heading would then fall under the floor.
+    # threshold this gate checks. Mutation: raise MIN_FONT_SIZE past 10.0
+    # -- the size assertion below fails, because the template's 10pt contact
+    # line would then fall under the floor.
     with pdfplumber.open(str(out)) as pdf:
         page = pdf.pages[0]
         sizes = {round(float(c["size"]), 2) for c in page.chars}
@@ -684,11 +684,15 @@ def test_clean_render_passes(tmp_path: Path) -> None:
     reader = PdfReader(str(out))
     metadata_keys = set(dict(reader.metadata or {}).keys())
 
-    assert sizes == {9.0, 10.0, 11.0, 16.0}, sizes
-    assert colours == {(0.0,)}, colours
+    assert sizes == {10.0, 10.5, 11.0, 20.0}, sizes
+    # Black body text and the navy accent on the name and section headings.
+    assert colours == {(0.0,), (0.12156863, 0.22745098, 0.37254903)}, colours
     assert background is not None
     assert background == (1.0, 1.0, 1.0), background
-    assert contrast_ratio((0.0, 0.0, 0.0), background) > MIN_CONTRAST_RATIO
+    for colour in colours:
+        rgb = to_rgb(colour)
+        assert rgb is not None
+        assert contrast_ratio(rgb, background) > MIN_CONTRAST_RATIO
     assert not is_default_ignorable(raw)
     allowed = {"/Title", "/Author", "/Producer", "/Creator", "/CreationDate", "/ModDate"}
     assert metadata_keys <= allowed

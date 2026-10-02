@@ -60,6 +60,8 @@ def to_text(doc: ResumeDoc, *, width: int = 78) -> str:
                 lines += _wrap(bullet.text, width, first="- ", rest="  ")
         if section.skills:
             lines += _wrap(", ".join(section.skills), width)
+        for group in section.skill_groups:
+            lines += _wrap(f"{group.label}: {', '.join(group.skills)}", width)
     return "\n".join(lines) + "\n"
 
 
@@ -81,7 +83,7 @@ def _critical(doc: ResumeDoc) -> list[tuple[str, str]]:
                 if value:
                     fields.append((f"{name}[{index}]", value))
             index += 1
-        fields += [(f"skill[{n}][{i}]", skill) for i, skill in enumerate(section.skills)]
+        fields += [(f"skill[{n}][{i}]", skill) for i, skill in enumerate(section.all_skills)]
     return fields
 
 

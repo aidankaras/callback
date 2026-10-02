@@ -45,7 +45,7 @@ def test_a_section_can_hold_a_skills_list_with_no_entries() -> None:
 
 
 def test_a_section_cannot_hold_both_entries_and_skills() -> None:
-    with pytest.raises(ValidationError, match="both entries and skills"):
+    with pytest.raises(ValidationError, match="has entries and skills; a section holds only one"):
         Section(title="Skills", entries=[Entry(heading="X")], skills=["Python"])
 
 

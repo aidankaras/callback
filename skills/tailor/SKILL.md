@@ -134,12 +134,22 @@ Tailoring a resume to a posting needs only the section below.
    `$CALLBACK_HOME/inbox/<job-id>.md`, first line `# <role> - <company>`. The
    `job-id` is short, lowercase letters, digits and hyphens, e.g.
    `acme-ml-intern`. Every later step reads this one copy.
-2. **Select, no prose yet.** From the confirmed facts, choose the entries,
-   bullets and skills that answer this posting, and their order. `fit` reports
+2. **Select, no prose yet.** Start from the user's base document: the saved
+   template they call their own resume (`callback template list`; ask once
+   which it is if more than one exists). It is their own judgement of their
+   best material and its story. Tailoring is a diff against it, and every
+   change needs a reason in this posting: "replaced bullet X with Y because
+   the posting asks for Z." A change with no posting reason is not made.
+   With no base document, choose from the confirmed facts. `fit` reports
    which of the posting's technologies confirmed facts back. Say what you
-   chose and what you cut, in a short list. What to select on:
-   - **A requirement the posting states, answered by a fact.** Take those
-     first.
+   changed and why, in a short list. What to select on:
+   - **A technical requirement the posting states, answered by a fact.**
+     Take those first.
+   - **A commodity requirement is answered once, in the skills section.**
+     Office suites, communication, teamwork: list the skill if a confirmed
+     fact backs it, and never spend a bullet on it. A bullet written to name a
+     commodity tool displaces an outcome and makes a strong candidate read
+     like everyone else.
    - **Outcomes over duties.** A fact carrying a number or a result beats one
      describing a responsibility; put the strongest one first in its entry,
      since a reader who stops reading stops at the top.
@@ -154,11 +164,11 @@ Tailoring a resume to a posting needs only the section below.
 3. **Ask about gaps.** List each requirement with no supporting fact and ask
    the user about it (use `AskUserQuestion` for yes/no). Add true answers as
    facts; the user confirms them.
-4. **Phrase.** Write `$CALLBACK_HOME/outputs/<job-id>/draft/resume.yaml`. For a
-   role like one already tailored, `callback template list` and
-   `callback template use <name> --job <job-id>` start from that document
-   instead of a blank one -- then edit it down for this posting rather than
-   sending it as it is. After a build passes, offer
+4. **Phrase.** Write `$CALLBACK_HOME/outputs/<job-id>/draft/resume.yaml`.
+   `callback template use <name> --job <job-id>` copies the base document (or,
+   for a role like one already tailored, that document) into the draft; then
+   apply the diff from step 2 rather than sending it as it is. After a build
+   passes, offer
    `callback template save <job-id> --name <name>` for the next one.
    - Keep each bullet's claim exactly as its fact states it. You may reorder
      words and use the posting's term for the same skill.
@@ -174,8 +184,8 @@ Tailoring a resume to a posting needs only the section below.
    user the remaining findings.
 7. **Report:**
    - the gate summary;
-   - what was selected, and why for this posting;
-   - what was cut;
+   - each change from the base document, and the posting's reason for it
+     (or what was selected and cut, with no base document);
    - the questions asked and their answers;
    - where the PDF is (`outputs/<job-id>/draft/resume.pdf`).
 
