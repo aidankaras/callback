@@ -106,14 +106,24 @@ _YEAR = re.compile(r"\b(20\d\d)\b")
 # ("juniors, seniors or PhD students", "a four-year university or PhD
 # program"): an admitting match clears every degree finding in the posting,
 # so "a PhD program at an accredited university" or "senior engineers" must
-# not count. A plural is a noun for students ("juniors or seniors"); a singular
-# is usually an adjective ("junior or senior engineers"), so it counts only in
-# a list of levels that ends in "student".
+# not count. A singular year word is often an adjective ("junior or senior
+# engineers"), so a list of them followed by a colleague noun does not count.
+# The test is that denylist rather than an allowlist ending in "student"
+# because the two errors cost differently: a false admission leaves a posting
+# on the list, while a missed one can make a knockout of "a rising junior or
+# senior, or a current PhD student" and hide a posting the candidate qualifies
+# for.
 _LIST_SEP = r"\s*(?:,\s*(?:or\b|and\b)?|/|or\b|and\b)\s*"
-_LIST_LEVEL = r"(?:juniors?|seniors?|sophomores?|master[\u2019']?s|ph\.?\s?d\.?)"
+_RANK_WORD = r"(?:juniors?|seniors?|sophomores?|staff|principal|lead|mid-level)"
+_COLLEAGUE = (
+    r"(?:engineer|engineering|researcher|scientist|developer|analyst|staff|member|colleague"
+    r"|leader|leadership|manager|management|role|position|level|team|people|professional"
+    r"|mentor|trader|quant|designer|associate|partner|executive|hire|talent|software|data"
+    r"|technical|technologist|employee|consultant|investor|banker|portfolio|stakeholder)\w*"
+)
 _YEAR_OF_STUDY = (
-    r"(?:juniors|seniors)(?=\s*(?:,|/|or\b))"
-    rf"|(?:junior|senior)(?=(?:{_LIST_SEP}{_LIST_LEVEL})+\s+students?\b)"
+    r"(?:juniors|seniors)(?=\s*(?:,|/|or\b|and\b))"
+    rf"|(?:junior|senior|sophomore)(?={_LIST_SEP})(?!(?:{_LIST_SEP}{_RANK_WORD})*\s+{_COLLEAGUE}\b)"
 )
 _DEGREE_LEVELS: dict[DegreeLevel, re.Pattern[str]] = {
     "bachelor": re.compile(
@@ -284,10 +294,13 @@ def check_eligibility(text: str, profile: Profile) -> Eligibility:
         # One finding per rule, the most severe any sentence gives it: sentences
         # are read in document order, and a stretch early in a posting must not
         # hide a knockout later in it.
+        # The replacement moves to the end, so findings stay in the order of
+        # the sentences they quote.
         for i, found in enumerate(findings):
             if found.rule == rule:
                 if _SEVERITY[level] < _SEVERITY[found.level]:
-                    findings[i] = Finding(rule, level, quote.strip(), reason)
+                    del findings[i]
+                    break
                 return
         findings.append(Finding(rule, level, quote.strip(), reason))
 

@@ -142,6 +142,12 @@ def test_a_range_of_years_counts_from_its_low_end(
         "Currently pursuing a BSc, MSc or PhD in Computer Science",
         "Must be currently enrolled as a junior, senior, or PhD student",
         "Open to rising juniors, seniors or PhD candidates.",
+        "Candidates must be a rising junior or senior, or a current PhD student.",
+        "Must be enrolled as a junior or senior in college or a PhD student.",
+        "Must be a current sophomore, junior or senior, or a master's or PhD student.",
+        "Rising Junior or Senior (Class of 2028 or 2029), or Master's/PhD student.",
+        "Students entering their junior or senior year, or PhD students, are eligible.",
+        "Open only to rising juniors and PhD students.",
         "Current students (BS/MS/PhD) welcome",
         "Currently enrolled in a four-year university or PhD program",
         "Currently in your third year of college or in a PhD program",
@@ -171,12 +177,19 @@ def test_a_year_of_study_word_alone_admits_no_one() -> None:
     assert kinds(text) == [("degree", "knockout")]
 
 
-def test_singular_year_words_in_a_list_of_colleagues_admit_no_one() -> None:
-    """ "junior or senior engineers" is a list, but of adjectives: a singular
-    year word counts only in a list of levels ending in "student".
-    Mutation: count a singular year word followed by "or" -- the sentence
-    admits the candidate and clears the knockout."""
-    colleagues = "You will work with junior or senior engineers and PhD researchers."
+@pytest.mark.parametrize(
+    "colleagues",
+    [
+        "You will work with junior or senior engineers and PhD researchers.",
+        "You will work with junior and senior engineers and PhD researchers.",
+        "Collaborate with junior, senior and staff engineers and PhD researchers.",
+        "Senior or staff engineers and PhD researchers mentor every intern.",
+    ],
+)
+def test_year_words_describing_colleagues_admit_no_one(colleagues: str) -> None:
+    """A singular year word followed by a colleague noun is an adjective.
+    Mutation: drop the colleague-noun lookahead -- the sentence admits the
+    candidate and clears the knockout."""
     assert kinds(colleagues) == [("degree", "stretch")]  # premise: names no level of ours
     assert kinds(f"Open to current PhD students only. {colleagues}") == [("degree", "knockout")]
 
@@ -191,6 +204,16 @@ def test_a_knockout_after_a_stretch_for_the_same_rule_is_kept() -> None:
     assert kinds(knockout) == [("degree", "knockout")]  # premise
     assert kinds(f"{stretch} {knockout}") == [("degree", "knockout")]
     assert kinds(f"{knockout} {stretch}") == [("degree", "knockout")]
+
+
+def test_a_replaced_finding_keeps_findings_in_document_order() -> None:
+    """Mutation: replace the stretch in its own slot -- the degree finding,
+    quoting the last sentence, is listed before the experience one."""
+    text = (
+        "We are seeking exceptional PhD candidates. Requires 3+ years of experience"
+        " in Python. Open to current PhD students only."
+    )
+    assert kinds(text) == [("experience", "stretch"), ("degree", "knockout")]
 
 
 @pytest.mark.parametrize(
