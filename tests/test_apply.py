@@ -8,7 +8,14 @@ from pathlib import Path
 
 import pytest
 
-from core.apply import ApplyError, Target, apply, load_applications, record_outcome
+from core.apply import (
+    ApplyError,
+    Target,
+    apply,
+    load_applications,
+    record_outcome,
+    void_application,
+)
 from core.paths import ensure_home
 
 NOW = datetime(2026, 10, 1, 15, 0, tzinfo=UTC)
@@ -159,6 +166,64 @@ def test_an_outcome_is_recorded_against_its_application(home: Path) -> None:
     ]
     with pytest.raises(ApplyError, match="no application"):
         record_outcome("never-applied", "offer", now=NOW)
+
+
+def test_an_application_never_submitted_can_be_voided(home: Path) -> None:
+    """Voided, it leaves the record and stops counting toward the volume rules,
+    and the ledger says so. Mutation: skip the save -- the record stays."""
+    _built(home, "acme-ml")
+    apply(_target(), now=NOW)
+    assert [a.job_id for a in load_applications()] == ["acme-ml"]
+
+    void_application("acme-ml", now=NOW + timedelta(hours=1))
+
+    assert load_applications() == []
+    ledger = (home / "ledger.log").read_text().splitlines()
+    assert [json.loads(line)["event"] for line in ledger][-2:] == ["apply", "void"]
+    apply(_target(), now=NOW + timedelta(hours=2))  # the same job is no longer a duplicate
+
+
+def test_an_application_marked_withdrew_can_still_be_voided(home: Path) -> None:
+    """`withdrew` was the only way to mark an unsent application before `void`.
+    Mutation: refuse on any outcome -- this fails."""
+    _built(home, "acme-ml")
+    apply(_target(), now=NOW)
+    record_outcome("acme-ml", "withdrew", now=NOW + timedelta(hours=1))
+    void_application("acme-ml", now=NOW + timedelta(hours=2))
+    assert load_applications() == []
+
+
+def test_an_application_with_an_outcome_cannot_be_voided(home: Path) -> None:
+    """Mutation: drop the outcome check -- a replied-to application vanishes."""
+    _built(home, "acme-ml")
+    apply(_target(), now=NOW)
+    record_outcome("acme-ml", "viewed", now=NOW + timedelta(days=1))
+    with pytest.raises(ApplyError, match="was submitted"):
+        void_application("acme-ml", now=NOW + timedelta(days=2))
+    assert [a.job_id for a in load_applications()] == ["acme-ml"]
+    with pytest.raises(ApplyError, match="no application"):
+        void_application("never-applied", now=NOW)
+    from core.cli import main
+
+    assert main(["void", "acme-ml"]) == 3
+
+
+def test_a_void_whose_save_fails_says_so(home: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Mutation: let the OSError escape `_save` -- `void_application` must wrap it
+    into an `ApplyError` naming the ledger rather than let it propagate."""
+    import core.apply
+
+    _built(home, "acme-ml")
+    apply(_target(), now=NOW)
+
+    def full(_applications: object) -> None:
+        raise OSError(28, "No space left on device")
+
+    monkeypatch.setattr(core.apply, "_save", full)
+    with pytest.raises(ApplyError, match="ledger records the void"):
+        void_application("acme-ml", now=NOW + timedelta(hours=1))
+    with pytest.raises(ValueError, match="timezone"):
+        void_application("acme-ml", now=datetime(2026, 10, 1, 18, 0))  # noqa: DTZ001
 
 
 def test_a_source_must_be_one_of_the_known_channels() -> None:
