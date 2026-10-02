@@ -132,7 +132,7 @@ class SkillGroup(BaseModel):
             raise ValueError("a skill group's label cannot be blank")
         if "," in label or ":" in label:
             raise ValueError(f"skill group label {label!r} cannot contain a comma or a colon")
-        return label
+        return label.strip()
 
     @field_validator("skills")
     @classmethod

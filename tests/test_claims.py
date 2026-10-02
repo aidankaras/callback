@@ -123,6 +123,9 @@ def test_an_honest_document_passes() -> None:
         ({"start": "Jun 2023"}, "start date 'Jun 2023'"),
         ({"end": "Present"}, "end date 'Present'"),
         ({"start": "Summer 2024"}, "start date 'Summer 2024'"),
+        # The right date with a claim beside it; the cell renders bold.
+        ({"end": "Aug 2025 \u00b7 Promoted to Lead Engineer"}, "end date 'Aug 2025"),
+        ({"start": "Top performer, Jun 2024"}, "start date 'Top performer"),
         ({"sources": []}, "cites no fact"),
         ({"sources": ["nope"]}, "unknown fact"),
     ],

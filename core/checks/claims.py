@@ -66,6 +66,9 @@ from core.profile.models import Fact, FactKind, Identity
 from core.resume.models import Entry, ResumeDoc
 
 _YEAR = re.compile(r"^\d{4}$")
+# A header date is the date alone: one month and year, nothing around it,
+# since the cell renders bold and "Aug 2025 · Promoted to Lead" holds one date.
+_MONTH_YEAR = re.compile(r"[A-Za-z]{3,9}\.?\s+\d{4}")
 _HEADER_KINDS = frozenset({FactKind.EXPERIENCE, FactKind.EDUCATION, FactKind.PROJECT})
 
 SECTION_TITLES = frozenset(
@@ -103,7 +106,9 @@ SECTION_TITLES = frozenset(
 # A skill group's label renders bold beside its skills, and bold text reads as a
 # claim, yet no fact can back a heading. So a label is a category name from this
 # list, never free text: "Certified Cloud Architect: Python" would otherwise pass
-# every gate. Compared casefolded, with "&" read as "and".
+# every gate. Compared casefolded, with "&" read as "and", and only when the
+# label is printable ASCII: casefolding maps the long s (U+017F) to "s" and the Kelvin sign to
+# "k", so "Tools" spelled with it would otherwise pass and print as something off the list.
 SKILL_GROUP_LABELS = frozenset(
     {
         "languages",
@@ -161,7 +166,11 @@ def _date_ok(value: str, fact_date: str | None, *, is_end: bool) -> bool:
     if _YEAR.match(value.strip()):
         return value.strip() == fact_date[:4]
     parsed = iso_month_dates(value)
-    return len(parsed) == 1 and parsed[0] == fact_date[:7]
+    return (
+        _MONTH_YEAR.fullmatch(value.strip()) is not None
+        and len(parsed) == 1
+        and parsed[0] == fact_date[:7]
+    )
 
 
 def _mismatches(entry: Entry, fact: Fact) -> list[str]:
@@ -393,7 +402,8 @@ def check_claims(doc: ResumeDoc, facts: Mapping[str, Fact]) -> ClaimsResult:
         findings.extend(
             f"skill group label {group.label!r} is not a recognised category name"
             for group in section.skill_groups
-            if _norm(group.label).replace(" & ", " and ") not in SKILL_GROUP_LABELS
+            if not (group.label.isascii() and group.label.isprintable())
+            or _norm(group.label).replace(" & ", " and ") not in SKILL_GROUP_LABELS
         )
         for entry in section.entries:
             findings.extend(_check_entry(f"entry {index} ({entry.heading})", entry, facts))

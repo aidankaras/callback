@@ -103,13 +103,25 @@ def test_a_category_label_passes_claims_in_either_conjunction(label: str) -> Non
 
 
 @pytest.mark.parametrize(
-    "label", ["Certified Cloud Architect", "Expert Languages", "Languages & Kubernetes"]
+    "label",
+    [
+        "Certified Cloud Architect",
+        "Expert Languages",
+        "Languages & Kubernetes",
+        "Tool\u017f",  # long s: casefolds to "tools"
+        "Framewor\u212as",  # Kelvin sign: casefolds to "k"
+        "Machine\x1cLearning",  # a separator str.split() treats as a space
+    ],
 )
 def test_a_label_outside_the_category_list_fails_claims(label: str) -> None:
     """A bold label reads as a claim and no fact can back it. Mutation: skip
     the label check -- each of these renders as an unbacked bold claim."""
     findings = check_claims(grouped((label, ["Python"])), _python_facts()).findings
     assert findings == (f"skill group label {label!r} is not a recognised category name",)
+
+
+def test_a_label_is_stripped_so_its_colon_stays_attached() -> None:
+    assert SkillGroup(label="  Tools  ", skills=["Python"]).label == "Tools"
 
 
 def _python_facts() -> dict[str, Fact]:
