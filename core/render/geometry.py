@@ -22,21 +22,24 @@ The tolerance is **one value for the whole call**, computed as
 `tolerance_ratio * font_size` from the caller's declared body size — it is
 not re-derived per line from each line's own rendered size. That is
 deliberate rather than an omission. Scaling per line would give this
-template's 16pt centred name a 4.8pt tolerance against a body line pitch of
-5.5pt (`leading: 0.55em` at 10pt in `templates/resume.typ`), making a false
-*merge* of two genuinely adjacent lines more likely in order to fix a false
-split that no measurement exhibits: the largest same-line offset observed on
-a real render is 0.03pt, which is 90x to 160x inside the tolerance across
-every size the template uses (2.7pt at 9pt text through 4.8pt at the 16pt
-name).
+template's 20pt name a 6.0pt tolerance, making a false *merge* of two
+genuinely adjacent lines more likely in order to fix a false split that no
+measurement exhibits. Measured with `extract_lines` on renders of
+`templates/resume.typ` (10.5pt body, `leading: 0.63em`): words on one visual
+line share a `top` exactly (0.000pt spread), because every right-hand cell is
+set at its own row's size; the smallest distance between two adjacent lines'
+tops is 11.34pt on a full one-page, 49-line resume and 11.55pt on
+`tests/test_geometry.py`'s fixture; and the line count is unchanged at every
+tolerance from 0.5pt to 9pt.
 
 So the number that matters to a future reader is the margin, not the ratio:
-the default 3.0pt tolerance sits against a 5.5pt line pitch, roughly 1.8x.
-A template with tighter leading than this one's — or a caller passing a
-`font_size` well above the dominant body size — is what breaks this, by
-silently collapsing two real lines into one and undercounting `line_count`.
-Neither is currently reachable; both are worth a measurement before
-changing `leading` or the default.
+the default 3.0pt tolerance sits against an 11.34pt smallest line-to-line
+distance, roughly 3.8x. Note that this distance is the line pitch, not the
+`leading` value, which is only the space between lines. A template with much
+tighter line spacing, a row mixing sizes whose tops differ by more than the
+tolerance, or a caller passing a `font_size` well above the body size is what
+breaks this: the first and last by collapsing two real lines into one, the
+mixed row by splitting one line in two. Re-measure before changing any of them.
 
 **Why PDF geometry, not Typst introspection.** Two alternatives were tried
 before this one and both measurably fail on this project's own bullets:

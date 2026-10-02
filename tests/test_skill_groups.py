@@ -96,6 +96,41 @@ def test_an_unbacked_skill_inside_a_group_fails_claims() -> None:
     assert not any("'Python'" in f for f in findings)
 
 
+@pytest.mark.parametrize("label", ["Languages & Tools", "languages and tools", "AI Engineering"])
+def test_a_category_label_passes_claims_in_either_conjunction(label: str) -> None:
+    findings = check_claims(grouped((label, ["Python"])), _python_facts()).findings
+    assert not any("label" in f for f in findings)
+
+
+@pytest.mark.parametrize(
+    "label", ["Certified Cloud Architect", "Expert Languages", "Languages & Kubernetes"]
+)
+def test_a_label_outside_the_category_list_fails_claims(label: str) -> None:
+    """A bold label reads as a claim and no fact can back it. Mutation: skip
+    the label check -- each of these renders as an unbacked bold claim."""
+    findings = check_claims(grouped((label, ["Python"])), _python_facts()).findings
+    assert findings == (f"skill group label {label!r} is not a recognised category name",)
+
+
+def _python_facts() -> dict[str, Fact]:
+    """Facts backing the identity and the skill Python, so a label is the only
+    thing left to fail."""
+    return {
+        "skills": Fact.model_validate(
+            {"id": "skills", "kind": FactKind.SKILL, "text": "Python", "provenance": CONFIRMED}
+        ),
+        "contact": Fact.model_validate(
+            {
+                "id": "contact",
+                "kind": FactKind.LINKS,
+                "text": "Dana Vex, dana@example.com",
+                "entities": ["Dana Vex", "dana@example.com"],
+                "provenance": CONFIRMED,
+            }
+        ),
+    }
+
+
 # --- the text export ----------------------------------------------------------------
 
 

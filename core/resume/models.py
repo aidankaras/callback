@@ -114,9 +114,10 @@ def _check_skill_names(skills: list[str]) -> list[str]:
 class SkillGroup(BaseModel):
     """One labelled row of a skills section: `Languages & Tools: Python, SQL`.
 
-    The label is a heading for the reader, not a claim: only the skills are
-    checked against facts. It may contain neither a comma nor a colon, for
-    the reason `_check_skill_names` gives for skills.
+    The skills are checked against facts; the label cannot be, so the claims
+    gate accepts only a category name from `SKILL_GROUP_LABELS` -- a bold
+    heading is otherwise an unbacked claim. It may contain neither a comma nor
+    a colon, for the reason `_check_skill_names` gives for skills.
     """
 
     model_config = {"extra": "forbid"}

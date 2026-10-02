@@ -410,6 +410,14 @@ def test_an_ended_role_at_the_same_organization_does_not_hide_a_current_one() ->
     assert omitted_current_roles(doc(entry={"sources": ["intern"]}), FACTS) == ["Harbor Lab"]
 
 
+def test_a_current_role_with_no_organization_is_named_by_its_title() -> None:
+    """The name reaches a lint message. Mutation: fall back to the fact id --
+    the message names `current`."""
+    unnamed = CURRENT.model_copy(update={"organization": None})
+    assert unnamed.title  # premise: a title to fall back to
+    assert omitted_current_roles(doc(), {**FACTS, "current": unnamed}) == [unnamed.title]
+
+
 def test_a_retired_current_role_is_not_an_omission() -> None:
     retired = CURRENT.model_copy(update={"retired_on": date(2026, 9, 30)})
     assert omitted_current_roles(doc(), {**FACTS, "current": retired}) == []

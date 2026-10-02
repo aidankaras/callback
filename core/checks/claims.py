@@ -100,6 +100,38 @@ SECTION_TITLES = frozenset(
     }
 )
 
+# A skill group's label renders bold beside its skills, and bold text reads as a
+# claim, yet no fact can back a heading. So a label is a category name from this
+# list, never free text: "Certified Cloud Architect: Python" would otherwise pass
+# every gate. Compared casefolded, with "&" read as "and".
+SKILL_GROUP_LABELS = frozenset(
+    {
+        "languages",
+        "programming languages",
+        "tools",
+        "languages and tools",
+        "libraries",
+        "frameworks",
+        "libraries and frameworks",
+        "databases",
+        "data",
+        "data engineering",
+        "cloud",
+        "cloud and devops",
+        "devops",
+        "platforms",
+        "machine learning",
+        "ai engineering",
+        "statistics",
+        "mathematics",
+        "quantitative methods",
+        "methods",
+        "software engineering",
+        "engineering practices",
+        "web development",
+    }
+)
+
 
 @dataclass(frozen=True)
 class ClaimsResult:
@@ -313,7 +345,9 @@ def skills_shown_by_entries(
 
 
 def omitted_current_roles(doc: ResumeDoc, facts: Mapping[str, Fact]) -> list[str]:
-    """Organizations of confirmed current roles that nothing on the page cites.
+    """Confirmed current roles that nothing on the page cites, each named by its
+    organization, else its title: the name reaches a lint message, so it is
+    never the fact's id.
 
     A role is current when its dates have a start and no end. It is on the
     page when a cited fact is the role or descends from it, or when another
@@ -342,7 +376,7 @@ def omitted_current_roles(doc: ResumeDoc, facts: Mapping[str, Fact]) -> list[str
     shown = {_norm(current[a].organization or a) for a in on_page if a in current}
     return sorted(
         {
-            f.organization or fid
+            f.organization or f.title or "a role with no organization or title"
             for fid, f in current.items()
             if _norm(f.organization or fid) not in shown
         }
@@ -356,6 +390,11 @@ def check_claims(doc: ResumeDoc, facts: Mapping[str, Fact]) -> ClaimsResult:
     for section in doc.sections:
         if _norm(section.title).replace(" & ", " and ") not in SECTION_TITLES:
             findings.append(f"section title {section.title!r} is not a recognised section name")
+        findings.extend(
+            f"skill group label {group.label!r} is not a recognised category name"
+            for group in section.skill_groups
+            if _norm(group.label).replace(" & ", " and ") not in SKILL_GROUP_LABELS
+        )
         for entry in section.entries:
             findings.extend(_check_entry(f"entry {index} ({entry.heading})", entry, facts))
             index += 1
