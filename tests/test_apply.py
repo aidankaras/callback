@@ -209,7 +209,8 @@ def test_an_application_with_an_outcome_cannot_be_voided(home: Path) -> None:
 
 
 def test_a_void_whose_save_fails_says_so(home: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Mutation: let the OSError escape -- the CLI exits with a traceback."""
+    """Mutation: let the OSError escape `_save` -- `void_application` must wrap it
+    into an `ApplyError` naming the ledger rather than let it propagate."""
     import core.apply
 
     _built(home, "acme-ml")

@@ -59,6 +59,7 @@ from core.profile.models import Fact
 
 PROFILE_FILE = "profile.yaml"
 Level = Literal["knockout", "unknown", "stretch"]
+_SEVERITY: dict[Level, int] = {"knockout": 0, "unknown": 1, "stretch": 2}
 DegreeLevel = Literal["high school", "associate", "bachelor", "master", "phd"]
 FRESH_DAYS = 30
 STRETCH_YEARS = 2
@@ -105,10 +106,18 @@ _YEAR = re.compile(r"\b(20\d\d)\b")
 # ("juniors, seniors or PhD students", "a four-year university or PhD
 # program"): an admitting match clears every degree finding in the posting,
 # so "a PhD program at an accredited university" or "senior engineers" must
-# not count.
+# not count. A plural is a noun for students ("juniors or seniors"); a singular
+# is usually an adjective ("junior or senior engineers"), so it counts only in
+# a list of levels that ends in "student".
+_LIST_SEP = r"\s*(?:,\s*(?:or\b|and\b)?|/|or\b|and\b)\s*"
+_LIST_LEVEL = r"(?:juniors?|seniors?|sophomores?|master[\u2019']?s|ph\.?\s?d\.?)"
+_YEAR_OF_STUDY = (
+    r"(?:juniors|seniors)(?=\s*(?:,|/|or\b))"
+    rf"|(?:junior|senior)(?=(?:{_LIST_SEP}{_LIST_LEVEL})+\s+students?\b)"
+)
 _DEGREE_LEVELS: dict[DegreeLevel, re.Pattern[str]] = {
     "bachelor": re.compile(
-        r"\b(?:bachelor|undergrad|b\.?\s?sc?\b|(?:juniors?|seniors?)(?=\s*(?:,|/|or\b))"
+        rf"\b(?:bachelor|undergrad|b\.?\s?sc?\b|{_YEAR_OF_STUDY}"
         r"|four-year (?:college|university)|of college\b|college (?:students?|juniors?|seniors?))",
         re.I,
     ),
@@ -272,8 +281,15 @@ def check_eligibility(text: str, profile: Profile) -> Eligibility:
     auth = profile.work_authorization
 
     def add(rule: str, level: Level, quote: str, reason: str) -> None:
-        if not any(f.rule == rule for f in findings):
-            findings.append(Finding(rule, level, quote.strip(), reason))
+        # One finding per rule, the most severe any sentence gives it: sentences
+        # are read in document order, and a stretch early in a posting must not
+        # hide a knockout later in it.
+        for i, found in enumerate(findings):
+            if found.rule == rule:
+                if _SEVERITY[level] < _SEVERITY[found.level]:
+                    findings[i] = Finding(rule, level, quote.strip(), reason)
+                return
+        findings.append(Finding(rule, level, quote.strip(), reason))
 
     # Board content arrives as HTML more often than not: "&nbsp;" and tags would
     # otherwise sit between the words every rule below expects to be adjacent.

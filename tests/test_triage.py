@@ -101,7 +101,7 @@ def test_a_graduation_window_with_no_graduation_on_file_is_a_question() -> None:
     assert kinds(text, Profile(work_authorization="US citizen")) == [("graduation", "unknown")]
 
 
-# --- degree and experience (stretches, never knockouts) ---------------------------------
+# --- degree and experience ------------------------------------------------------------
 
 
 def test_a_graduate_degree_requirement_is_a_stretch_for_an_undergraduate() -> None:
@@ -141,6 +141,7 @@ def test_a_range_of_years_counts_from_its_low_end(
         "Currently pursuing a BS, MS, or PhD in Computer Science",
         "Currently pursuing a BSc, MSc or PhD in Computer Science",
         "Must be currently enrolled as a junior, senior, or PhD student",
+        "Open to rising juniors, seniors or PhD candidates.",
         "Current students (BS/MS/PhD) welcome",
         "Currently enrolled in a four-year university or PhD program",
         "Currently in your third year of college or in a PhD program",
@@ -168,6 +169,28 @@ def test_a_year_of_study_word_alone_admits_no_one() -> None:
     the PhD finding is cleared."""
     text = "Open to current PhD students only. You will work with senior researchers."
     assert kinds(text) == [("degree", "knockout")]
+
+
+def test_singular_year_words_in_a_list_of_colleagues_admit_no_one() -> None:
+    """ "junior or senior engineers" is a list, but of adjectives: a singular
+    year word counts only in a list of levels ending in "student".
+    Mutation: count a singular year word followed by "or" -- the sentence
+    admits the candidate and clears the knockout."""
+    colleagues = "You will work with junior or senior engineers and PhD researchers."
+    assert kinds(colleagues) == [("degree", "stretch")]  # premise: names no level of ours
+    assert kinds(f"Open to current PhD students only. {colleagues}") == [("degree", "knockout")]
+
+
+def test_a_knockout_after_a_stretch_for_the_same_rule_is_kept() -> None:
+    """Sentences are read in document order; the most severe finding per rule
+    wins. Mutation: keep the first finding per rule -- the stretch hides the
+    knockout."""
+    stretch = "We are seeking exceptional PhD candidates to join our Quant Resource team."
+    knockout = "Open to current PhD students only."
+    assert kinds(stretch) == [("degree", "stretch")]  # premise
+    assert kinds(knockout) == [("degree", "knockout")]  # premise
+    assert kinds(f"{stretch} {knockout}") == [("degree", "knockout")]
+    assert kinds(f"{knockout} {stretch}") == [("degree", "knockout")]
 
 
 @pytest.mark.parametrize(
