@@ -112,7 +112,8 @@ _YEAR = re.compile(r"\b(20\d\d)\b")
 # because the two errors cost differently: a false admission leaves a posting
 # on the list, while a missed one can make a knockout of "a rising junior or
 # senior, or a current PhD student" and hide a posting the candidate qualifies
-# for.
+# for. Several colleague words are also adjectives ("software engineering
+# majors"), so one followed by a student noun in the same clause does not count.
 _LIST_SEP = r"\s*(?:,\s*(?:or\b|and\b)?|/|or\b|and\b)\s*"
 _RANK_WORD = r"(?:juniors?|seniors?|sophomores?|staff|principal|lead|mid-level)"
 _COLLEAGUE = (
@@ -121,9 +122,11 @@ _COLLEAGUE = (
     r"|mentor|trader|quant|designer|associate|partner|executive|hire|talent|software|data"
     r"|technical|technologist|employee|consultant|investor|banker|portfolio|stakeholder)\w*"
 )
+_NOT_A_STUDENT_NOUN = r"(?![^.,;]{0,40}?\b(?:students?|majors?|undergrad\w*|candidates?)\b)"
 _YEAR_OF_STUDY = (
     r"(?:juniors|seniors)(?=\s*(?:,|/|or\b|and\b))"
-    rf"|(?:junior|senior|sophomore)(?={_LIST_SEP})(?!(?:{_LIST_SEP}{_RANK_WORD})*\s+{_COLLEAGUE}\b)"
+    rf"|(?:junior|senior|sophomore)(?={_LIST_SEP})"
+    rf"(?!(?:{_LIST_SEP}{_RANK_WORD})*\s+{_COLLEAGUE}\b{_NOT_A_STUDENT_NOUN})"
 )
 _DEGREE_LEVELS: dict[DegreeLevel, re.Pattern[str]] = {
     "bachelor": re.compile(
