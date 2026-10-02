@@ -761,6 +761,7 @@ def _cmd_outcome(args: argparse.Namespace) -> int:
     except ApplyError as exc:
         print(f"callback outcome: {exc}", file=sys.stderr)
         return 3
+    print(f"recorded {args.kind} for {args.job}")
     return 0
 
 
@@ -774,6 +775,7 @@ def _cmd_void(args: argparse.Namespace) -> int:
     except (ApplyError, OSError) as exc:
         print(f"callback void: {exc}", file=sys.stderr)
         return 3
+    print(f"voided {args.job}: its application record is removed")
     return 0
 
 
