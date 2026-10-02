@@ -183,6 +183,20 @@ def test_an_application_never_submitted_can_be_voided(home: Path) -> None:
     apply(_target(), now=NOW + timedelta(hours=2))  # the same job is no longer a duplicate
 
 
+def test_the_cli_says_a_void_happened(home: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """A void that succeeds silently reads the same as one that never ran.
+    Mutation: drop the confirmation -- stdout is empty."""
+    from core.cli import main
+
+    _built(home, "acme-ml")
+    apply(_target(), now=NOW)
+    capsys.readouterr()
+    assert main(["void", "acme-ml"]) == 0
+    assert capsys.readouterr().out == "voided acme-ml: its application record is removed\n"
+    assert main(["void", "acme-ml"]) == 3
+    assert capsys.readouterr().out == ""
+
+
 def test_an_application_marked_withdrew_can_still_be_voided(home: Path) -> None:
     """`withdrew` was the only way to mark an unsent application before `void`.
     Mutation: refuse on any outcome -- this fails."""
@@ -244,6 +258,7 @@ def test_the_cli_builds_a_packet_and_says_it_does_not_submit(
     assert main([*args, "--source", "greenhouse"]) == 3
     assert "already applied" in capsys.readouterr().err
     assert main(["outcome", "acme-ml", "interview"]) == 0
+    assert "recorded interview for acme-ml" in capsys.readouterr().out
     assert main(["applications"]) == 0
     assert "interview" in capsys.readouterr().out
 
