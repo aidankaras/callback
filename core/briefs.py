@@ -21,7 +21,7 @@ import yaml
 from pydantic import AwareDatetime, BaseModel, Field, ValidationError, field_validator
 
 from core.discovery.fetch import denied_domain
-from core.paths import resolve_inside
+from core.paths import OutsideHomeError, resolve_inside
 
 FIELD = re.compile(r"[a-z0-9][a-z0-9-]{0,63}")
 MAX_EXEMPLAR_WORDS = 60
@@ -44,6 +44,14 @@ class Source(BaseModel):
     title: str = Field(min_length=1)
     url: str = Field(pattern=r"^https://")
     fetched_at: AwareDatetime
+
+    @field_validator("url")
+    @classmethod
+    def _plain_host(cls, v: str) -> str:
+        host = urlsplit(v).hostname
+        if not host or not re.fullmatch(r"[a-z0-9-]+(?:\.[a-z0-9-]+)*\.?", host):
+            raise ValueError(f"source url {v!r} has no plain host name")
+        return v
 
 
 class Claim(BaseModel):
@@ -99,12 +107,15 @@ def load_brief(field: str) -> Brief:
     """The stored brief for `field`; raises `BriefError` naming what is wrong."""
     if not FIELD.fullmatch(field):
         raise BriefError(f"brief name {field!r} must be lowercase letters, digits and hyphens")
-    path = resolve_inside(f"briefs/{field}.yaml")
+    try:
+        path = resolve_inside(f"briefs/{field}.yaml")
+    except OutsideHomeError as exc:
+        raise BriefError(f"brief {field!r} resolves outside the callback home") from exc
     try:
         brief = Brief.model_validate(yaml.safe_load(path.read_text(encoding="utf-8")))
     except FileNotFoundError as exc:
         raise BriefError(f"no brief named {field!r} at {path}") from exc
-    except (OSError, yaml.YAMLError, ValidationError) as exc:
+    except (OSError, UnicodeDecodeError, yaml.YAMLError, ValidationError) as exc:
         raise BriefError(f"cannot read brief {field!r}: {exc}") from exc
     if brief.field != field:
         raise BriefError(f"{path} declares field {brief.field!r}, not {field!r}")

@@ -182,3 +182,47 @@ def test_the_brief_tool_returns_the_brief_and_its_check(home: Path) -> None:
     content = result.structured_content  # type: ignore[attr-defined]
     assert content["check"] == {"verdict": "pass", "fails": [], "warns": []}
     assert content["brief"]["field"] == "quant-research"
+
+
+def test_a_brief_that_is_not_utf8_is_reported_unreadable(
+    home: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from core.cli import main
+
+    raw = b"\xff\xfe field: quant-research"
+    with pytest.raises(UnicodeDecodeError):
+        raw.decode("utf-8")
+    (home / "briefs").mkdir(parents=True, exist_ok=True)
+    (home / "briefs" / "quant-research.yaml").write_bytes(raw)
+    assert main(["brief", "check", "quant-research"]) == 3
+    assert main(["brief", "show", "quant-research"]) == 3
+    assert "quant-research" in capsys.readouterr().err
+
+
+def test_a_brief_linked_from_outside_the_home_is_reported_unreadable(
+    home: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from core.cli import main
+
+    outside = tmp_path / "elsewhere.yaml"
+    outside.write_text(yaml.safe_dump(_body()), encoding="utf-8")
+    (home / "briefs").mkdir(parents=True, exist_ok=True)
+    link = home / "briefs" / "quant-research.yaml"
+    link.symlink_to(outside)
+    assert link.is_symlink()
+    assert not link.resolve().is_relative_to(home.resolve())
+    assert main(["brief", "check", "quant-research"]) == 3
+    assert main(["brief", "show", "quant-research"]) == 3
+    assert "outside the callback home" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("url", ["https://\\linkedin.com/x", "https://", "https://[x/a"])
+def test_a_source_url_without_a_plain_host_is_refused(home: Path, url: str) -> None:
+    _store(home, "quant-research", _body(sources=[{**SOURCE, "url": url}]))
+    with pytest.raises(BriefError, match="cannot read brief"):
+        load_brief("quant-research")
+
+
+def test_a_denied_but_plain_host_still_loads(home: Path) -> None:
+    _store(home, "quant-research", _body(sources=[{**SOURCE, "url": "https://LinkedIn.com./x"}]))
+    assert load_brief("quant-research").sources[0].url == "https://LinkedIn.com./x"
