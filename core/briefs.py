@@ -83,11 +83,21 @@ class Brief(BaseModel):
     @field_validator("phrases_to_avoid")
     @classmethod
     def _phrases_have_words(cls, phrases: tuple[str, ...]) -> tuple[str, ...]:
-        """Refuse a blank phrase: it compiles to a pattern that matches
-        between any two non-word characters, failing every sentence that
-        has punctuation in it."""
-        if any(not p.split() for p in phrases):
-            raise ValueError("a phrase to avoid cannot be blank")
+        """Refuse a phrase the whole-word match cannot use. A blank one
+        compiles to `(?<!\\w)(?!\\w)`, an empty match wherever no word
+        character is on either side -- after a sentence's final full stop,
+        or between a comma and the space after it -- so it would fail almost
+        every sentence. One that begins or ends with a non-word character
+        puts the whole-word edge on that character instead of on a word:
+        "-driven" requires no word character before its hyphen, so it never
+        matches inside "results-driven", the compound it was written to catch."""
+        for p in phrases:
+            if not p.split():
+                raise ValueError("a phrase to avoid cannot be blank")
+            if not re.fullmatch(r"\w(?:.*\w)?", p.strip(), re.DOTALL):
+                raise ValueError(
+                    f"a phrase to avoid must begin and end with a letter or digit: {p!r}"
+                )
         return phrases
 
 
@@ -122,9 +132,25 @@ def load_brief(field: str) -> Brief:
     return brief
 
 
+def load_checked_brief(field: str, *, now: datetime) -> Brief:
+    """The stored brief for `field`, refused with `BriefError` if it fails
+    `check_brief`; its warnings do not refuse it."""
+    brief = load_brief(field)
+    report = check_brief(brief, now=now)
+    if report.verdict == "fail":
+        raise BriefError(
+            f"brief {field!r} fails its check: {'; '.join(report.fails)}; "
+            f"run `callback brief check {field}`"
+        )
+    return brief
+
+
 def check_brief(brief: Brief, *, now: datetime) -> BriefReport:
-    """Every rule `brief` breaks: unknown or denied sources and over-long
-    exemplars fail; a stale source or too few exemplars warn."""
+    """Every rule `brief` breaks. A source id listed twice, a source on a
+    platform that forbids automated access, a claim or exemplar citing a
+    source not listed, and an exemplar over `MAX_EXEMPLAR_WORDS` words fail;
+    a source fetched more than `STALE_AFTER` ago and fewer than
+    `MIN_EXEMPLARS` exemplars warn."""
     fails: list[str] = []
     warns: list[str] = []
     ids = [s.id for s in brief.sources]

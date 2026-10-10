@@ -462,7 +462,11 @@ def interview(job_id: str) -> dict[str, object]:
 @_tool
 def brief(field: str) -> dict[str, object]:
     """A field brief -- what screeners look for and exemplars of the field's
-    register -- with its check: unknown or denied sources fail, staleness warns."""
+    register -- with its check. A duplicate source id, a source on a platform
+    that forbids automated access, a citation of an unlisted source and an
+    exemplar over 60 words fail; a source fetched over 90 days ago and fewer
+    than 5 exemplars warn. `build`, `letter` and `answers` refuse a brief whose
+    check fails."""
     from core.briefs import check_brief, load_brief
 
     loaded = load_brief(field)

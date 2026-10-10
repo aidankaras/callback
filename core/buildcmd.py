@@ -17,9 +17,10 @@ import re
 import shutil
 import tempfile
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 
-from core.briefs import BriefError, load_brief
+from core.briefs import BriefError, load_checked_brief
 from core.draft import RESUME_ARTIFACTS
 from core.gates import GateOutcome, GateReport, run_gates
 from core.paths import private_dir, write_private, write_private_bytes
@@ -87,17 +88,20 @@ def build(doc_path: Path, job_id: str) -> BuildResult:
     except ProfileError as exc:
         raise BuildError(str(exc)) from exc
 
-    try:
-        brief = load_brief(doc.brief) if doc.brief else None
-    except BriefError as exc:
-        raise BuildError(str(exc)) from exc
-
     out_dir = private_dir(f"outputs/{job_id}/draft")
     # A previous build's report must never sit beside a PDF it did not judge,
-    # so the draft is cleared before anything else can fail. Unlinking removes
-    # a planted symlink itself, never its target.
+    # so the draft is cleared before any brief is loaded and the document
+    # rendered: a build refused from here on leaves no draft behind. One
+    # refused above (a bad job id, an unreadable document, facts or profile)
+    # leaves the previous draft as it was. Unlinking removes a planted symlink
+    # itself, never its target.
     for name in RESUME_ARTIFACTS:
         (out_dir / name).unlink(missing_ok=True)
+
+    try:
+        brief = load_checked_brief(doc.brief, now=datetime.now(tz=UTC)) if doc.brief else None
+    except BriefError as exc:
+        raise BuildError(str(exc)) from exc
 
     # Render and gate inside a fresh, unpredictably named directory, then
     # publish the exact bytes that were gated.

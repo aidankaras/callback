@@ -25,8 +25,11 @@ posting's first line, not merely occur somewhere in it -- an injected line can
 put any name somewhere in a posting. The letter also fails on more than
 `MAX_WORDS` words, on commitment or negotiation language (which a signed
 letter must not concede and an injected posting would try to insert), on
-reusing a resume bullet verbatim, on a stock phrase, and, when it names a field
-brief, on copying one of that brief's exemplars (`core.checks.style`).
+reusing a resume bullet verbatim. Every sentence but a courtesy one on the
+fixed list also fails on a stock phrase and, when the letter names a field
+brief, on that brief's own phrases and on copying one of its exemplars
+(`core.checks.style`). A letter that names a brief fails unless that brief
+was passed in, so the copy check cannot be skipped by not loading it.
 """
 
 from __future__ import annotations
@@ -189,6 +192,15 @@ def heading_findings(company: str, role: str, posting: str) -> list[str]:
     ]
 
 
+def brief_findings(subject: str, named: str | None, brief: Brief | None) -> list[str]:
+    """A document that names a brief fails unless that brief was loaded: the
+    copy check and a brief's own phrases run only against a loaded one, so
+    checking without it would read as having passed them."""
+    if named is not None and (brief is None or brief.field != named):
+        return [f"{subject} brief {named!r}, which was not loaded"]
+    return []
+
+
 def question_findings(question: str, ctx: SentenceContext) -> list[str]:
     """A form question is copied from the form, never written, and it is
     rendered above its answer: so it may not carry a claim of its own."""
@@ -204,11 +216,17 @@ def question_findings(question: str, ctx: SentenceContext) -> list[str]:
 def check_sentence(label: str, sentence: Sentence, ctx: SentenceContext) -> list[str]:
     """Every rule `sentence` breaks, for its declared kind -- see the module docstring."""
     findings = _kind_findings(label, sentence, ctx)
+    # A courtesy sentence that passed is one of `COURTESY`, so its wording is
+    # fixed, not written: the style check could only fail a sentence the
+    # letter is allowed to use, as when an exemplar happens to contain it.
+    fixed = sentence.kind == "courtesy" and not findings
     if _COMMITMENT.search(sentence.text):
         findings.append(f"sentence {label}: commitment or negotiation language: {sentence.text!r}")
     if any(_norm(b) in _norm(sentence.text) for b in ctx.resume_bullets):
         findings.append(f"sentence {label}: reuses a resume bullet verbatim")
-    findings += text_findings(f"sentence {label}", sentence.text, ctx.brief)
+    if not fixed:
+        own = [ctx.facts[s].text for s in sentence.sources if s != POSTING and s in ctx.facts]
+        findings += text_findings(f"sentence {label}", sentence.text, ctx.brief, own=own)
     return findings
 
 
@@ -270,6 +288,7 @@ def check_letter(
         findings.append(f"closing {letter.closing!r} must be one of {sorted(CLOSINGS)}")
 
     findings.extend(identity_findings(letter.identity, facts))
+    findings.extend(brief_findings("the letter names", letter.brief, brief))
     ctx = context_for(
         letter.company, letter.role, letter.identity.name, facts, posting, resume_bullets, brief
     )

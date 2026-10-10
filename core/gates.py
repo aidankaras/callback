@@ -220,8 +220,9 @@ def run_gates(
         return ("warn" if found else "pass"), tuple(f"{x.rule}: {x.detail}" for x in found)
 
     def style() -> tuple[Outcome, tuple[str, ...]]:
-        # A document that names a brief is checked against it or not at all:
-        # skipping the exemplar check would read as having passed it.
+        # A document that names a brief that was not loaded fails this gate:
+        # the ValueError becomes a fail through `_guarded`, since skipping the
+        # exemplar check would read as having passed it.
         if doc.brief is not None and (brief is None or brief.field != doc.brief):
             raise ValueError(f"the document names brief {doc.brief!r}, which was not loaded")
         fails, warns = resume_findings(doc, facts, brief)

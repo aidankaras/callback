@@ -280,3 +280,42 @@ def test_a_report_written_before_the_style_gate_still_reads(tmp_path: Path, home
     assert [o["gate"] for o in record["outcomes"]][-1] == "lints"  # premise: pre-style shape
     assert save("northwind-de", "base").is_file()
     assert recurring().unreadable == ()
+
+
+@pytest.mark.slow
+def test_a_build_checks_against_the_brief_it_names(tmp_path: Path, home: Path) -> None:
+    """Mutation: drop `brief=brief` where the build calls `run_gates` -- the
+    style gate then fails as naming a brief not loaded, not as copying."""
+    from tests.test_briefs import store_brief
+
+    store_brief(home, "data-eng", "Ran a dependable nightly batch scheduler for the finance team")
+    bullet = (
+        "Cut the review queue to 300 items with a dependable nightly batch scheduler for Python"
+    )
+    # Premise: the shared run is not the cited fact's own wording.
+    assert "dependable" not in FACTS["queue"].text
+    doc = sample_doc(bullet).model_copy(update={"brief": "data-eng"})
+    result = build(_write(tmp_path, doc), "northwind-de")
+    style = next(o for o in result.report.outcomes if o.gate == "style")
+    assert style.findings == (
+        "bullet 0: copies an exemplar of the data-eng brief: "
+        "'a dependable nightly batch scheduler for'",
+    )
+
+
+@pytest.mark.slow
+def test_a_build_refuses_a_brief_that_fails_its_check_and_clears_the_old_draft(
+    tmp_path: Path, home: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from core.cli import main
+    from tests.test_briefs import SOURCE, store_brief
+
+    build(_write(tmp_path, sample_doc()), "northwind-de")
+    draft = home / "outputs" / "northwind-de" / "draft"
+    assert (draft / "report.json").is_file()  # premise: a previous build's draft is there
+    store_brief(home, "data-eng", sources=[{**SOURCE, "url": "https://www.linkedin.com/x"}])
+    doc = sample_doc().model_copy(update={"brief": "data-eng"})
+    assert main(["build", str(_write(tmp_path, doc)), "--job", "northwind-de"]) == 3
+    assert "source 's1' is on linkedin.com" in capsys.readouterr().err
+    assert not (draft / "report.json").exists()
+    assert not (draft / "resume.pdf").exists()

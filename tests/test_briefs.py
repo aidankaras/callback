@@ -8,7 +8,7 @@ import pytest
 import yaml
 from pydantic import ValidationError
 
-from core.briefs import Brief, BriefError, check_brief, load_brief
+from core.briefs import Brief, BriefError, check_brief, load_brief, load_checked_brief
 from core.discovery.fetch import denied_domain
 
 NOW = datetime(2026, 10, 10, 18, 0, tzinfo=UTC)
@@ -109,10 +109,49 @@ def test_a_stale_source_and_too_few_exemplars_warn() -> None:
     assert few.warns == ("4 exemplars; at least 5 expected",)
 
 
+def store_brief(home: Path, field: str, exemplar: str | None = None, **changes: object) -> None:
+    """Store a brief named `field` that passes its check today, unless
+    `changes` break it, with `exemplar` as its first exemplar if given."""
+    fresh = {**SOURCE, "fetched_at": datetime.now(tz=UTC).isoformat()}
+    exemplars = EXEMPLARS if exemplar is None else [{**EXEMPLARS[0], "text": exemplar}]
+    exemplars = [*exemplars, *EXEMPLARS[len(exemplars) :]]
+    _store(
+        home,
+        field,
+        _body(**{"field": field, "sources": [fresh], "exemplars": exemplars, **changes}),
+    )
+
+
 def test_a_blank_phrase_to_avoid_is_refused() -> None:
-    """A blank phrase would match between any two non-word characters."""
+    """A blank phrase compiles to an empty match wherever no word character
+    is on either side, as after a sentence's final full stop."""
     with pytest.raises(ValidationError, match="cannot be blank"):
         _brief(phrases_to_avoid=["synergy", "   "])
+
+
+@pytest.mark.parametrize(
+    ("phrase", "compound"),
+    [("-driven", "A data-driven analyst"), ("driven-", "A driven-minded lead")],
+)
+def test_a_phrase_to_avoid_with_a_punctuation_edge_is_refused(phrase: str, compound: str) -> None:
+    from core.checks.style import stock_phrases
+
+    # Premises: an edge is not a word character, and so the whole-word match
+    # misses the compound the phrase was written to catch.
+    assert not (phrase[0].isalnum() and phrase[-1].isalnum())
+    assert phrase in compound
+    assert stock_phrases(compound, [phrase]) == []
+    with pytest.raises(ValidationError, match=f"begin and end with a letter or digit: '{phrase}'"):
+        _brief(phrases_to_avoid=["synergy", phrase])
+
+
+def test_a_brief_that_fails_its_check_is_refused_and_one_that_warns_is_not(home: Path) -> None:
+    store_brief(home, "quant-research", sources=[{**SOURCE, "url": "https://www.linkedin.com/x"}])
+    with pytest.raises(BriefError, match="fails its check: source 's1' is on linkedin"):
+        load_checked_brief("quant-research", now=NOW)
+    store_brief(home, "quant-research", exemplars=EXEMPLARS[:4])
+    assert check_brief(load_brief("quant-research"), now=NOW).verdict == "warn"  # premise
+    assert load_checked_brief("quant-research", now=NOW).field == "quant-research"
 
 
 def test_a_stored_brief_loads(home: Path) -> None:

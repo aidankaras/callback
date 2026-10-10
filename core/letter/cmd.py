@@ -14,9 +14,10 @@ import json
 import shutil
 import tempfile
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 
-from core.briefs import BriefError, load_brief
+from core.briefs import BriefError, load_checked_brief
 from core.buildcmd import BuildError
 from core.checks.hidden import check_hidden
 from core.draft import LETTER_ARTIFACTS
@@ -64,7 +65,7 @@ def build_letter(path: Path) -> LetterBuild:
         (out_dir / name).unlink(missing_ok=True)
 
     try:
-        brief = load_brief(letter.brief) if letter.brief else None
+        brief = load_checked_brief(letter.brief, now=datetime.now(tz=UTC)) if letter.brief else None
     except BriefError as exc:
         raise BuildError(str(exc)) from exc
     result = check_letter(letter, facts, posting, resume_bullets=bullets, brief=brief)

@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 from core.briefs import Brief
+from core.checks.style import copied_run
 from core.letter.checks import check_letter
 from core.letter.models import CoverLetter, Sentence
 from core.profile.models import Dates, Fact, FactKind, Identity, Provenance, Quantity, Trust
@@ -425,3 +426,88 @@ def test_a_letter_copying_its_briefs_exemplar_fails() -> None:
     found = check_letter(letter(), FACTS, POSTING, brief=brief).findings
     assert any("copies an exemplar of the ml-research brief" in f for f in found), found
     assert check_letter(letter(), FACTS, POSTING).findings == ()
+
+
+# --- a named brief ------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("loaded", [None, "quant-research"])
+def test_a_letter_naming_a_brief_that_was_not_loaded_fails(loaded: str | None) -> None:
+    """Otherwise the copy check and that brief's phrases silently do not run.
+    Mutation: drop the guard -- both letters pass."""
+    brief = (
+        None if loaded is None else _brief("Unrelated words.").model_copy(update={"field": loaded})
+    )
+    found = check_letter(letter(brief="ml-research"), FACTS, POSTING, brief=brief).findings
+    assert found == ("the letter names brief 'ml-research', which was not loaded",)
+    named = _brief("Unrelated words.")
+    assert check_letter(letter(brief="ml-research"), FACTS, POSTING, brief=named).findings == ()
+
+
+def test_a_courtesy_sentence_an_exemplar_contains_is_not_copying() -> None:
+    """A courtesy sentence must be one of the fixed list, so failing it as
+    copied would leave a letter that can never pass."""
+    courtesy = "Thank you for your time and consideration."
+    exemplar = f"I would value the chance to talk further. {courtesy}"
+    # Premise: the exemplar holds the courtesy sentence's six words.
+    assert copied_run(courtesy, [exemplar]) == "thank you for your time and"
+    doc = letter([*HONEST[:3], k(courtesy)])
+    assert check_letter(doc, FACTS, POSTING, brief=_brief(exemplar)).findings == ()
+
+
+def test_a_sentence_sharing_its_cited_facts_wording_with_an_exemplar_is_not_copying() -> None:
+    exemplar = "Trained a scikit-learn classifier that flagged duplicate claims at a bank."
+    sentence = HONEST[2]
+    # Premise: six of the sentence's words are the exemplar's, and its fact's.
+    assert copied_run(sentence.text, [exemplar]) == "trained a scikit learn classifier that"
+    assert copied_run(sentence.text, [FACTS["nw-model"].text]) is not None
+    assert check_letter(letter(), FACTS, POSTING, brief=_brief(exemplar)).findings == ()
+
+
+def _letter_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    from core.paths import ensure_home
+    from core.profile.store import save_facts
+
+    monkeypatch.setenv("CALLBACK_HOME", str(tmp_path / "cb"))
+    home = ensure_home()
+    save_facts(FACTS)
+    (home / "inbox" / "acme-ml-intern.md").write_text(POSTING, encoding="utf-8")
+    return home
+
+
+@pytest.mark.slow
+def test_callback_letter_checks_against_the_brief_it_names(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Mutation: drop `brief=brief` where the command calls `check_letter` --
+    the letter then fails as naming a brief not loaded, not as copying."""
+    from core.letter.cmd import build_letter
+    from core.letter.io import dump_letter
+    from tests.test_briefs import store_brief
+
+    home = _letter_home(tmp_path, monkeypatch)
+    exemplar = "I trained a scikit-learn classifier that flagged duplicate invoices for a bank."
+    store_brief(home, "ml-research", exemplar)
+    source = tmp_path / "letter.yaml"
+    source.write_text(dump_letter(letter(brief="ml-research")), encoding="utf-8")
+    found = build_letter(source).findings
+    assert found == (
+        "sentence 0.2: copies an exemplar of the ml-research brief: "
+        "'i trained a scikit learn classifier'",
+    )
+
+
+@pytest.mark.slow
+def test_callback_letter_refuses_a_brief_that_fails_its_check(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from core.cli import main
+    from core.letter.io import dump_letter
+    from tests.test_briefs import SOURCE, store_brief
+
+    home = _letter_home(tmp_path, monkeypatch)
+    store_brief(home, "ml-research", sources=[{**SOURCE, "url": "https://www.linkedin.com/x"}])
+    source = tmp_path / "letter.yaml"
+    source.write_text(dump_letter(letter(brief="ml-research")), encoding="utf-8")
+    assert main(["letter", str(source)]) == 3
+    assert "source 's1' is on linkedin.com" in capsys.readouterr().err
