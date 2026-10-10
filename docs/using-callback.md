@@ -44,6 +44,7 @@ which only you can run.
 | `callback notes families [--set a,b]` | Shows, or replaces, the role families applications can be sorted into | 0, 3 invalid name |
 | `callback build <resume.yaml> --job <id>` | Renders the PDF and runs every gate, writing to `outputs/<id>/draft/` | 0 pass, 1 warn, 2 fail, 3 could not build |
 | `callback export <resume.yaml>` | Prints the resume as plain text for forms that want it pasted, and checks every critical field survived | 0, 2 if a field was lost, 3 unreadable document |
+| `callback brief show <field>` / `callback brief check <field>` | Prints a field brief's claims and exemplars, refusing one that fails its check; checks a brief's sources, citations and exemplar lengths | `check`: 0 pass, 1 warn, 2 fail, 3 unreadable; `show`: 0, 2 fails its check, 3 |
 | `callback letter <letter.yaml>` | Renders a cover letter and checks it against your facts and the saved posting | 0 pass, 2 fail, 3 could not run |
 | `callback apply <id> --company … --title … --source …` | Builds the application packet from a gated draft and records it. A draft, letter or set of answers checked against facts that have since changed (one confirmed, replaced or retired) is refused until it is built again. Records it with the template it started from, the facts it cites and an optional `--role-family`; `--refresh` rebuilds it after the draft improves, keeping every earlier send and what happened to it. **Never submits** | 0, 3 refused |
 | `callback outcome <id> <kind>` / `callback applications` | Records what happened; lists applications | 0, 3 unreadable record |
@@ -396,7 +397,7 @@ rewritten from scratch fails even when every entry chains correctly, and
 
 The plugin registers `callback-mcp` (see `.mcp.json`), which serves the same
 checks as tools: `build`, `letter`, `answers`, `outreach`, `facts_add`,
-`facts_list`, `facts_check`, `notes_list`, `notes_propose`, `notes_retire`, `watch`, `triage`, `fit`, `agenda`, `postings_add`, `postings_take`, `postings_resolve`,
+`facts_list`, `facts_check`, `brief`, `notes_list`, `notes_propose`, `notes_retire`, `watch`, `triage`, `fit`, `agenda`, `postings_add`, `postings_take`, `postings_resolve`,
 `applications`, `funnel`, `insights`, `gaps`,
 `eligibility`, `apply`, `interview` and `verify`. Each wraps the function the
 command line calls, so a result is identical whichever way it is reached, and

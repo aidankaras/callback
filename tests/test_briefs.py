@@ -143,3 +143,42 @@ def test_a_brief_filed_under_another_name_is_refused(home: Path) -> None:
     _store(home, "ai-ml", _body())
     with pytest.raises(BriefError, match="declares field 'quant-research'"):
         load_brief("ai-ml")
+
+
+def test_the_brief_commands_report_the_check(
+    home: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from core.cli import main
+
+    _store(home, "quant-research", _body())
+    assert main(["brief", "check", "quant-research"]) == 0
+    assert main(["brief", "show", "quant-research"]) == 0
+    shown = capsys.readouterr().out
+    assert "imitate the structure, never the words" in shown
+    assert "[Northwind Capital, Internships]" in shown
+    assert main(["brief", "check", "absent"]) == 3
+
+
+def test_a_brief_that_fails_its_check_is_not_shown(
+    home: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from core.cli import main
+
+    _store(
+        home, "quant-research", _body(sources=[{**SOURCE, "url": "https://lnkd.linkedin.com/x"}])
+    )
+    assert main(["brief", "check", "quant-research"]) == 2
+    assert main(["brief", "show", "quant-research"]) == 2
+    assert "Exemplars" not in capsys.readouterr().out
+
+
+def test_the_brief_tool_returns_the_brief_and_its_check(home: Path) -> None:
+    import asyncio
+
+    from core.mcp_server import server
+
+    _store(home, "quant-research", _body())
+    result = asyncio.run(server.call_tool("brief", {"field": "quant-research"}))
+    content = result.structured_content  # type: ignore[attr-defined]
+    assert content["check"] == {"verdict": "pass", "fails": [], "warns": []}
+    assert content["brief"]["field"] == "quant-research"

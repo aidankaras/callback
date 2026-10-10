@@ -460,6 +460,24 @@ def interview(job_id: str) -> dict[str, object]:
 
 
 @_tool
+def brief(field: str) -> dict[str, object]:
+    """A field brief -- what screeners look for and exemplars of the field's
+    register -- with its check: unknown or denied sources fail, staleness warns."""
+    from core.briefs import check_brief, load_brief
+
+    loaded = load_brief(field)
+    report = check_brief(loaded, now=_now())
+    return {
+        "brief": loaded.model_dump(mode="json"),
+        "check": {
+            "verdict": report.verdict,
+            "fails": list(report.fails),
+            "warns": list(report.warns),
+        },
+    }
+
+
+@_tool
 def agenda() -> dict[str, object]:
     """What to do next, most time-sensitive first; judges nothing new, acts on nothing."""
     from core.agenda import agenda as build_agenda
