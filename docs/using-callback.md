@@ -72,7 +72,7 @@ postings anyway.
 | `callback watch` | Polls every target and stores new matching postings with when they were first seen | 0, 1 if a board could not be read, 3 |
 | `callback postings list [--days N]` | Stored postings, newest first | 0, 3 |
 | `callback postings resolve <url> --company "<company>"` | The canonical posting behind a Greenhouse, Lever or Ashby URL, or an employer careers page's `schema.org/JobPosting` data | 0, 3 |
-| `callback postings add --company "…" --title "…" --url <url> --text-file <path> [--deadline YYYY-MM-DD]` | Stores a posting no watch can read, such as a research programme, from its text. A bare date is 23:59 in this machine's timezone on that day, and the stored deadline is printed with its offset. Adding the same URL again updates the text and deadline; a watch never removes it | 0, 3 |
+| `callback postings add --company "…" --title "…" --url <url> --text-file <path> [--deadline YYYY-MM-DD]` | Stores a posting no watch can read, such as a research programme, from its text. A bare date is 23:59 in this machine's timezone on that day, and the stored deadline is printed with its offset. Adding the same page again (URLs are compared ignoring case in the scheme and host, a fragment and one trailing slash) updates the text and deadline and keeps its id and first-seen date; a watch never removes it | 0, 3 |
 | `callback postings take <id> --job <job-id>` | Saves the posting's own text to `inbox/<job-id>.md` | 0, 3 |
 | `callback profile --work-authorization … --graduation … --degree … --pages … --seasons … --max-weeks …` | What eligibility is judged against, and how many pages a resume may run to (1 unless set) | 0, 3 |
 | `callback agenda` | What to do next, most time-sensitive first: interviews recorded with no prep pack, deadlines in the next 30 days (and, for a week, ones just passed), drafts built but never sent, the five best-ranked eligible postings at companies not yet applied to, and applications silent for 21+ days. Each line names the command that acts; this one never does | 0, 3 |
@@ -115,9 +115,10 @@ With `--seasons` and `--max-weeks` set, it also reads the term and the length:
   are not terms, "(Winter)" and "(Summer or Winter)" are, and "Backend
   Engineering Intern (Spring Boot)" is eligible.
 
-**Priority tiers** order the ranking before anything else: every posting in
-your first tier comes before every posting in your second, and so on, with
-anything matching no tier last. Set them in `profile.yaml` under the data
+**Priority tiers** order everything that is not a knockout, and knockouts stay
+last whatever their tier: every such posting in your first tier comes before
+every one in your second, and so on, with anything matching no tier after the
+tiered ones. Set them in `profile.yaml` under the data
 home; each tier's `criteria` use the same terms as `callback criteria`, matched
 against `"<company> | <title> | <location>"`, and `prefer` orders postings
 inside a tier:
