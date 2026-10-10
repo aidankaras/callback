@@ -195,3 +195,67 @@ def test_a_job_that_was_never_built_is_not_an_item(home: Path) -> None:
     """A missing report is a job never built, not a damaged one."""
     (home / "outputs" / "acme-ml" / "draft").mkdir(parents=True)
     assert agenda([], [], PROFILE, FACTS, now=NOW).items == ()
+
+
+# --- deadlines ------------------------------------------------------------------------
+
+
+def _programme(pid: str, company: str, deadline: datetime | None) -> Found:
+    return _posting(pid, company).model_copy(
+        update={
+            "ats": "manual",
+            "title": "Summer Research",
+            "url": f"https://www.example.org/{pid}",
+            "deadline": deadline,
+        }
+    )
+
+
+def _deadline_lines(
+    postings: list[Found], applications: list[Application] | None = None
+) -> list[str]:
+    result = agenda(postings, applications or [], PROFILE, FACTS, now=NOW)
+    return [item.what for item in result.items if item.kind == "deadline"]
+
+
+def test_deadlines_in_the_next_thirty_days_are_listed_soonest_first(home: Path) -> None:
+    """Days are calendar days in the deadline's own zone: 08:00 on 12 October
+    in Berlin is eleven days from 1 October there, though under eleven days of
+    elapsed time from 15:00 UTC. Mutation: count elapsed days -- this reads 10."""
+    from zoneinfo import ZoneInfo
+
+    berlin = ZoneInfo("Europe/Berlin")
+    postings = [
+        _programme("late", "Late Lab", datetime(2026, 10, 25, 23, 59, tzinfo=berlin)),
+        _programme("soon", "Soon Lab", datetime(2026, 10, 12, 8, 0, tzinfo=berlin)),
+        _programme("far", "Far Lab", datetime(2026, 11, 15, 23, 59, tzinfo=berlin)),
+        _programme("none", "No Date Lab", None),
+    ]
+    assert _deadline_lines(postings) == [
+        "Soon Lab Summer Research: closes in 11 days (2026-10-12)",
+        "Late Lab Summer Research: closes in 24 days (2026-10-25)",
+    ]
+
+
+def test_a_passed_deadline_shows_as_closed_for_a_week_then_drops(home: Path) -> None:
+    """Mutation: drop the `CLOSED_DAYS` bound -- the nine-day-old one is listed."""
+    postings = [
+        _programme("recent", "Recent Lab", NOW - timedelta(days=3)),
+        _programme("old", "Old Lab", NOW - timedelta(days=9)),
+    ]
+    assert _deadline_lines(postings) == ["Recent Lab Summer Research: closed (2026-09-28)"]
+
+
+def test_a_programme_already_applied_to_has_no_deadline_line(home: Path) -> None:
+    applied = _application("lab-app", "Soon Lab", days_ago=1).model_copy(
+        update={"title": "Summer Research"}
+    )
+    postings = [_programme("soon", "Soon Lab", NOW + timedelta(days=5))]
+    assert _deadline_lines(postings) != []  # premise: listed before the application
+    assert _deadline_lines(postings, [applied]) == []
+
+
+def test_a_closed_posting_is_not_suggested_for_applying(home: Path) -> None:
+    postings = [_programme("shut", "Shut Lab", NOW - timedelta(days=2))]
+    result = agenda(postings, [], PROFILE, FACTS, now=NOW)
+    assert [i.kind for i in result.items] == ["deadline"]

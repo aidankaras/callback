@@ -21,7 +21,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import cast
 
-from core.apply import MAX_PER_DAY, Application
+from core.apply import MAX_PER_DAY, Application, Target
 from core.discovery.store import Found
 from core.funnel import POSITIVE, REPLIES, STALE_DAYS
 from core.paths import resolve_inside
@@ -31,6 +31,10 @@ from core.triage import Profile, rank
 # How many postings to suggest at once: a shortlist a person will actually
 # read, not the whole ranked list, which `callback triage` already prints.
 SHORTLIST = 5
+# How far ahead a deadline is worth listing, and how long a passed one stays
+# listed as closed, so that it is seen once rather than vanishing overnight.
+DEADLINE_DAYS = 30
+CLOSED_DAYS = 7
 # An application is waiting on nobody once it has a reply or the candidate has
 # closed it themselves.
 _CLOSED = REPLIES | POSITIVE | {"ghosted", "withdrew"}
@@ -142,6 +146,9 @@ def agenda(
                 )
             )
 
+    # A deadline is a date, like an interview: soonest first.
+    items.extend(_deadlines(postings, applications, now=now))
+
     # A draft that passed but was never sent is work already done.
     ready, unreadable = _drafted_jobs()
     packets = _packet_jobs()
@@ -174,6 +181,8 @@ def agenda(
             continue
         if row.eligibility.verdict == "knockout":
             continue
+        if row.posting.deadline is not None and row.posting.deadline < now:
+            continue
         evidenced, missing = row.coverage
         items.append(
             Item(
@@ -203,6 +212,48 @@ def agenda(
 
     today = sum(1 for a in applications if (now - a.submitted_at) < timedelta(days=1))
     return Agenda(items=tuple(items), applied_today=today)
+
+
+def _deadlines(
+    postings: Sequence[Found], applications: Sequence[Application], *, now: datetime
+) -> list[Item]:
+    """Postings closing in the next `DEADLINE_DAYS` days, or closed in the last
+    `CLOSED_DAYS`, that have not been applied to. Days are counted in the
+    deadline's own timezone, as the employer counts them."""
+    dated: list[tuple[datetime, Found]] = []
+    for posting in postings:
+        deadline = posting.deadline
+        if deadline is None or not now - timedelta(days=CLOSED_DAYS) <= deadline:
+            continue
+        if deadline > now + timedelta(days=DEADLINE_DAYS):
+            continue
+        # Applications record no posting id, so match them as `apply` does.
+        this = Target(
+            job_id="posting",
+            company=posting.company,
+            title=posting.title,
+            location=posting.location,
+            url=posting.url,
+            source="other",
+        )
+        if not any(a.same_posting(this) for a in applications):
+            dated.append((deadline, posting))
+    items: list[Item] = []
+    for deadline, posting in sorted(dated, key=lambda pair: pair[0]):
+        day = deadline.date().isoformat()
+        if deadline < now:
+            when = f"closed ({day})"
+        else:
+            days = (deadline.date() - now.astimezone(deadline.tzinfo).date()).days
+            when = f"closes in {days} days ({day})"
+        items.append(
+            Item(
+                "deadline",
+                f"{posting.company} {posting.title}: {when}",
+                f"callback postings take {posting.id} --job <job-id>",
+            )
+        )
+    return items
 
 
 def render(result: Agenda) -> str:
