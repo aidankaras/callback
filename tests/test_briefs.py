@@ -1,0 +1,145 @@
+from __future__ import annotations
+
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
+from urllib.parse import urlsplit
+
+import pytest
+import yaml
+from pydantic import ValidationError
+
+from core.briefs import Brief, BriefError, check_brief, load_brief
+from core.discovery.fetch import denied_domain
+
+NOW = datetime(2026, 10, 10, 18, 0, tzinfo=UTC)
+
+
+SOURCE: dict[str, object] = {
+    "id": "s1",
+    "kind": "employer",
+    "publisher": "Northwind Capital",
+    "title": "Internships",
+    "url": "https://careers.northwind.example/interns",
+    "fetched_at": "2026-10-10T13:20:00-04:00",
+}
+EXEMPLARS: list[dict[str, object]] = [
+    {
+        "kind": "bullet",
+        "text": f"Cut nightly batch latency from 40 to {n} minutes by rewriting the join",
+        "source": "s1",
+        "why": "System, scale and result in one line.",
+    }
+    for n in range(5)
+]
+
+
+def _body(**changes: object) -> dict[str, object]:
+    body: dict[str, object] = {
+        "field": "quant-research",
+        "built_at": "2026-10-10T14:00:00-04:00",
+        "sources": [SOURCE],
+        "claims": [{"text": "Screeners read for measured results.", "source": "s1"}],
+        "exemplars": EXEMPLARS,
+    }
+    body.update(changes)
+    return body
+
+
+def _brief(**changes: object) -> Brief:
+    return Brief.model_validate(yaml.safe_load(yaml.safe_dump(_body(**changes))))
+
+
+def _store(home: Path, name: str, body: dict[str, object] | str) -> None:
+    briefs = home / "briefs"
+    briefs.mkdir(parents=True, exist_ok=True)
+    text = body if isinstance(body, str) else yaml.safe_dump(body)
+    (briefs / f"{name}.yaml").write_text(text, encoding="utf-8")
+
+
+@pytest.fixture
+def home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    monkeypatch.setenv("CALLBACK_HOME", str(tmp_path / "cb"))
+    return tmp_path / "cb"
+
+
+def test_a_complete_brief_passes() -> None:
+    report = check_brief(_brief(), now=NOW)
+    assert (report.verdict, report.fails, report.warns) == ("pass", (), ())
+
+
+def test_a_claim_or_exemplar_citing_an_unknown_source_fails() -> None:
+    report = check_brief(_brief(claims=[{"text": "Results first.", "source": "s9"}]), now=NOW)
+    assert report.verdict == "fail"
+    assert report.fails == ("claim 0 cites unknown source 's9'",)
+
+
+def test_a_source_on_a_denied_platform_fails() -> None:
+    url = "https://www.linkedin.com/pulse/how-we-hire"
+    # Premise: the URL's host is a subdomain of the denied platform.
+    host = urlsplit(url).hostname
+    assert host == "www.linkedin.com" and denied_domain(host) == "linkedin.com"
+    source = {**SOURCE, "url": url}
+    report = check_brief(_brief(sources=[source]), now=NOW)
+    assert report.verdict == "fail"
+    assert "source 's1' is on linkedin.com" in report.fails[0]
+
+
+def test_an_exemplar_over_sixty_words_fails_and_sixty_passes() -> None:
+    def exemplar(words: int) -> dict[str, str]:
+        return {"kind": "bullet", "text": " ".join(["word"] * words), "source": "s1", "why": "w"}
+
+    at = _brief(exemplars=[exemplar(60)] * 5)
+    over = _brief(exemplars=[exemplar(61)] + [exemplar(60)] * 4)
+    assert check_brief(at, now=NOW).fails == ()
+    assert check_brief(over, now=NOW).fails == ("exemplar 0 is 61 words; at most 60",)
+
+
+def test_a_repeated_source_id_fails() -> None:
+    report = check_brief(_brief(sources=[SOURCE, SOURCE]), now=NOW)
+    assert report.fails == ("source id 's1' is listed more than once",)
+
+
+def test_a_stale_source_and_too_few_exemplars_warn() -> None:
+    fresh = _brief()
+    assert check_brief(fresh, now=NOW + timedelta(days=89)).warns == ()
+    stale = check_brief(fresh, now=NOW + timedelta(days=91))
+    assert stale.verdict == "warn"
+    assert stale.warns[0].startswith("source 's1' was fetched 91 days ago")
+    few = check_brief(_brief(exemplars=EXEMPLARS[:4]), now=NOW)
+    assert few.warns == ("4 exemplars; at least 5 expected",)
+
+
+def test_a_blank_phrase_to_avoid_is_refused() -> None:
+    """A blank phrase would match between any two non-word characters."""
+    with pytest.raises(ValidationError, match="cannot be blank"):
+        _brief(phrases_to_avoid=["synergy", "   "])
+
+
+def test_a_stored_brief_loads(home: Path) -> None:
+    _store(home, "quant-research", _body())
+    assert load_brief("quant-research").field == "quant-research"
+
+
+def test_a_naive_timestamp_is_refused_on_load(home: Path) -> None:
+    body = _body(built_at=datetime(2026, 10, 10, 14, 0))  # noqa: DTZ001 -- the naive value under test
+    # Premise: YAML reads it as a datetime with no zone.
+    parsed = yaml.safe_load(yaml.safe_dump(body))["built_at"]
+    assert isinstance(parsed, datetime) and parsed.tzinfo is None
+    _store(home, "quant-research", body)
+    with pytest.raises(BriefError, match="timezone"):
+        load_brief("quant-research")
+
+
+@pytest.mark.parametrize(
+    ("name", "message"),
+    [("absent", "no brief named"), ("../facts", "lowercase letters"), ("Quant", "lowercase")],
+)
+def test_a_brief_that_cannot_be_read_is_named(home: Path, name: str, message: str) -> None:
+    with pytest.raises(BriefError, match=message):
+        load_brief(name)
+
+
+def test_a_brief_filed_under_another_name_is_refused(home: Path) -> None:
+    _store(home, "ai-ml", _body())
+    with pytest.raises(BriefError, match="declares field 'quant-research'"):
+        load_brief("ai-ml")
