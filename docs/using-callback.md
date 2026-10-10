@@ -72,13 +72,14 @@ postings anyway.
 | `callback watch` | Polls every target and stores new matching postings with when they were first seen | 0, 1 if a board could not be read, 3 |
 | `callback postings list [--days N]` | Stored postings, newest first | 0, 3 |
 | `callback postings resolve <url> --company "<company>"` | The canonical posting behind a Greenhouse, Lever or Ashby URL, or an employer careers page's `schema.org/JobPosting` data | 0, 3 |
+| `callback postings add --company "…" --title "…" --url <url> --text-file <path> [--deadline YYYY-MM-DD]` | Stores a posting no watch can read, such as a research programme, from its text. A bare date is 23:59 in this machine's timezone on that day, and the stored deadline is printed with its offset. Adding the same URL again updates the text and deadline; a watch never removes it | 0, 3 |
 | `callback postings take <id> --job <job-id>` | Saves the posting's own text to `inbox/<job-id>.md` | 0, 3 |
-| `callback profile --work-authorization … --graduation … --degree … --pages …` | What eligibility is judged against, and how many pages a resume may run to (1 unless set) | 0, 3 |
-| `callback agenda` | What to do next, most time-sensitive first: interviews recorded with no prep pack, drafts built but never sent, the five freshest eligible postings at companies not yet applied to, and applications silent for 21+ days. Each line names the command that acts; this one never does | 0, 3 |
+| `callback profile --work-authorization … --graduation … --degree … --pages … --seasons … --max-weeks …` | What eligibility is judged against, and how many pages a resume may run to (1 unless set) | 0, 3 |
+| `callback agenda` | What to do next, most time-sensitive first: interviews recorded with no prep pack, deadlines in the next 30 days (and, for a week, ones just passed), drafts built but never sent, the five best-ranked eligible postings at companies not yet applied to, and applications silent for 21+ days. Each line names the command that acts; this one never does | 0, 3 |
 | `callback template save <job-id> --name <name>` / `list` / `use <name> --job <job-id> [--overwrite]` | Saves a document whose build passed under a name, and copies it into another job's draft as a starting point. The copy is an ordinary draft: every gate runs against it again, and its bullets still cite facts that must still be confirmed | 0, 3 |
 | `callback fit <job-id>` | The same knockouts, plus every technology the posting names that the alias table knows: which ones confirmed facts back (with the fact ids to cite) and which are missing | 0 eligible or stretch, 1 a question, 2 knockout, 3 |
 | `callback eligibility <job-id>` | Knockout requirements in a saved posting, each quoted | 0 eligible or stretch, 1 a question, 2 knockout, 3 |
-| `callback triage [--days N]` | Stored postings ranked: knockouts last, then by evidenced technologies and freshness | 0, 3 |
+| `callback triage [--days N]` | Stored postings ranked: knockouts last, then by your priority tiers, then by evidenced technologies and freshness. With tiers set, each line starts with its tier | 0, 3 |
 | `callback gaps [--days N]` | Technologies the eligible stored postings name that no confirmed fact backs, most frequent first, with how many rejected applications' saved postings named each; a rejection with no saved posting is listed, not counted | 0, 3 |
 
 **Network access.** Discovery is the only part of callback that uses the
@@ -95,6 +96,43 @@ network:
 citizenship or clearance requirement, a graduation window, and graduate-degree
 or years-of-experience requirements. It judges them against your profile and
 quotes each one. It is advice and never blocks a document.
+
+With `--seasons` and `--max-weeks` set, it also reads the term and the length:
+- a title naming only terms outside your seasons ("Winter 2027"), or saying
+  off-cycle or co-op, is a knockout; one naming yours as well ("Summer/Fall
+  2027") is a stretch, as is another term mentioned in the body;
+- a sentence giving the internship's length is a knockout when even its low
+  end is longer than `--max-weeks`, and a stretch when only a range's high end
+  is, or when it is hedged ("up to 24 weeks"). A length counts only when the
+  sentence states it of the role ("a 24-week internship", "the internship runs
+  six months"); "6 months of experience" and "a 24-month master's program" are
+  not read;
+- when the posting also states a length that fits (one role of several is 10
+  weeks), a long length is a stretch rather than a knockout, and the reason
+  quotes that clause;
+- a season word counts only beside a year, a term word or a bracket that
+  closes right after the season, so "Fall Risk Analytics" and "Spring Street"
+  are not terms, "(Winter)" and "(Summer or Winter)" are, and "Backend
+  Engineering Intern (Spring Boot)" is eligible.
+
+**Priority tiers** order the ranking before anything else: every posting in
+your first tier comes before every posting in your second, and so on, with
+anything matching no tier last. Set them in `profile.yaml` under the data
+home; each tier's `criteria` use the same terms as `callback criteria`, matched
+against `"<company> | <title> | <location>"`, and `prefer` orders postings
+inside a tier:
+
+```yaml
+tiers:
+  - name: europe
+    criteria: {include: [london, amsterdam, zurich]}
+  - name: ai-ml
+    criteria: {include: [machine learning, ml, ai]}
+    prefer: [trading, quant*]
+```
+
+A company's name is part of what is matched, so a tier of cities also takes
+a company named after one; an `exclude` term removes it.
 
 ## Facts
 
@@ -354,7 +392,7 @@ rewritten from scratch fails even when every entry chains correctly, and
 
 The plugin registers `callback-mcp` (see `.mcp.json`), which serves the same
 checks as tools: `build`, `letter`, `answers`, `outreach`, `facts_add`,
-`facts_list`, `facts_check`, `notes_list`, `notes_propose`, `notes_retire`, `watch`, `triage`, `fit`, `agenda`, `postings_take`, `postings_resolve`,
+`facts_list`, `facts_check`, `notes_list`, `notes_propose`, `notes_retire`, `watch`, `triage`, `fit`, `agenda`, `postings_add`, `postings_take`, `postings_resolve`,
 `applications`, `funnel`, `insights`, `gaps`,
 `eligibility`, `apply`, `interview` and `verify`. Each wraps the function the
 command line calls, so a result is identical whichever way it is reached, and
