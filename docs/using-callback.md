@@ -371,6 +371,14 @@ recording where a fact came from. Put that text in a file and pass the file's
 path. It guards against accidental writes; it is not a sandbox. A command that builds
 its path at run time is not caught.
 
+**Style** fails a stock phrase from a fixed list ("spearheaded",
+"results-driven", "passionate about"; words that are technical terms in some
+field, such as "leverage" or "robust", only in the filler phrases listed) and,
+when a document names a brief with `brief: <field>`, that brief's own
+phrases to avoid and any six consecutive words copied from one of its exemplars. It
+runs on resume bullets, letter sentences and form answers, and warns on a
+resume bullet with no digit and none of its cited facts' entities.
+
 **Layout lints** (a bullet over two lines, fewer than 2 or more than 6
 bullets for a role, more pages than your profile allows, a near-empty last
 page) can only warn. They never fail a document. The page limit is one unless

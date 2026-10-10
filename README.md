@@ -26,8 +26,8 @@ something you can re-run, not something the model reports about itself. There is
 | Applications stay reasonable | at most 10 in 24 hours, no re-apply to the same posting within 90 days, and a packet is only built from a draft that passed, or whose warnings the candidate accepted |
 | What was sent stays provable | a sealed document is copied read-only with a signed manifest of its hashes, and every seal and application is appended to a hash-chained, keyed ledger, so a file changed afterwards, or a ledger rewritten, is detected |
 
-It does **not** check ordinary wording: "led the migration" and "helped with the migration" are
-indistinguishable to it. And it cannot know whether a fact the candidate confirmed is true. See
+Beyond a fixed list of stock phrases, it does **not** check ordinary wording: "led the migration"
+and "helped with the migration" are indistinguishable to it. And it cannot know whether a fact the candidate confirmed is true. See
 `docs/limitations.md` for the full list.
 
 ## What it looks like
@@ -54,6 +54,7 @@ FAIL  ~/.callback/outputs/acme-ml/draft/resume.pdf
   hidden     pass
   skills     warn
   lints      pass
+  style      pass
 report: ~/.callback/outputs/acme-ml/draft/report.md
 ```
 

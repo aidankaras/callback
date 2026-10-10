@@ -174,12 +174,19 @@ Tailoring a resume to a posting needs only the section below.
      words and use the posting's term for the same skill.
    - Keep numbers verbatim, or derive them only as the fact's own `derived`
      entries allow.
+   - Before writing, read the field's brief (`callback brief show <field>`)
+     and put `brief: <field>` in the document. Imitate its exemplars'
+     structure, never their words. `references/briefs.md` says how to build a
+     brief when the field has none.
 5. **Build.** Run `callback build <that yaml> --job <job-id>`. The exit code is the verdict:
    - `0` — every gate passed.
    - `1` — warnings only (see `report.md`). Show them to the user; they decide.
    - `2` — a gate failed. Read "Fix first" in `report.md`, fix the *document*,
      and rebuild.
    - `3` — the build could not run. Fix the input.
+
+   Once it passes or warns, run the critic in `references/briefs.md` and show
+   the user what it suggests.
 6. **Stop repeating after five builds** that don't converge, and show the
    user the remaining findings.
 7. **Report:**
