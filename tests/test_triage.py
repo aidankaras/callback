@@ -667,13 +667,18 @@ def test_a_posting_stating_a_length_that_fits_is_never_a_duration_knockout() -> 
         "Candidates with prior internships of 6 months are preferred.",
         "Our interns are 6 months from graduation.",
         "Return offers remain open to interns for 6 months.",
+        "Within 6 months, most internship hires convert to full-time.",
+        "After 6 months, internship participants receive a review.",
+        "Every 6 months, internship cohorts present.",
+        "Duration: 12 months after graduation",
+        "Duration: 18 months graduate programme follows",
     ],
 )
 def test_a_length_near_a_role_word_is_not_the_role_s(text: str) -> None:
     """Each length here exceeds 14 weeks and sits beside a role word, but is
     the length of something else. Mutation: count every length -- each becomes
     a duration knockout."""
-    assert re.search(r"\b(?:4|6|24|18)[ -]months?\b", text)  # premise: a length too long
+    assert re.search(r"\b(?:4|6|12|18|24)[ -]months?\b", text)  # premise: a length too long
     assert ("duration", "knockout") not in season(text, "")
 
 
@@ -687,6 +692,10 @@ def test_a_length_near_a_role_word_is_not_the_role_s(text: str) -> None:
         "It opens with a 1-week intern bootcamp.",
         "The notice period for interns is 2 weeks.",
         "Paid time off for interns: 2 weeks.",
+        "In the first 2 weeks, internship hosts run orientation.",
+        "Duration: 2 weeks onboarding",
+        "Duration: 2 weeks per rotation",
+        "The internship takes 2 weeks to set up.",
     ],
 )
 def test_a_short_span_that_is_not_the_role_s_does_not_soften_a_knockout(other: str) -> None:
@@ -695,6 +704,38 @@ def test_a_short_span_that_is_not_the_role_s_does_not_soften_a_knockout(other: s
     knockout = "Data Science Intern. This internship runs 6 months."
     assert season(knockout, "") == [("duration", "knockout")]  # premise
     assert season(f"{knockout} {other}", "") == [("duration", "knockout")]
+
+
+@pytest.mark.parametrize(
+    ("text", "role_clause"),
+    [
+        (
+            "You have completed an internship of at least 6 months.",
+            "An internship of at least 6 months.",
+        ),
+        (
+            "You have already completed a first internship of at least 6 months.",
+            "A first internship of at least 6 months.",
+        ),
+        (
+            "Ideally you have done an internship lasting 6 months.",
+            "An internship lasting 6 months.",
+        ),
+        (
+            "Prior experience: an internship lasting at least 6 months.",
+            "An internship lasting at least 6 months.",
+        ),
+    ],
+)
+def test_the_candidate_s_past_internship_is_not_this_role_s_length(
+    text: str, role_clause: str
+) -> None:
+    """A requirement about an internship the candidate has done states its
+    length too. Mutation: drop the `_CANDIDATE_HISTORY` check -- each is a
+    knockout."""
+    assert role_clause.rstrip(".").casefold() in text.casefold()  # premise: the same clause
+    assert season(role_clause, "") == [("duration", "knockout")]  # ... which alone is read
+    assert season(text, "") == []
 
 
 @pytest.mark.parametrize(

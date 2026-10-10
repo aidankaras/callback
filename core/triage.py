@@ -207,15 +207,18 @@ _PROGRAM = r"(?:programmes?|programs?)"
 _NOT_A_MODIFIER = (
     r"of|before|after|within|prior|post|from|for|in|at|to|into|since|until|ago|by|on|per"
     r"|than|with|without|as|the|a|an|and|or|is|are|was|will|you|we|our|your|their|its"
-    r"|which|that|who|where"
+    r"|which|that|who|where|most|many|all|some|every|each|any|no|several|few|these|those|this"
 )
 _ADJUNCT = (
     r"experience|completion|interviews?|applications?|offers?|orientation|onboarding"
     r"|training|bootcamp|alumni|credits?"
 )
+_MODIFIER = rf"\s+(?!(?:{_NOT_A_MODIFIER})\b)[\w'-]+"
+# A comma after the length lists a modifier ("a 6 month, full-time
+# internship"); with none after it, it ends a clause ("After 6 months,
+# internship participants receive a review").
 _LENGTH_NAMES_ROLE = re.compile(
-    r"(?:[\s-]long)?,?"
-    rf"(?:\s+(?!(?:{_NOT_A_MODIFIER})\b)[\w'-]+){{0,3}}"
+    rf"(?:[\s-]long)?(?:,(?:{_MODIFIER}){{1,3}}|(?:{_MODIFIER}){{0,3}})"
     rf"\s+(?:{_ROLE_NOUN}|intern\s+{_PROGRAM})\b(?!\s+(?:{_ADJUNCT})\b)"
     rf"|\s+{_PROGRAM}\b",
     re.I,
@@ -237,7 +240,7 @@ _ROLE_RUNS = re.compile(
     r"(?:(?P<prev>[\w'-]+)\s+)??\b"
     r"(?:(?:(?:duration|length)\s+of\s+(?:the\s+|this\s+|your\s+|an?\s+)?)?"
     rf"(?:{_ROLE_NOUN}(?:\s+{_PROGRAM})?|intern\s+{_PROGRAM})"
-    rf"|(?P<bare>{_PROGRAM})|^\s*(?:duration|length))"
+    rf"|(?P<bare>{_PROGRAM})|(?P<label>^\s*(?:duration|length)))"
     r"(?:\s+(?:period|length|duration|term|contract))?"
     rf"(?P<tail>(?:\s*[:(,]|\s+[-\u2013\u2014])?(?:\s+(?:{_LINK_WORDS})\b)*)\s*$",
     re.I,
@@ -251,6 +254,18 @@ _NOT_THE_SUBJECT = (
 # programme runs six months", "our summer program", but not "our graduate
 # program is 24 months" or "our rotational program runs 18 months".
 _PROGRAM_OWNERS = r"the|this|our|a|an|each|your|summer|winter|fall|autumn|spring"
+# "You have completed an internship of at least 6 months", "Prior experience:
+# an internship lasting 6 months": the candidate's past role, not this one.
+_CANDIDATE_HISTORY = re.compile(
+    r"\b(?:(?:have|has|had|having)\s+(?:\w+\s+)?(?:completed|done|undertaken|finished)"
+    r"|prior|previous)\b\W+(?:[\w'-]+\W+){0,6}$",
+    re.I,
+)
+# A "Duration:" line's length must end its value: "Duration: 12 months after
+# graduation" and "Duration: 2 weeks per rotation" measure something else.
+_VALUE_ENDS = re.compile(r"\s*(?:[,;().\u2013\u2014-]|$)")
+# "The internship takes 2 weeks to set up": a length of a task, not the role.
+_LENGTH_FOR_A_TASK = re.compile(r"\s+to\b", re.I)
 _LENGTH_HEDGE = re.compile(rf"\b(?:{_HEDGE_WORDS})\b", re.I)
 _WEEKS_PER_MONTH = 52 / 12
 
@@ -396,11 +411,13 @@ def _weeks(number: str, unit: str) -> float:
     return n * _WEEKS_PER_MONTH if unit.casefold().startswith("month") else n
 
 
-def _role_link(before: str) -> str | None:
-    """The words linking a role subject to a length that follows `before`, or
-    None when `before` does not end in a role subject and a link."""
+def _role_link(before: str, after: str) -> str | None:
+    """The words linking a role subject to a length between `before` and
+    `after`, or None when `before` does not end in a role subject and a link."""
     runs = _ROLE_RUNS.search(before)
-    if runs is None or not runs.group("tail").strip():
+    if runs is None or not runs.group("tail").strip() or _LENGTH_FOR_A_TASK.match(after):
+        return None
+    if runs.group("label") and not _VALUE_ENDS.match(after):
         return None
     prev = runs.group("prev") or ""
     if runs.group("bare"):
@@ -414,7 +431,10 @@ def _role_lengths(sentence: str) -> list[tuple[float, float, bool, str]]:
     text)`, the bounds in weeks."""
     lengths: list[tuple[float, float, bool, str]] = []
     for m in _DURATION.finditer(sentence):
-        link = _role_link(sentence[: m.start()])
+        before = sentence[: m.start()]
+        if _CANDIDATE_HISTORY.search(before):
+            continue
+        link = _role_link(before, sentence[m.end() :])
         if link is None and not _LENGTH_NAMES_ROLE.match(sentence, m.end()):
             continue
         low = _weeks(m.group("lo"), m.group("unit"))
