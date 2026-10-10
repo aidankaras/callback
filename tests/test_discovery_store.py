@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -207,3 +208,135 @@ def test_the_discovery_commands_end_to_end(
     from core.discovery.store import load_criteria
 
     assert load_criteria().require == ["data", "ml"]
+
+
+# --- postings added by hand -----------------------------------------------------------
+
+DAAD_URL = "https://www.example.org/rise/germany"
+
+
+def test_a_manual_posting_is_stored_with_its_deadline() -> None:
+    from core.discovery.store import add_manual
+
+    deadline = datetime(2026, 11, 30, 23, 59, tzinfo=UTC)
+    found = add_manual(
+        "Example Exchange", "Summer Research", DAAD_URL, "Ten weeks.", deadline, now=NOW
+    )
+    digest = hashlib.sha256(DAAD_URL.encode()).hexdigest()[:8]
+    assert found.id == f"manual:example-exchange:{digest}"
+    assert load_postings()[found.id].deadline == deadline
+
+
+def test_adding_the_same_url_again_updates_it_in_place() -> None:
+    """Mutation: mint the id from the time instead of the URL -- two postings."""
+    from core.discovery.store import add_manual
+
+    first = add_manual("Example Exchange", "Summer Research", DAAD_URL, "Old.", None, now=NOW)
+    later = NOW + timedelta(days=3)
+    deadline = datetime(2026, 11, 30, 23, 59, tzinfo=UTC)
+    again = add_manual("Example Exchange", "Summer Research", DAAD_URL, "New.", deadline, now=later)
+    assert again.id == first.id
+    (stored,) = load_postings().values()
+    assert (stored.text, stored.deadline, stored.first_seen) == ("New.", deadline, NOW)
+
+
+def test_the_url_identifies_a_manual_posting_whatever_the_company_is_called() -> None:
+    """Mutation: key the id on the company slug alone -- two postings."""
+    from core.discovery.store import add_manual
+
+    first = add_manual("Example", "Summer Research", DAAD_URL, "Old.", None, now=NOW)
+    again = add_manual("Example Exchange e.V.", "Summer Research", DAAD_URL, "New.", None, now=NOW)
+    assert again.id == first.id
+    assert [p.text for p in load_postings().values()] == ["New."]
+
+
+def test_a_watch_leaves_a_manual_posting_in_place() -> None:
+    """No board lists it, so a watch that pruned unlisted postings would drop it."""
+    from core.discovery.store import add_manual
+
+    manual = add_manual(
+        "Example Exchange", "Summer Research", DAAD_URL, "Ten weeks.", None, now=NOW
+    )
+    add_target(Target(company="Acme Robotics", ats="greenhouse", board="acme"))
+    result = watch(FakeFetcher({"acme": _greenhouse("Data Science Intern")}), now=NOW)
+    assert [p.title for p in result.new] == ["Data Science Intern"]  # premise: the watch wrote
+    assert manual.id in load_postings()
+
+
+@pytest.mark.parametrize(
+    ("company", "url", "text"),
+    [
+        ("", DAAD_URL, "Ten weeks."),
+        ("Example Exchange", DAAD_URL, "   "),
+        ("Example Exchange", "javascript:alert(1)", "Ten weeks."),
+        ("Example Exchange", "example.org/rise", "Ten weeks."),
+    ],
+)
+def test_a_manual_posting_needs_a_company_its_text_and_a_web_url(
+    company: str, url: str, text: str
+) -> None:
+    from core.discovery.store import add_manual
+
+    with pytest.raises(DiscoveryError):
+        add_manual(company, "Summer Research", url, text, None, now=NOW)
+    assert load_postings() == {}
+
+
+def test_a_deadline_must_carry_a_timezone() -> None:
+    from pydantic import ValidationError
+
+    from core.discovery.store import Found
+
+    with pytest.raises(ValidationError, match="timezone"):
+        Found(
+            id="manual:x:00000000",
+            ats="manual",
+            board="x",
+            company="X",
+            title="T",
+            url=DAAD_URL,
+            text="t",
+            deadline=datetime(2026, 11, 30, 23, 59),  # noqa: DTZ001 -- the naive value under test
+            first_seen=NOW,
+        )
+
+
+@pytest.fixture
+def new_york(monkeypatch: pytest.MonkeyPatch) -> object:
+    import time
+
+    monkeypatch.setenv("TZ", "America/New_York")
+    time.tzset()
+    yield None
+    monkeypatch.undo()
+    time.tzset()
+
+
+@pytest.mark.usefixtures("new_york")
+def test_a_bare_date_is_the_end_of_that_day_in_that_day_s_local_offset() -> None:
+    """30 November is after the clocks change: -05:00, where today's offset in
+    October would be -04:00. Mutation: attach today's local zone instead --
+    this reads -04:00."""
+    from core.discovery.store import parse_deadline
+
+    assert parse_deadline("2026-11-30").isoformat() == "2026-11-30T23:59:00-05:00"
+    assert parse_deadline("2026-10-20").isoformat() == "2026-10-20T23:59:00-04:00"
+    assert parse_deadline("2026-11-30T17:00+01:00").isoformat() == "2026-11-30T17:00:00+01:00"
+    with pytest.raises(DiscoveryError):
+        parse_deadline("30/11/2026")
+
+
+def test_the_postings_add_command(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    from core.cli import main
+
+    text = tmp_path / "rise.txt"
+    text.write_text("A 10-week internship in a German lab.\n", encoding="utf-8")
+    args = ["postings", "add", "--company", "Example Exchange", "--title", "Summer Research"]
+    args += ["--text-file", str(text)]
+    assert main([*args, "--url", DAAD_URL, "--deadline", "2026-11-30T23:59+01:00"]) == 0
+    out = capsys.readouterr().out
+    assert out.startswith("manual:example-exchange:")
+    assert "deadline 2026-11-30T23:59:00+01:00" in out
+    assert main([*args, "--url", "nope"]) == 3
+    assert main([*args, "--url", DAAD_URL, "--deadline", "30/11/2026"]) == 3
+    assert "30/11/2026" in capsys.readouterr().err

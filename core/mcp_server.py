@@ -332,6 +332,31 @@ def postings_resolve(url: str, company: str) -> dict[str, object]:
 
 
 @_tool
+def postings_add(
+    company: str, title: str, url: str, text: str, deadline: str | None = None
+) -> dict[str, object]:
+    """Store a posting no watch can read, such as a research programme, with its
+    deadline: `YYYY-MM-DD` (23:59 local time) or an ISO date and time."""
+    from core.discovery.store import add_manual, parse_deadline
+
+    ensure_home()
+    found = add_manual(
+        company,
+        title,
+        url,
+        text,
+        parse_deadline(deadline) if deadline else None,
+        now=_now(),
+    )
+    return {
+        "id": found.id,
+        "company": found.company,
+        "title": found.title,
+        "deadline": found.deadline.isoformat() if found.deadline else None,
+    }
+
+
+@_tool
 def eligibility(job_id: str) -> dict[str, object]:
     """Knockout requirements in a saved posting, each quoted, judged against the profile."""
     from core.paths import resolve_inside

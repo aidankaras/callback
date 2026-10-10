@@ -71,6 +71,15 @@ def build_parser() -> argparse.ArgumentParser:
     p_resolve.add_argument("url")
     p_resolve.add_argument("--company", required=True)
     p_resolve.set_defaults(handler=_cmd_postings_resolve)
+    p_add = postings_sub.add_parser(
+        "add", help="store a posting no watch can read, such as a research programme"
+    )
+    p_add.add_argument("--company", required=True)
+    p_add.add_argument("--title", required=True)
+    p_add.add_argument("--url", required=True)
+    p_add.add_argument("--text-file", required=True, type=Path, help="the posting's text")
+    p_add.add_argument("--deadline", help="YYYY-MM-DD (23:59 local time) or an ISO date and time")
+    p_add.set_defaults(handler=_cmd_postings_add)
     p_take = postings_sub.add_parser("take", help="save a posting as the posting for a job")
     p_take.add_argument("posting_id")
     p_take.add_argument("--job", required=True)
@@ -442,6 +451,28 @@ def _cmd_postings_resolve(args: argparse.Namespace) -> int:
         print(f"callback postings resolve: {exc}", file=sys.stderr)
         return 3
     print(f"{found.id}  {found.company} / {found.title}")
+    return 0
+
+
+def _cmd_postings_add(args: argparse.Namespace) -> int:
+    from datetime import UTC, datetime
+
+    from core.discovery.store import add_manual, parse_deadline
+    from core.paths import ensure_home
+
+    ensure_home()
+    try:
+        deadline = parse_deadline(args.deadline) if args.deadline else None
+        text = cast("Path", args.text_file).read_text(encoding="utf-8")
+        found = add_manual(
+            args.company, args.title, args.url, text, deadline, now=datetime.now(tz=UTC)
+        )
+    except _discovery_errors() as exc:
+        print(f"callback postings add: {exc}", file=sys.stderr)
+        return 3
+    print(f"{found.id}  {found.company} / {found.title}")
+    if found.deadline is not None:
+        print(f"deadline {found.deadline.isoformat()}")
     return 0
 
 

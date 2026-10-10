@@ -311,3 +311,29 @@ def test_every_expected_failure_says_why(
     with pytest.raises(ToolError) as raised:
         call(tool, args)
     assert not isinstance(raised.value, UnexpectedToolError), str(raised.value)
+
+
+def test_a_manual_posting_can_be_added_as_a_tool(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The same function as `postings add`; a deadline it cannot read is a tool
+    error that says so, never a posting stored without one."""
+    from mcp.server.mcpserver.exceptions import ToolError, UnexpectedToolError
+
+    from core.discovery.store import load_postings
+
+    monkeypatch.setenv("CALLBACK_HOME", str(tmp_path / "cb"))
+    ensure_home()
+    args: dict[str, object] = {
+        "company": "Example Exchange",
+        "title": "Summer Research",
+        "url": "https://www.example.org/rise",
+        "text": "A 10-week internship.",
+    }
+    added = call("postings_add", {**args, "deadline": "2026-11-30T23:59+01:00"}).structured_content  # type: ignore[attr-defined]
+    assert added["deadline"] == "2026-11-30T23:59:00+01:00"
+    assert added["id"] in load_postings()
+    with pytest.raises(ToolError) as raised:
+        call("postings_add", {**args, "deadline": "30/11/2026"})
+    assert not isinstance(raised.value, UnexpectedToolError) and "30/11/2026" in str(raised.value)
+    assert load_postings()[added["id"]].deadline is not None  # the bad call stored nothing new

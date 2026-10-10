@@ -24,10 +24,11 @@ type the way `core.profile.store` does.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import date, datetime, time
 from pathlib import Path
 from typing import Protocol, cast
 from urllib.parse import urlsplit
@@ -287,6 +288,62 @@ def resolve(
         if posting.id == wanted:
             return _store(posting, now)
     raise DiscoveryError(f"{url} is not on {company}'s {ats} board any more")
+
+
+def parse_deadline(value: str) -> datetime:
+    """A deadline as a person types it: `YYYY-MM-DD` is 23:59 that day, and an
+    ISO date and time without an offset is read, in this machine's timezone.
+
+    The zone is the one in force on that date, not today's: a deadline set in
+    October for 30 November in New York is -05:00, not October's -04:00."""
+    text = value.strip()
+    try:
+        if re.fullmatch(r"\d{4}-\d{2}-\d{2}", text):
+            moment = datetime.combine(date.fromisoformat(text), time(23, 59))
+        else:
+            moment = datetime.fromisoformat(text)
+    except ValueError as exc:
+        raise DiscoveryError(
+            f"deadline {value!r} is not YYYY-MM-DD or an ISO date and time"
+        ) from exc
+    return moment if moment.tzinfo is not None else moment.astimezone()
+
+
+def add_manual(
+    company: str, title: str, url: str, text: str, deadline: datetime | None, *, now: datetime
+) -> Found:
+    """Store a posting no watch can read -- a research programme, a careers page
+    with no structured data -- from the text the candidate saw on it.
+
+    Its id is `manual:<company slug>:<8 hex of the URL's sha256>`. The URL is
+    what identifies it: adding the same URL again, under any spelling of the
+    company, replaces the text and deadline and keeps the id and `first_seen`.
+    No watch fetches it, and a watch only ever adds to the store, so it stays."""
+    if not (company.strip() and title.strip() and text.strip()):
+        raise DiscoveryError("a posting needs a company, a title and its text")
+    parts = urlsplit(url)
+    if parts.scheme not in {"http", "https"} or not parts.netloc:
+        raise DiscoveryError(f"{url!r} is not an http(s) URL")
+    slug = re.sub(r"[^a-z0-9]+", "-", company.casefold()).strip("-")[:40].strip("-") or "posting"
+    stored = load_postings()
+    previous = next((p for p in stored.values() if p.ats == "manual" and p.url == url), None)
+    posting_id = (
+        previous.id if previous else f"manual:{slug}:{hashlib.sha256(url.encode()).hexdigest()[:8]}"
+    )
+    found = Found(
+        id=posting_id,
+        ats="manual",
+        board=previous.board if previous else slug,
+        company=company.strip(),
+        title=title.strip(),
+        url=url,
+        text=text,
+        deadline=deadline,
+        first_seen=previous.first_seen if previous else now,
+    )
+    stored[posting_id] = found
+    _save_postings(stored)
+    return found
 
 
 def take(posting_id: str, job_id: str) -> Path:
