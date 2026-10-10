@@ -228,6 +228,21 @@ def test_a_bullet_naming_its_entity_by_an_alias_is_specific(
     assert is_specific(text, [_fact("x", f"Used {entity}", [entity])])
 
 
+@pytest.mark.parametrize(
+    ("text", "specific"),
+    [("Fit pricing models in R&Stata", True), ("Fit pricing models in R&D", False)],
+)
+def test_a_one_letter_name_beside_another_tools_ampersand_still_counts(
+    text: str, specific: bool
+) -> None:
+    """The one-letter edge refuses the literal match in both texts, so only
+    the token route can tell "R&Stata", which names R, from "R&D"."""
+    assert not any(c.isdigit() for c in text)  # premise: no digit to rescue it
+    assert "R&" in text  # premise: the letter sits against an ampersand
+    cited = _fact("lang", "Fit models in R", ["R"])
+    assert is_specific(text, [cited]) is specific
+
+
 ROLE = Fact(
     id="role",
     kind=FactKind.EXPERIENCE,
