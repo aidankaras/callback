@@ -75,9 +75,15 @@ check. Write with its claims as the screening
 criteria and its exemplars as a model of **structure** (system, scale,
 result), never of words. Put `brief: <field>` at the top level of the resume,
 letter or answers document; the build then fails any six consecutive
-words copied from an exemplar and any phrase that brief lists to avoid.
+words copied from an exemplar and any phrase that brief lists to avoid. Words
+are counted as tokens, so a hyphen, apostrophe or decimal point splits one
+("state-of-the-art" is four). A run of six words the sentence's own cited
+facts also contain is the candidate's wording, not copying, and a courtesy
+sentence from the fixed list is checked for neither.
 
-A document that names a brief which cannot be loaded does not build.
+A document that names a brief which cannot be loaded, or whose
+`callback brief check` fails, does not build (exit 3). A brief that only warns
+is used.
 
 ## The critic
 

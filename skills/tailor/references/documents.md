@@ -4,6 +4,8 @@ The saved posting's first line must read `# <role> - <company>`, exactly as
 the posting names them. Write `$CALLBACK_HOME/outputs/<job-id>/draft/letter.yaml`
 (format in `docs/using-callback.md`) and run `callback letter <that yaml>`:
 exit 0 passes, 2 fails (fix the letter and rerun), 3 could not run.
+Name the field's brief with `brief: <field>` in a letter or answers document as
+in a resume; see "Using one" in `references/briefs.md`.
 
 Every sentence declares its `kind`:
 

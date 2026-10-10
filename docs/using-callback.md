@@ -263,6 +263,7 @@ job_id: acme-ml-intern
 company: Acme Robotics
 role: Machine Learning Intern
 greeting: Dear Hiring Team,
+brief: ai-ml-engineering   # optional: the field brief the style check uses
 paragraphs:
 - - {kind: courtesy, text: I am applying for the Machine Learning Intern role at Acme Robotics.}
   - {kind: employer, text: Acme Robotics is building a perception data platform., sources: [posting]}
@@ -293,6 +294,10 @@ Also checked:
   language (salary, compensation, availability, "available to start",
   relocation, visa or sponsorship, start date, notice period, "willing to"),
   or reuses a resume bullet verbatim.
+- Every sentence but a courtesy one from the fixed list is held to the style
+  rules: a stock phrase fails, and so, when the letter names a brief, do that
+  brief's phrases to avoid and six words copied from one of its exemplars (see
+  **Style** below).
 - The PDF is screened for hidden text.
 
 ## Form answers and outreach
@@ -305,6 +310,7 @@ job_id: acme-ml-intern
 company: Acme Robotics
 role: Machine Learning Intern
 candidate_name: Dana Vex
+brief: ai-ml-engineering   # optional, as in a letter
 answers:
 - question: Why are you interested in Acme Robotics?
   max_chars: 400
@@ -375,9 +381,13 @@ its path at run time is not caught.
 "results-driven", "passionate about"; words that are technical terms in some
 field, such as "leverage" or "robust", only in the filler phrases listed) and,
 when a document names a brief with `brief: <field>`, that brief's own
-phrases to avoid and any six consecutive words copied from one of its exemplars. It
-runs on resume bullets, letter sentences and form answers, and warns on a
-resume bullet with no digit and none of its cited facts' entities.
+phrases to avoid and any six consecutive words copied from one of its exemplars.
+Words are counted as tokens, so a hyphen, apostrophe or decimal point splits
+one, and a run of six words the cited facts also contain is not copying. A
+brief whose `callback brief check` fails is refused before any document is
+checked against it. Style runs on resume bullets and on every letter,
+form-answer and outreach sentence but a courtesy one from the fixed list, and
+warns on a resume bullet with no digit and none of its cited facts' entities.
 
 **Layout lints** (a bullet over two lines, fewer than 2 or more than 6
 bullets for a role, more pages than your profile allows, a near-empty last
