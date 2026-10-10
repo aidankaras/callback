@@ -683,27 +683,80 @@ def test_a_length_near_a_role_word_is_not_the_role_s(text: str) -> None:
 
 
 @pytest.mark.parametrize(
-    "other",
+    ("other", "quoted"),
     [
-        "Interns receive 2 weeks of paid time off.",
-        "Interns begin with a 1-week orientation program.",
-        "Offers go out 2 weeks before internship start.",
-        "Expect a decision within 2 weeks of internship interviews.",
-        "It opens with a 1-week intern bootcamp.",
-        "The notice period for interns is 2 weeks.",
-        "Paid time off for interns: 2 weeks.",
-        "In the first 2 weeks, internship hosts run orientation.",
-        "Duration: 2 weeks onboarding",
-        "Duration: 2 weeks per rotation",
-        "The internship takes 2 weeks to set up.",
+        ("Interns receive 2 weeks of paid time off.", "2 weeks"),
+        ("Interns begin with a 1-week orientation program.", "1-week"),
+        ("Offers go out 2 weeks before internship start.", "2 weeks"),
+        ("Expect a decision within 2 weeks of internship interviews.", "2 weeks"),
+        ("It opens with a 1-week intern bootcamp.", "1-week"),
+        ("The notice period for interns is 2 weeks.", "2 weeks"),
+        ("Paid time off for interns: 2 weeks.", "2 weeks"),
+        ("In the first 2 weeks, internship hosts run orientation.", "2 weeks"),
+        ("Duration: 2 weeks onboarding", "2 weeks"),
+        ("Duration: 2 weeks per rotation", "2 weeks"),
+        ("The internship takes 2 weeks to set up.", "2 weeks"),
     ],
 )
-def test_a_short_span_that_is_not_the_role_s_does_not_soften_a_knockout(other: str) -> None:
-    """Mutation: let "program" follow a modifier in `_LENGTH_NAMES_ROLE` -- the
-    orientation program becomes a fitting length and the knockout a stretch."""
+def test_a_short_span_beside_a_role_word_softens_a_knockout_and_is_quoted(
+    other: str, quoted: str
+) -> None:
+    """None of these spans is the role's length, but reading one as fitting only
+    makes the knockout a stretch whose reason quotes it, so the posting stays
+    visible; a knockout would hide it. Mutation: make the downgrade use the
+    strict `_role_lengths` reader -- each stays a knockout."""
     knockout = "Data Science Intern. This internship runs 6 months."
     assert season(knockout, "") == [("duration", "knockout")]  # premise
-    assert season(f"{knockout} {other}", "") == [("duration", "knockout")]
+    assert season(f"{knockout} {other}", "") == [("duration", "stretch")]
+    [finding] = check_eligibility(f"{knockout} {other}", SUMMER_ONLY, title="").findings
+    assert repr(quoted) in finding.reason
+
+
+@pytest.mark.parametrize(
+    ("other", "quoted"),
+    [
+        ("No prior experience is required for this 10-week internship.", "10-week"),
+        ("Duration: 10 weeks starting June 2027", "10 weeks"),
+        ("Duration: 10 weeks full-time", "10 weeks"),
+        ("Duration: 10-12 weeks during the summer", "10-12 weeks"),
+        ("Duration: 10 weeks | Location: Boston", "10 weeks"),
+        ("The internship takes 10 weeks to complete.", "10 weeks"),
+        ("The internship runs 10 weeks to the end of August.", "10 weeks"),
+        ("Once you have completed the 10-week internship, you join a team.", "10-week"),
+        ("A 10-week all-expenses-paid internship.", "10-week"),
+    ],
+)
+def test_a_fitting_length_the_strict_reader_misses_still_softens_a_knockout(
+    other: str, quoted: str
+) -> None:
+    """Each is this role's own fitting length in a phrasing the knockout reader
+    declines (a "prior" or "completed" before it, a "Duration:" value that runs
+    on, a "to" after it, a long modifier chain). Mutation: make the downgrade use
+    the strict `_role_lengths` reader -- each stays a knockout."""
+    knockout = "Data Science Intern. This internship runs 6 months."
+    assert season(knockout, "") == [("duration", "knockout")]  # premise
+    assert season(f"{knockout} {other}", "") == [("duration", "stretch")]
+    [finding] = check_eligibility(f"{knockout} {other}", SUMMER_ONLY, title="").findings
+    assert repr(quoted) in finding.reason
+
+
+@pytest.mark.parametrize(
+    "fitting",
+    [
+        "No prior experience is required for this 10-week internship.",
+        "Duration: 10 weeks starting June 2027",
+    ],
+)
+def test_a_summer_posting_naming_another_role_s_long_minimum_is_not_hidden(fitting: str) -> None:
+    """A summer posting that also describes a longer role elsewhere in the firm.
+    Mutation: make the downgrade use the strict `_role_lengths` reader -- each
+    is a knockout."""
+    other_role = "For our off-cycle roles, the minimum internship period is 6 months."
+    assert season(other_role, "") == [("duration", "knockout")]  # premise
+    text = f"Summer 2027 Analyst.\n{fitting}\n{other_role}"
+    assert season(text, "Summer Analyst Intern") == [("duration", "stretch")]
+    verdict = check_eligibility(text, SUMMER_ONLY, title="Summer Analyst Intern").verdict
+    assert verdict != "knockout"
 
 
 @pytest.mark.parametrize(
@@ -771,10 +824,9 @@ def test_the_candidate_s_past_internship_is_not_this_role_s_length(
 def test_a_phrasing_that_states_the_role_s_length_is_read_at_either_length(
     template: str, long: str, short: str, level: str
 ) -> None:
-    """One reading serves both the knockout and the downgrade, so each phrasing
-    is pinned twice: too long, it is a finding; fitting, beside another
-    sentence's knockout, it softens that knockout. Mutation: drop "will" from
-    `_LINK_WORDS` -- every "will" phrasing fails both ways."""
+    """Each phrasing is pinned twice: too long, it is a finding; fitting, beside
+    another sentence's knockout, it softens that knockout. Mutation: drop "will"
+    from `_LINK_WORDS` -- every "will" phrasing loses its knockout."""
     knockout = "Data Science Intern. This internship runs 6 months."
     assert season(knockout, "") == [("duration", "knockout")]  # premise
     assert season(template.format(long), "") == [("duration", level)]

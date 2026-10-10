@@ -191,9 +191,9 @@ _DURATION = re.compile(
 # A length is the role's only when the sentence attributes it to the role, not
 # when it merely sits near a role word: "a 24-week internship" and "the
 # internship runs 6 months" state one; "6 months of Python experience", "a
-# 1-week orientation program" and "a 24-month master's program" do not. The
-# same reading decides a knockout and the downgrade a fitting length gives, so
-# a phrasing left unread can admit a posting or leave a knockout standing.
+# 1-week orientation program" and "a 24-month master's program" do not. This
+# reading decides a knockout only; the downgrade a fitting length gives reads
+# far more loosely (`_fitting_length`), because the two errors cost differently.
 _ROLE_NOUN = r"(?:internships?|co-?ops?|placements?|fellowships?)"
 _PROGRAM = r"(?:programmes?|programs?)"
 # The length names the role: "a 24-week internship", "a six-month-long
@@ -267,6 +267,11 @@ _VALUE_ENDS = re.compile(r"\s*(?:[,;().\u2013\u2014-]|$)")
 # "The internship takes 2 weeks to set up": a length of a task, not the role.
 _LENGTH_FOR_A_TASK = re.compile(r"\s+to\b", re.I)
 _LENGTH_HEDGE = re.compile(rf"\b(?:{_HEDGE_WORDS})\b", re.I)
+# Any role word, for the downgrade only: "interns" and a bare "program" count here.
+_ROLE_WORD = re.compile(
+    r"\b(?:intern(?:ship)?s?|programmes?|programs?|co-?ops?|placements?|fellowships?)\b", re.I
+)
+_LENGTH_LABEL = re.compile(r"^\s*(?:duration|length|period)\b", re.I)
 _WEEKS_PER_MONTH = 52 / 12
 
 
@@ -444,6 +449,23 @@ def _role_lengths(sentence: str) -> list[tuple[float, float, bool, str]]:
     return lengths
 
 
+def _fitting_length(sentence: str, max_weeks: int) -> str | None:
+    """The first length within `max_weeks` in a sentence naming any role word or
+    opening with a "Duration"/"Length"/"Period" label, or None.
+
+    Deliberately loose. A false fitting length only turns a duration knockout
+    into a stretch whose reason quotes it, so the posting stays visible; a
+    missed one leaves the knockout standing and hides the posting. So none of
+    `_role_lengths`' attribution checks apply: "Interns receive 2 weeks of paid
+    time off" counts as fitting, as does "Duration: 10 weeks starting June"."""
+    if not (_ROLE_WORD.search(sentence) or _LENGTH_LABEL.match(sentence)):
+        return None
+    for m in _DURATION.finditer(sentence):
+        if _weeks(m.group("hi") or m.group("lo"), m.group("unit")) <= max_weeks:
+            return m.group(0)
+    return None
+
+
 def _title_of(text: str) -> str:
     """A saved posting's title: `take` heads the file `# <title> - <company>`,
     and a title may itself hold " - ", so only the last one is cut."""
@@ -566,10 +588,11 @@ def check_eligibility(text: str, profile: Profile, *, title: str | None = None) 
         if allowed and any(term - allowed for at, term in _season_terms(sentence) if at < cut):
             add("season", "stretch", sentence, "mentions a term you are not available for")
         if profile.max_weeks is not None:
-            for low, high, hedged, stated in _role_lengths(sentence):
+            fitting_length = fitting_length or _fitting_length(sentence, profile.max_weeks)
+            for low, high, hedged, _ in _role_lengths(sentence):
                 if high <= profile.max_weeks:
-                    fitting_length = fitting_length or stated
-                elif low > profile.max_weeks and not hedged:
+                    continue
+                if low > profile.max_weeks and not hedged:
                     add("duration", "knockout", sentence, f"longer than {profile.max_weeks} weeks")
                 else:
                     add("duration", "stretch", sentence, f"may run past {profile.max_weeks} weeks")
