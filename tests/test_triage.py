@@ -647,7 +647,9 @@ def test_a_posting_stating_a_length_that_fits_is_never_a_duration_knockout() -> 
     )
     assert season(text, "Quant Intern") == [("duration", "stretch")]
     [finding] = check_eligibility(text, SUMMER_ONLY, title="Quant Intern").findings
-    assert "'10-week'" in finding.reason
+    assert finding.reason == (
+        'longer than 14 weeks; it also states "Over the 10-week internship program, you will learn"'
+    )
 
 
 @pytest.mark.parametrize(
@@ -683,24 +685,22 @@ def test_a_length_near_a_role_word_is_not_the_role_s(text: str) -> None:
 
 
 @pytest.mark.parametrize(
-    ("other", "quoted"),
+    "other",
     [
-        ("Interns receive 2 weeks of paid time off.", "2 weeks"),
-        ("Interns begin with a 1-week orientation program.", "1-week"),
-        ("Offers go out 2 weeks before internship start.", "2 weeks"),
-        ("Expect a decision within 2 weeks of internship interviews.", "2 weeks"),
-        ("It opens with a 1-week intern bootcamp.", "1-week"),
-        ("The notice period for interns is 2 weeks.", "2 weeks"),
-        ("Paid time off for interns: 2 weeks.", "2 weeks"),
-        ("In the first 2 weeks, internship hosts run orientation.", "2 weeks"),
-        ("Duration: 2 weeks onboarding", "2 weeks"),
-        ("Duration: 2 weeks per rotation", "2 weeks"),
-        ("The internship takes 2 weeks to set up.", "2 weeks"),
+        "Interns receive 2 weeks of paid time off.",
+        "Interns begin with a 1-week orientation program.",
+        "Offers go out 2 weeks before internship start.",
+        "Expect a decision within 2 weeks of internship interviews.",
+        "It opens with a 1-week intern bootcamp.",
+        "The notice period for interns is 2 weeks.",
+        "Paid time off for interns: 2 weeks.",
+        "In the first 2 weeks, internship hosts run orientation.",
+        "Duration: 2 weeks onboarding",
+        "Duration: 2 weeks per rotation",
+        "The internship takes 2 weeks to set up.",
     ],
 )
-def test_a_short_span_beside_a_role_word_softens_a_knockout_and_is_quoted(
-    other: str, quoted: str
-) -> None:
+def test_a_short_span_beside_a_role_word_softens_a_knockout_and_is_quoted(other: str) -> None:
     """None of these spans is the role's length, but reading one as fitting only
     makes the knockout a stretch whose reason quotes it, so the posting stays
     visible; a knockout would hide it. Mutation: make the downgrade use the
@@ -709,26 +709,24 @@ def test_a_short_span_beside_a_role_word_softens_a_knockout_and_is_quoted(
     assert season(knockout, "") == [("duration", "knockout")]  # premise
     assert season(f"{knockout} {other}", "") == [("duration", "stretch")]
     [finding] = check_eligibility(f"{knockout} {other}", SUMMER_ONLY, title="").findings
-    assert repr(quoted) in finding.reason
+    assert finding.reason.endswith(f'; it also states "{other.rstrip(".")}"')
 
 
 @pytest.mark.parametrize(
-    ("other", "quoted"),
+    "other",
     [
-        ("No prior experience is required for this 10-week internship.", "10-week"),
-        ("Duration: 10 weeks starting June 2027", "10 weeks"),
-        ("Duration: 10 weeks full-time", "10 weeks"),
-        ("Duration: 10-12 weeks during the summer", "10-12 weeks"),
-        ("Duration: 10 weeks | Location: Boston", "10 weeks"),
-        ("The internship takes 10 weeks to complete.", "10 weeks"),
-        ("The internship runs 10 weeks to the end of August.", "10 weeks"),
-        ("Once you have completed the 10-week internship, you join a team.", "10-week"),
-        ("A 10-week all-expenses-paid internship.", "10-week"),
+        "No prior experience is required for this 10-week internship.",
+        "Duration: 10 weeks starting June 2027",
+        "Duration: 10 weeks full-time",
+        "Duration: 10-12 weeks during the summer",
+        "Duration: 10 weeks | Location: Boston",
+        "The internship takes 10 weeks to complete.",
+        "The internship runs 10 weeks to the end of August.",
+        "Once you have completed the 10-week internship, you join a team.",
+        "A 10-week all-expenses-paid internship.",
     ],
 )
-def test_a_fitting_length_the_strict_reader_misses_still_softens_a_knockout(
-    other: str, quoted: str
-) -> None:
+def test_a_fitting_length_the_strict_reader_misses_still_softens_a_knockout(other: str) -> None:
     """Each is this role's own fitting length in a phrasing the knockout reader
     declines (a "prior" or "completed" before it, a "Duration:" value that runs
     on, a "to" after it, a long modifier chain). Mutation: make the downgrade use
@@ -737,7 +735,37 @@ def test_a_fitting_length_the_strict_reader_misses_still_softens_a_knockout(
     assert season(knockout, "") == [("duration", "knockout")]  # premise
     assert season(f"{knockout} {other}", "") == [("duration", "stretch")]
     [finding] = check_eligibility(f"{knockout} {other}", SUMMER_ONLY, title="").findings
-    assert repr(quoted) in finding.reason
+    assert finding.reason.endswith(f'; it also states "{other.rstrip(".")}"')
+
+
+_RUN_ON_FILLER = (
+    " and the team works across data platforms, analytics tooling, reporting pipelines,"
+    " stakeholder dashboards, model monitoring, documentation and weekly demos with partners"
+    " from finance, operations, marketing and product"
+)
+
+
+def test_a_role_word_far_from_a_short_length_in_a_run_on_body_does_not_soften_a_knockout() -> None:
+    """Tag-stripped HTML with no sentence break reads as one sentence. Mutation:
+    look for the role word anywhere in the sentence instead of in the quoted
+    clause -- "internship" at the start vouches for "2 weeks" at the end."""
+    body = f"This internship runs 6 months{_RUN_ON_FILLER}{_RUN_ON_FILLER}"
+    text = f"<li>{body}, with 2 weeks of paid leave</li>"
+    plain = re.sub(r"<[^>]+>", " ", text)
+    assert len(plain) > 300 and not re.search(r"[.!?;\n]", plain)  # premise: one long sentence
+    assert "internship" in plain and plain.index("2 weeks") - plain.index("internship") > 200
+    assert season(text, "") == [("duration", "knockout")]
+
+
+def test_a_run_on_clause_is_quoted_only_around_its_fitting_length() -> None:
+    """Mutation: drop the cut to `_QUOTE_REACH` -- the whole run-on is quoted."""
+    other = f"Each cohort{_RUN_ON_FILLER} meets for 2 weeks of intern onboarding{_RUN_ON_FILLER}"
+    knockout = "Data Science Intern. This internship runs 6 months."
+    assert len(other) > 300  # premise: the clause runs on
+    [finding] = check_eligibility(f"{knockout} {other}", SUMMER_ONLY, title="").findings
+    assert finding.level == "stretch"
+    quote = finding.reason.split("it also states ", 1)[1].strip('"')
+    assert "2 weeks of intern onboarding" in quote and len(quote) <= 110
 
 
 @pytest.mark.parametrize(

@@ -272,6 +272,12 @@ _ROLE_WORD = re.compile(
     r"\b(?:intern(?:ship)?s?|programmes?|programs?|co-?ops?|placements?|fellowships?)\b", re.I
 )
 _LENGTH_LABEL = re.compile(r"^\s*(?:duration|length|period)\b", re.I)
+# A clause ends at "." or ";" before a space; not at a decimal point, and not
+# at ":", which would leave "Paid time off for interns: 2 weeks" as "2 weeks".
+_CLAUSE_END = re.compile(r"[.;](?=\s|$)")
+# How far a run-on clause is quoted either side of a fitting length, and so how
+# far its role word may sit from it.
+_QUOTE_REACH = 50
 _WEEKS_PER_MONTH = 52 / 12
 
 
@@ -449,20 +455,42 @@ def _role_lengths(sentence: str) -> list[tuple[float, float, bool, str]]:
     return lengths
 
 
+def _clause_around(sentence: str, start: int, end: int) -> tuple[int, int]:
+    """The bounds of the clause holding `sentence[start:end]`, cut to
+    `_QUOTE_REACH` characters either side of it, at a space, if it runs on."""
+    left = max((m.end() for m in _CLAUSE_END.finditer(sentence, 0, start)), default=0)
+    after = _CLAUSE_END.search(sentence, end)
+    right = after.start() if after else len(sentence)
+    if start - left > _QUOTE_REACH:
+        cut = sentence.find(" ", start - _QUOTE_REACH, start)
+        left = cut + 1 if cut != -1 else start
+    if right - end > _QUOTE_REACH:
+        cut = sentence.rfind(" ", end, end + _QUOTE_REACH)
+        right = cut if cut != -1 else end
+    return left, right
+
+
 def _fitting_length(sentence: str, max_weeks: int) -> str | None:
-    """The first length within `max_weeks` in a sentence naming any role word or
-    opening with a "Duration"/"Length"/"Period" label, or None.
+    """The clause around the first length within `max_weeks` whose clause also
+    names a role word, or which a sentence-initial "Duration"/"Length"/"Period"
+    label opens; None when there is none.
 
     Deliberately loose. A false fitting length only turns a duration knockout
-    into a stretch whose reason quotes it, so the posting stays visible; a
-    missed one leaves the knockout standing and hides the posting. So none of
-    `_role_lengths`' attribution checks apply: "Interns receive 2 weeks of paid
-    time off" counts as fitting, as does "Duration: 10 weeks starting June"."""
-    if not (_ROLE_WORD.search(sentence) or _LENGTH_LABEL.match(sentence)):
-        return None
+    into a stretch whose reason quotes this clause, so the posting stays
+    visible and the reader can see what was read; a missed one leaves the
+    knockout standing and hides the posting. So none of `_role_lengths`'
+    attribution checks apply: "Interns receive 2 weeks of paid time off" counts
+    as fitting, as does "Duration: 10 weeks starting June". The role word must
+    sit inside the quoted clause, so tag-stripped HTML that reads as one long
+    sentence does not let a role word anywhere vouch for a length anywhere."""
     for m in _DURATION.finditer(sentence):
-        if _weeks(m.group("hi") or m.group("lo"), m.group("unit")) <= max_weeks:
-            return m.group(0)
+        if _weeks(m.group("hi") or m.group("lo"), m.group("unit")) > max_weeks:
+            continue
+        left, right = _clause_around(sentence, m.start(), m.end())
+        if _ROLE_WORD.search(sentence, left, right) or (
+            left == 0 and _LENGTH_LABEL.match(sentence)
+        ):
+            return sentence[left:right].strip()
     return None
 
 
@@ -605,7 +633,7 @@ def check_eligibility(text: str, profile: Profile, *, title: str | None = None) 
     # role, or more than one option; which applies is a question, not a knockout.
     if fitting_length:
         findings = [
-            replace(f, level="stretch", reason=f"{f.reason}; it also states {fitting_length!r}")
+            replace(f, level="stretch", reason=f'{f.reason}; it also states "{fitting_length}"')
             if f.rule == "duration" and f.level == "knockout"
             else f
             for f in findings
