@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 from core.agenda import SHORTLIST, agenda, render
-from core.apply import Application, Outcome
+from core.apply import Application, Outcome, Target
 from core.discovery.store import Found
 from core.paths import ensure_home
 from core.profile.models import Fact, FactKind, Provenance, Trust
@@ -259,3 +259,59 @@ def test_a_closed_posting_is_not_suggested_for_applying(home: Path) -> None:
     postings = [_programme("shut", "Shut Lab", NOW - timedelta(days=2))]
     result = agenda(postings, [], PROFILE, FACTS, now=NOW)
     assert [i.kind for i in result.items] == ["deadline"]
+
+
+def _season_pair(
+    applied_title: str, posting_title: str, applied_url: str = "", url: str | None = None
+) -> tuple[list[Found], list[Application]]:
+    posting = _programme("p", "Lab", NOW + timedelta(days=5)).model_copy(
+        update={"title": posting_title, **({"url": url} if url else {})}
+    )
+    applied = _application("lab-app", "Lab", days_ago=1).model_copy(
+        update={"title": applied_title, "url": applied_url}
+    )
+    target = Target(job_id="x", company="Lab", title=posting.title, url=posting.url, source="other")
+    assert applied.same_posting(target)  # premise: `apply` would call these one posting
+    return [posting], [applied]
+
+
+def test_another_term_of_a_programme_applied_to_keeps_its_deadline(home: Path) -> None:
+    """Mutation: make `_is_applied` return `same_posting` alone -- no line."""
+    postings, applied = _season_pair(
+        "Summer Research (Summer 2027)", "Summer Research (Winter 2027)"
+    )
+    assert len(_deadline_lines(postings, applied)) == 1
+
+
+def test_the_same_term_or_a_missing_term_still_hides_the_deadline(home: Path) -> None:
+    for a, b in [
+        ("Summer Research (Summer 2027)", "Summer Research ( summer  2027 )"),
+        ("Summer Research (Summer 2027)", "Summer Research"),
+        ("Summer Research", "Summer Research (Winter 2027)"),
+    ]:
+        postings, applied = _season_pair(a, b)
+        assert _deadline_lines(postings, applied) == [], (a, b)
+
+
+def test_the_same_url_hides_the_deadline_despite_different_terms(home: Path) -> None:
+    url = "https://www.example.org/p"
+    postings, applied = _season_pair(
+        "Summer Research (Summer 2027)", "Summer Research (Winter 2027)", applied_url=url, url=url
+    )
+    assert _deadline_lines(postings, applied) == []
+
+
+def test_the_window_edges_are_inclusive_at_a_week_and_a_month(home: Path) -> None:
+    """Mutations: `<=` to `<` on the closed bound drops the first; `>` to `>=`
+    on the 30-day bound drops the third."""
+    week, month = timedelta(days=7), timedelta(days=30)
+    edges = {
+        "a": NOW - week,
+        "b": NOW - week - timedelta(minutes=1),
+        "c": NOW + month,
+        "d": NOW + month + timedelta(hours=1),
+        "e": NOW + month - timedelta(hours=1),
+    }
+    postings = [_programme(k, f"Lab {k}", v) for k, v in edges.items()]
+    shown = {line.split()[1] for line in _deadline_lines(postings)}
+    assert shown == {"a", "c", "e"}

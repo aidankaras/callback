@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -214,6 +215,28 @@ def agenda(
     return Agenda(items=tuple(items), applied_today=today)
 
 
+def _term(title: str) -> str | None:
+    """The trailing parenthetical of a title, "(Summer 2027)", normalised."""
+    match = re.search(r"\(([^()]*)\)\s*$", title)
+    return " ".join(match.group(1).casefold().split()) if match else None
+
+
+def _is_applied(application: Application, posting: Target) -> bool:
+    """`same_posting`, except that two programmes whose titles differ only in
+    a bracketed term ("(Summer 2027)" against "(Winter 2027)") are different
+    postings unless they share a URL. `same_posting` leans towards matching so
+    that `apply` never reopens a posting; here that bias would hide a deadline."""
+    if not application.same_posting(posting):
+        return False
+    a, b = _term(application.title), _term(posting.title)
+    if a is None or b is None or a == b:
+        return True
+    # Only a shared URL is decisive now: probe with a target that can match on
+    # nothing else.
+    by_url = posting.model_copy(update={"company": "\0", "title": "\0", "location": ""})
+    return application.same_posting(by_url)
+
+
 def _deadlines(
     postings: Sequence[Found], applications: Sequence[Application], *, now: datetime
 ) -> list[Item]:
@@ -236,7 +259,7 @@ def _deadlines(
             url=posting.url,
             source="other",
         )
-        if not any(a.same_posting(this) for a in applications):
+        if not any(_is_applied(a, this) for a in applications):
             dated.append((deadline, posting))
     items: list[Item] = []
     for deadline, posting in sorted(dated, key=lambda pair: pair[0]):
