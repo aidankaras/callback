@@ -24,8 +24,9 @@ both are printed. The company and role must each equal a segment of the
 posting's first line, not merely occur somewhere in it -- an injected line can
 put any name somewhere in a posting. The letter also fails on more than
 `MAX_WORDS` words, on commitment or negotiation language (which a signed
-letter must not concede and an injected posting would try to insert), and on
-reusing a resume bullet verbatim.
+letter must not concede and an injected posting would try to insert), on
+reusing a resume bullet verbatim, on a stock phrase, and, when it names a field
+brief, on copying one of that brief's exemplars (`core.checks.style`).
 """
 
 from __future__ import annotations
@@ -36,9 +37,11 @@ from dataclasses import dataclass
 from typing import Literal
 
 from core.aliases import canonicalize
+from core.briefs import Brief
 from core.checks.claims import identity_findings
 from core.checks.grounding import check_bullet, checkable_entity_tokens
 from core.checks.numbers import parse_numbers
+from core.checks.style import text_findings
 from core.letter.models import POSTING, CoverLetter, Sentence
 from core.profile.models import Fact, FactKind, Provenance, Quantity, Trust
 
@@ -58,7 +61,6 @@ EMPLOYER_SUBJECTS = (
 COURTESY = (
     "i am applying for the {role} role at {company}",
     "i am writing to apply for the {role} position at {company}",
-    "i am excited to apply for the {role} role at {company}",
     "thank you for your consideration",
     "thank you for your time and consideration",
     "i look forward to hearing from you",
@@ -158,6 +160,7 @@ class SentenceContext:
     facts: Mapping[str, Fact]
     posting: Fact
     resume_bullets: Sequence[str] = ()
+    brief: Brief | None = None
 
 
 def context_for(
@@ -167,9 +170,12 @@ def context_for(
     facts: Mapping[str, Fact],
     posting: str,
     resume_bullets: Sequence[str] = (),
+    brief: Brief | None = None,
 ) -> SentenceContext:
     reused = [b for b in resume_bullets if len(_norm(b).split()) >= _MIN_REUSED_WORDS]
-    return SentenceContext(company, role, candidate_name, facts, _posting_fact(posting), reused)
+    return SentenceContext(
+        company, role, candidate_name, facts, _posting_fact(posting), reused, brief
+    )
 
 
 def heading_findings(company: str, role: str, posting: str) -> list[str]:
@@ -202,6 +208,7 @@ def check_sentence(label: str, sentence: Sentence, ctx: SentenceContext) -> list
         findings.append(f"sentence {label}: commitment or negotiation language: {sentence.text!r}")
     if any(_norm(b) in _norm(sentence.text) for b in ctx.resume_bullets):
         findings.append(f"sentence {label}: reuses a resume bullet verbatim")
+    findings += text_findings(f"sentence {label}", sentence.text, ctx.brief)
     return findings
 
 
@@ -249,6 +256,7 @@ def check_letter(
     posting: str,
     *,
     resume_bullets: Sequence[str] = (),
+    brief: Brief | None = None,
 ) -> LetterResult:
     """Every way `letter` fails, given the candidate's facts and the posting text."""
     findings = heading_findings(letter.company, letter.role, posting)
@@ -263,7 +271,7 @@ def check_letter(
 
     findings.extend(identity_findings(letter.identity, facts))
     ctx = context_for(
-        letter.company, letter.role, letter.identity.name, facts, posting, resume_bullets
+        letter.company, letter.role, letter.identity.name, facts, posting, resume_bullets, brief
     )
     words = len(letter.greeting.split()) + len(letter.closing.split())
     for label, sentence in letter.sentences:

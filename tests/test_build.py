@@ -42,9 +42,13 @@ FACTS = {
             kind=FactKind.EXPERIENCE_DETAIL,
             parent="role",
             text=text,
+            entities=[entity],
             provenance=CONFIRMED,
         )
-        for fid, text in (("loader", "Shipped the loader"), ("runbook", "Wrote the runbook"))
+        for fid, text, entity in (
+            ("loader", "Shipped the Airflow loader", "Airflow"),
+            ("runbook", "Wrote the Terraform runbook", "Terraform"),
+        )
     },
     "contact": Fact(
         id="contact",
@@ -72,8 +76,8 @@ def sample_doc(bullet: str = "Cut the review queue to 300 items using Python") -
                         sources=["role"],
                         bullets=[
                             Bullet(text=bullet, sources=["queue"]),
-                            Bullet(text="Shipped the loader", sources=["loader"]),
-                            Bullet(text="Wrote the runbook", sources=["runbook"]),
+                            Bullet(text="Shipped the Airflow loader", sources=["loader"]),
+                            Bullet(text="Wrote the Terraform runbook", sources=["runbook"]),
                         ],
                     )
                 ],
@@ -126,6 +130,7 @@ def test_the_report_names_the_exact_pdf_and_document_it_judged(tmp_path: Path) -
         "hidden",
         "skills",
         "lints",
+        "style",
     ]
 
 
@@ -251,3 +256,27 @@ def test_a_build_holds_the_resume_to_the_candidates_own_page_limit(
     assert len(page_fill(draft / "resume.pdf")) == 2
     lints = next(o for o in result.report.outcomes if o.gate == "lints")
     assert any(f.startswith("page_count") for f in lints.findings) is flagged
+
+
+@pytest.mark.slow
+def test_a_document_naming_a_missing_brief_cannot_build(tmp_path: Path, home: Path) -> None:
+    doc = sample_doc().model_copy(update={"brief": "absent"})
+    with pytest.raises(BuildError, match="no brief named 'absent'"):
+        build(_write(tmp_path, doc), "northwind-de")
+
+
+@pytest.mark.slow
+def test_a_report_written_before_the_style_gate_still_reads(tmp_path: Path, home: Path) -> None:
+    """A stored report is read as JSON by field, never rebuilt into a
+    `GateReport`, so one with fewer gates than `GATES` stays usable."""
+    from core.recurring import recurring
+    from core.templates import save
+
+    build(_write(tmp_path, sample_doc()), "northwind-de")
+    path = home / "outputs" / "northwind-de" / "draft" / "report.json"
+    record = json.loads(path.read_text())
+    record["outcomes"] = [o for o in record["outcomes"] if o["gate"] != "style"]
+    path.write_text(json.dumps(record))
+    assert [o["gate"] for o in record["outcomes"]][-1] == "lints"  # premise: pre-style shape
+    assert save("northwind-de", "base").is_file()
+    assert recurring().unreadable == ()

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from pathlib import Path
 
 import pytest
 
@@ -15,6 +16,7 @@ from core.checks.style import (
     stock_phrases,
     text_findings,
 )
+from core.gates import run_gates
 from core.profile.models import Fact, FactKind, Identity, Provenance, Trust
 from core.resume.models import Bullet, Entry, ResumeDoc, Section
 
@@ -187,3 +189,12 @@ def test_resume_findings_split_failures_from_warnings() -> None:
     fails, warns = resume_findings(doc, {"role": ROLE, "loader": loader}, None)
     assert fails == ["bullet 0: stock phrase 'Spearheaded'"]
     assert len(warns) == 1 and warns[0].startswith("bullet 1: no number")
+
+
+def test_a_document_naming_a_brief_that_was_not_loaded_fails_style(tmp_path: Path) -> None:
+    loader = _fact("loader", "Shipped the Airflow loader", ["Airflow"])
+    doc = _doc(Bullet(text="Shipped the Airflow loader", sources=["loader"]), brief="ai-ml")
+    report = run_gates(doc, {"role": ROLE, "loader": loader}, tmp_path / "absent.pdf")
+    style = report.outcomes[-1]
+    assert style.gate == "style" and style.verdict == "fail"
+    assert "names brief 'ai-ml', which was not loaded" in style.findings[0]

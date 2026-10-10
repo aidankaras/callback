@@ -49,6 +49,7 @@ class CoverLetter(BaseModel):
     greeting: str
     paragraphs: list[list[Sentence]] = Field(min_length=1)
     closing: str
+    brief: str | None = Field(default=None, pattern=r"^[a-z0-9][a-z0-9-]{0,63}$")
 
     @property
     def sentences(self) -> list[tuple[str, Sentence]]:

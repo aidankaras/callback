@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+from core.briefs import Brief
 from core.letter.checks import check_letter
 from core.letter.models import CoverLetter, Sentence
 from core.profile.models import Dates, Fact, FactKind, Identity, Provenance, Quantity, Trust
@@ -387,3 +388,40 @@ def test_a_greeting_is_a_salutation_not_a_clause(greeting: str, allowed: bool) -
     Mutation: allow 60 characters of free text -- both clauses pass."""
     found = check_letter(letter(greeting=greeting), FACTS, POSTING).findings
     assert (found == ()) is allowed, found
+
+
+def _brief(exemplar: str) -> Brief:
+    return Brief.model_validate(
+        {
+            "field": "ml-research",
+            "built_at": "2026-10-10T14:00:00-04:00",
+            "sources": [
+                {
+                    "id": "s1",
+                    "kind": "career-centre",
+                    "publisher": "Example University",
+                    "title": "Sample letters",
+                    "url": "https://careers.example.edu/letters",
+                    "fetched_at": "2026-10-10T13:00:00-04:00",
+                }
+            ],
+            "exemplars": [
+                {"kind": "letter-paragraph", "text": exemplar, "source": "s1", "why": "w"}
+            ],
+        }
+    )
+
+
+def test_the_excited_to_apply_opening_is_a_stock_phrase() -> None:
+    opening = k("I am excited to apply for the Machine Learning Intern role at Acme Robotics.")
+    found = findings(letter([opening, *HONEST[1:]]))
+    assert any("stock phrase 'I am excited to apply'" in f for f in found), found
+
+
+def test_a_letter_copying_its_briefs_exemplar_fails() -> None:
+    brief = _brief(
+        "I trained a scikit-learn classifier that flagged duplicate invoices for a bank."
+    )
+    found = check_letter(letter(), FACTS, POSTING, brief=brief).findings
+    assert any("copies an exemplar of the ml-research brief" in f for f in found), found
+    assert check_letter(letter(), FACTS, POSTING).findings == ()

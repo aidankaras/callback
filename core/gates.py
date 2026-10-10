@@ -27,19 +27,29 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
+from core.briefs import Brief
 from core.checks.claims import check_claims, omitted_current_roles, skills_shown_by_entries
 from core.checks.grounding import Verdict, check_bullet
 from core.checks.hidden import check_hidden
 from core.checks.lints import Lint, check_lints
 from core.checks.roundtrip import check_roundtrip
 from core.checks.skills import check_skills
+from core.checks.style import resume_findings
 from core.profile.models import Fact
 from core.resume.models import ResumeDoc
 
 Outcome = Literal["pass", "warn", "fail"]
-GateName = Literal["grounding", "claims", "roundtrip", "hidden", "skills", "lints"]
+GateName = Literal["grounding", "claims", "roundtrip", "hidden", "skills", "lints", "style"]
 
-GATES: tuple[GateName, ...] = ("grounding", "claims", "roundtrip", "hidden", "skills", "lints")
+GATES: tuple[GateName, ...] = (
+    "grounding",
+    "claims",
+    "roundtrip",
+    "hidden",
+    "skills",
+    "lints",
+    "style",
+)
 
 _KNOWN: dict[str, Outcome] = {"pass": "pass", "warn": "warn", "fail": "fail"}
 
@@ -153,7 +163,12 @@ def _guarded(gate: GateName, run: Callable[[], tuple[Outcome, tuple[str, ...]]])
 
 
 def run_gates(
-    doc: ResumeDoc, facts: Mapping[str, Fact], pdf_path: Path, *, max_pages: int = 1
+    doc: ResumeDoc,
+    facts: Mapping[str, Fact],
+    pdf_path: Path,
+    *,
+    max_pages: int = 1,
+    brief: Brief | None = None,
 ) -> GateReport:
     """Run every gate in `GATES` on `doc` and the PDF rendered from it."""
     try:
@@ -204,6 +219,14 @@ def run_gates(
         )
         return ("warn" if found else "pass"), tuple(f"{x.rule}: {x.detail}" for x in found)
 
+    def style() -> tuple[Outcome, tuple[str, ...]]:
+        # A document that names a brief is checked against it or not at all:
+        # skipping the exemplar check would read as having passed it.
+        if doc.brief is not None and (brief is None or brief.field != doc.brief):
+            raise ValueError(f"the document names brief {doc.brief!r}, which was not loaded")
+        fails, warns = resume_findings(doc, facts, brief)
+        return ("fail" if fails else "warn" if warns else "pass"), (*fails, *warns)
+
     return GateReport(
         outcomes=(
             grounding,
@@ -212,5 +235,6 @@ def run_gates(
             _guarded("hidden", hidden),
             _guarded("skills", skills),
             _guarded("lints", lints),
+            _guarded("style", style),
         )
     )

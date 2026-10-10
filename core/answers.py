@@ -24,6 +24,7 @@ from typing import Literal
 import yaml
 from pydantic import BaseModel, Field, ValidationError
 
+from core.briefs import Brief, BriefError, load_brief
 from core.checks.claims import name_findings
 from core.letter.checks import check_sentence, context_for, heading_findings, question_findings
 from core.letter.models import Sentence
@@ -58,6 +59,7 @@ class AnswerSet(BaseModel):
     role: str
     candidate_name: str
     answers: list[Answer] = Field(min_length=1)
+    brief: str | None = Field(default=None, pattern=r"^[a-z0-9][a-z0-9-]{0,63}$")
 
 
 @dataclass(frozen=True)
@@ -75,11 +77,14 @@ def check_answers(
     posting: str,
     *,
     resume_bullets: Sequence[str] = (),
+    brief: Brief | None = None,
 ) -> AnswersResult:
     """Every way `doc` fails: its sentences' rules, and each answer's limit."""
     findings = heading_findings(doc.company, doc.role, posting)
     findings.extend(name_findings(doc.candidate_name, facts))
-    ctx = context_for(doc.company, doc.role, doc.candidate_name, facts, posting, resume_bullets)
+    ctx = context_for(
+        doc.company, doc.role, doc.candidate_name, facts, posting, resume_bullets, brief
+    )
     for n, answer in enumerate(doc.answers):
         findings.extend(f"answer {n}: {f}" for f in question_findings(answer.question, ctx))
         for s, sentence in enumerate(answer.sentences):
@@ -132,7 +137,11 @@ def build_answers(path: Path, facts: Mapping[str, Fact]) -> tuple[AnswersResult,
         except DocumentError as exc:
             raise AnswersError(f"cannot read the job's resume to check for reuse: {exc}") from exc
         bullets = [b.text for sec in resume.sections for e in sec.entries for b in e.bullets]
-    result = check_answers(doc, facts, posting, resume_bullets=bullets)
+    try:
+        brief = load_brief(doc.brief) if doc.brief else None
+    except BriefError as exc:
+        raise AnswersError(str(exc)) from exc
+    result = check_answers(doc, facts, posting, resume_bullets=bullets, brief=brief)
     rendered = render_answers(doc)
     write_private(out_dir / "answers.md", rendered)
     record = {
