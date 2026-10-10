@@ -87,6 +87,10 @@ def build_parser() -> argparse.ArgumentParser:
         "--degree", choices=["high school", "associate", "bachelor", "master", "phd"]
     )
     profile.add_argument("--pages", type=int, help="how many pages a resume may run to (default 1)")
+    profile.add_argument(
+        "--seasons", help='terms you can intern in, comma-separated, e.g. "summer"'
+    )
+    profile.add_argument("--max-weeks", type=int, help="the longest internship you can take")
     profile.set_defaults(handler=_cmd_profile)
 
     triage = sub.add_parser("triage", help="rank stored postings: eligibility, evidence, freshness")
@@ -467,6 +471,14 @@ def _cmd_profile(args: argparse.Namespace) -> int:
                 ("graduation", args.graduation),
                 ("degree", args.degree),
                 ("resume_pages", args.pages),
+                # An empty list clears them: `--seasons ""`.
+                (
+                    "seasons",
+                    None
+                    if args.seasons is None
+                    else [s.strip() for s in args.seasons.split(",") if s.strip()],
+                ),
+                ("max_weeks", args.max_weeks),
             )
             if v is not None
         }
@@ -477,6 +489,8 @@ def _cmd_profile(args: argparse.Namespace) -> int:
         print(f"callback profile: {exc}", file=sys.stderr)
         return 3
     for key, value in profile.model_dump().items():
+        if key == "seasons":
+            value = ", ".join(profile.seasons) or None
         print(f"{key:<20} {value if value is not None else '(not set)'}")
     return 0
 

@@ -507,3 +507,157 @@ def test_the_page_limit_is_part_of_the_profile(
     assert main(["profile", "--pages", "0"]) == 3
     assert "resume_pages" in capsys.readouterr().err
     assert load_profile().resume_pages == 2
+
+
+# --- season and duration --------------------------------------------------------------
+
+SUMMER_ONLY = US_JUNIOR.model_copy(update={"seasons": ("summer",), "max_weeks": 14})
+
+
+def season(text: str, title: str) -> list[tuple[str, str]]:
+    return kinds_titled(text, title, SUMMER_ONLY)
+
+
+def kinds_titled(text: str, title: str, profile: Profile) -> list[tuple[str, str]]:
+    findings = check_eligibility(text, profile, title=title).findings
+    return [(f.rule, f.level) for f in findings if f.rule in {"season", "duration"}]
+
+
+@pytest.mark.parametrize(
+    ("title", "expected"),
+    [
+        ("Data Science Intern (Winter 2027)", [("season", "knockout")]),
+        ("Data Science Intern (Fall 2027)", [("season", "knockout")]),
+        ("Quant Researcher (Off-Cycle - Winter/Spring 2027 Intern)", [("season", "knockout")]),
+        ("Co-op, Data Engineering", [("season", "knockout")]),
+        ("Autumn 2027 Analyst", [("season", "knockout")]),
+        ("Data Science Intern - Winter '27", [("season", "knockout")]),
+        ("Analyst Intern (Summer/Fall 2027)", [("season", "stretch")]),
+        ("Software Engineer, Intern (Summer or Winter)", [("season", "stretch")]),
+        ("Data Science Intern (Summer 2027)", []),
+    ],
+)
+def test_the_title_states_the_term(title: str, expected: list[tuple[str, str]]) -> None:
+    """Only the title can knock a posting out on its term: it is the employer's
+    own statement of which term the role is. Mutation: drop the allowed-season
+    check in the title rule -- the "Summer/Fall" and "Summer or Winter" titles
+    become knockouts."""
+    assert season("Python and SQL.", title) == expected
+
+
+@pytest.mark.parametrize(
+    ("title", "text", "word"),
+    [
+        # A team name, not a term: no year, term word or bracket beside it.
+        ("Fall Risk Analytics Intern", "Join the Fall Risk Analytics team.", "fall"),
+        # An address.
+        ("Data Intern", "Our office is on Spring Street, New York.", "spring"),
+        # A verb and a noun.
+        ("Data Intern", "Tasks that fall under the team. A spring in your step.", "fall"),
+        # A company in the heading line of a saved posting.
+        ("Summer Analyst Intern", "Spring Health is our client.", "spring"),
+    ],
+)
+def test_a_season_word_that_names_no_term_is_not_one(title: str, text: str, word: str) -> None:
+    """Mutation: drop `_TERM_AFTER`/`_TERM_BEFORE` and count every season word --
+    each of these becomes a knockout or a stretch."""
+    assert word in f"{title} {text}".casefold()  # premise: the word is there
+    assert season(text, title) == []
+
+
+def test_a_term_mentioned_in_the_body_is_only_a_stretch() -> None:
+    text = "Summer 2027 Analyst; we also run winter and spring cohorts."
+    assert "winter" in text and "spring" in text  # premise
+    assert season(text, "Summer 2027 Analyst") == [("season", "stretch")]
+
+
+def test_a_graduation_window_naming_seasons_is_not_a_term() -> None:
+    """Measured on a real board: "a graduation date in Fall 2027 or Spring 2028"
+    sat in summer postings, and reading it as a term made 13 of them a stretch.
+    Mutation: drop the `_GRADUATION` guard -- this becomes a stretch."""
+    text = "Students graduating in Fall 2027 or Spring 2028 are eligible."
+    assert "Fall 2027" in text  # premise
+    assert season(text, "Data Intern (Summer 2027)") == []
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("This is a 24-week internship based in Berlin.", [("duration", "knockout")]),
+        ("The programme runs six months from January.", [("duration", "knockout")]),
+        ("The internship runs 4 months.", [("duration", "knockout")]),
+        ("The internship runs 3 months.", []),
+        ("Interns typically spend 12 weeks with us.", []),
+        ("Internship program: 10-26 weeks, full-time.", [("duration", "stretch")]),
+        ("Internship program: 12 - 24 weeks, full-time.", [("duration", "stretch")]),
+        ("The internship lasts up to 24 weeks.", [("duration", "stretch")]),
+    ],
+)
+def test_the_role_s_stated_length(text: str, expected: list[tuple[str, str]]) -> None:
+    """A range counts from its low end, and a hedge is a stretch: either way the
+    candidate may fit. Mutation: use the high end of a range -- "10-26 weeks"
+    becomes a knockout."""
+    assert season(text, "ML Intern") == expected
+
+
+def test_a_length_that_is_not_the_role_s_is_not_counted() -> None:
+    """Mutation: drop the role-word condition -- the onboarding sentence knocks
+    the internship out. The semicolon case is a length of something else in the
+    same sentence."""
+    onboarding = "Our 6-month onboarding for full-time hires starts in March."
+    semicolon = "This is a 10-week internship; full-time hires complete a 6-month rotation."
+    graduation = "Apply as a 3rd year internship, or within 12 months of graduation."
+    assert "6-month" in onboarding and "6-month" in semicolon and "12 months" in graduation
+    assert season(onboarding, "ML Intern") == []
+    assert season(semicolon, "ML Intern") == []
+    assert season(graduation, "ML Intern") == []
+
+
+def test_a_posting_stating_a_length_that_fits_is_never_a_duration_knockout() -> None:
+    """Measured on a real board: one posting described several internships, most
+    "10-week", one "minimum 6 months". A knockout would hide every role in it.
+    Mutation: drop the `fitting_length` downgrade -- this is a knockout."""
+    text = (
+        "Over the 10-week internship program, you will learn. "
+        "The minimum internship period is 6 months."
+    )
+    assert season(text, "Quant Intern") == [("duration", "stretch")]
+
+
+def test_the_season_rules_run_only_when_the_profile_asks() -> None:
+    text = "This is a 24-week internship."
+    assert kinds_titled(text, "Data Intern (Winter 2027)", US_JUNIOR) == []
+
+
+def test_a_saved_posting_s_heading_is_its_title() -> None:
+    """`take` writes `# <title> - <company>`; `eligibility` and `fit` pass no title."""
+    saved = "# Data Science Intern (Winter 2027) - Acme\n\nPython and SQL.\n"
+    assert [(f.rule, f.level) for f in check_eligibility(saved, SUMMER_ONLY).findings] == [
+        ("season", "knockout")
+    ]
+
+
+def test_seasons_round_trip_through_the_profile_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An existing profile file gains the fields without losing what it held."""
+    from core.triage import load_profile, save_profile
+
+    monkeypatch.setenv("CALLBACK_HOME", str(tmp_path))
+    save_profile(SUMMER_ONLY)
+    assert load_profile() == SUMMER_ONLY
+
+
+def test_the_profile_command_sets_seasons_and_a_length(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from core.cli import main
+
+    monkeypatch.setenv("CALLBACK_HOME", str(tmp_path / "cb"))
+    assert main(["profile", "--seasons", "summer, fall", "--max-weeks", "14"]) == 0
+    out = capsys.readouterr().out
+    assert "seasons              summer, fall" in out and "max_weeks            14" in out
+    assert main(["profile", "--seasons", "monsoon"]) == 3
+    capsys.readouterr()
+    assert main(["profile", "--seasons", ""]) == 0
+    assert "seasons              (not set)" in capsys.readouterr().out
