@@ -520,7 +520,9 @@ def _cmd_profile(args: argparse.Namespace) -> int:
         print(f"callback profile: {exc}", file=sys.stderr)
         return 3
     for key, value in profile.model_dump().items():
-        if key == "seasons":
+        if key == "tiers":
+            value = ", ".join(t.name for t in profile.tiers) or None
+        elif key == "seasons":
             value = ", ".join(profile.seasons) or None
         print(f"{key:<20} {value if value is not None else '(not set)'}")
     return 0
@@ -552,10 +554,14 @@ def _cmd_triage(args: argparse.Namespace) -> int:
         return 3
     if args.days is not None:
         postings = [p for p in postings if now - p.first_seen <= timedelta(days=args.days)]
+    width = max((len(t.name) for t in profile.tiers), default=0)
     for r in rank(postings, profile, facts, now=now)[: args.limit]:
         have, missing = r.coverage
+        # The tier is the first thing the order is decided by, so it is shown
+        # first; with no tiers set the output is as it always was.
+        tier = f"{r.tier:<{width}}  " if profile.tiers else ""
         print(
-            f"{r.score:>6.2f}  {r.eligibility.verdict:<9} {r.age_days:>3}d  "
+            f"{tier}{r.score:>6.2f}  {r.eligibility.verdict:<9} {r.age_days:>3}d  "
             f"{r.posting.company} / {r.posting.title}  [{r.posting.id}]"
         )
         if have or missing:

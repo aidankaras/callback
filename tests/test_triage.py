@@ -950,3 +950,175 @@ def test_the_profile_command_sets_seasons_and_a_length(
     capsys.readouterr()
     assert main(["profile", "--seasons", ""]) == 0
     assert "seasons              (not set)" in capsys.readouterr().out
+
+
+# --- priority tiers -------------------------------------------------------------------
+
+TIER_FACTS = {
+    "py": Fact(
+        id="py",
+        kind=FactKind.SKILL,
+        text="Wrote Python and SQL",
+        entities=["Python", "SQL"],
+        provenance=Provenance(source="x", trust=Trust.USER_CONFIRMED),
+    )
+}
+# id, company, title, location, text, days old
+TIER_CORPUS = [
+    ("a", "Acme", "Data Science Intern", "London", "Python and SQL.", 1),
+    ("b", "Borealis Capital", "Quant Research Intern", "Chicago", "Python.", 3),
+    ("c", "Cobalt", "ML Intern", "Zurich", "PyTorch and Kubernetes.", 0),
+    ("d", "Dune", "Analyst Intern", "New York", "Python. Class of 2027 only.", 0),
+    ("e", "Ember", "AI Engineer Intern", "Boston", "Python, SQL and PyTorch.", 10),
+    ("f", "Fjord Trading", "Data Scientist Intern", "Amsterdam", "SQL.", 25),
+    ("g", "Gale", "Software Intern", "Austin", "Java.", 2),
+    ("h", "Harbor", "ML Intern", "Paris", "Python. Must be a US citizen.", 5),
+]
+F1 = Profile(
+    work_authorization="F-1, will need sponsorship", graduation="May 2028", degree="bachelor"
+)
+
+
+def _tier_corpus() -> list[Found]:
+    return [
+        Found(
+            id=pid,
+            ats="greenhouse",
+            board=company.casefold(),
+            company=company,
+            title=title,
+            location=location,
+            url=f"https://job-boards.greenhouse.io/x/jobs/{pid}",
+            text=text,
+            first_seen=NOW - timedelta(days=days),
+        )
+        for pid, company, title, location, text, days in TIER_CORPUS
+    ]
+
+
+def _tiers(*tiers: tuple[str, list[str], tuple[str, ...]]) -> Profile:
+    from core.discovery.store import Criteria
+    from core.triage import Tier
+
+    built = tuple(Tier(name=n, criteria=Criteria(include=inc), prefer=p) for n, inc, p in tiers)
+    return F1.model_copy(update={"tiers": built})
+
+
+EUROPE = ("europe", ["london", "zurich", "amsterdam", "paris"], ())
+AI_ML = ("ai-ml", ["ai", "ml"], ())
+FINANCE = ("finance-ds", ["quant*", "data scien*", "analyst"], ())
+
+
+def test_with_no_tiers_the_order_is_the_order_before_tiers_existed() -> None:
+    """Recorded from `rank` before tiers were added, over this corpus and profile."""
+    ranked = rank(_tier_corpus(), F1, TIER_FACTS, now=NOW)
+    assert [r.posting.id for r in ranked] == ["a", "b", "e", "c", "g", "f", "d", "h"]
+    assert {r.tier for r in ranked} == {"other"}
+
+
+def test_tiers_order_strictly_before_the_score() -> None:
+    """A weak posting in an earlier tier outranks a strong one in a later tier:
+    "f" scores 0.267 and "e" 0.507. Knockouts stay last whatever their tier, and
+    are themselves in tier order. Mutation: put the score before the tier in the sort key --
+    "e" and "b" rise above "c" and "f"."""
+    ranked = rank(_tier_corpus(), _tiers(EUROPE, AI_ML, FINANCE), TIER_FACTS, now=NOW)
+    assert [(r.posting.id, r.tier) for r in ranked] == [
+        ("a", "europe"),
+        ("c", "europe"),
+        ("f", "europe"),
+        ("e", "ai-ml"),
+        ("b", "finance-ds"),
+        ("g", "other"),
+        ("h", "europe"),
+        ("d", "finance-ds"),
+    ]
+    assert ranked[2].score < ranked[3].score  # premise: the earlier tier holds the weaker posting
+
+
+def test_a_posting_belongs_to_the_first_tier_it_matches() -> None:
+    """ "c" is an ML role in Zurich: Europe first, it is Europe; AI first, it is AI."""
+    europe_first = rank(_tier_corpus(), _tiers(EUROPE, AI_ML), TIER_FACTS, now=NOW)
+    ai_first = rank(_tier_corpus(), _tiers(AI_ML, EUROPE), TIER_FACTS, now=NOW)
+    assert {r.posting.id: r.tier for r in europe_first}["c"] == "europe"
+    assert {r.posting.id: r.tier for r in ai_first}["c"] == "ai-ml"
+
+
+def test_a_preferred_posting_leads_its_tier() -> None:
+    """ "f" is the weakest posting in Europe and the only one at a trading firm.
+    Mutation: drop `prefer` from the sort key -- "f" falls back to third."""
+    europe = ("europe", ["london", "zurich", "amsterdam", "paris"], ("trading",))
+    ranked = rank(_tier_corpus(), _tiers(europe), TIER_FACTS, now=NOW)
+    assert [r.posting.id for r in ranked][:3] == ["f", "a", "c"]
+
+
+def test_triage_prints_the_tier_first_once_tiers_are_set(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """With none set the output is as it was: no column of "other"."""
+    from core.cli import main
+    from core.discovery.store import add_manual
+    from core.paths import ensure_home
+
+    monkeypatch.setenv("CALLBACK_HOME", str(tmp_path / "cb"))
+    home = ensure_home()
+    add_manual(
+        "Example Exchange",
+        "Summer Research",
+        "https://www.example.org/r",
+        "Ten weeks.",
+        None,
+        now=NOW,
+    )
+    assert main(["triage"]) == 0
+    assert not capsys.readouterr().out.startswith("other")
+    (home / "profile.yaml").write_text(
+        "tiers:\n- name: research\n  criteria: {include: [research]}\n", encoding="utf-8"
+    )
+    assert main(["triage"]) == 0
+    assert capsys.readouterr().out.startswith("research  ")
+
+
+def test_a_company_named_after_a_city_is_excluded_from_a_city_tier() -> None:
+    """A tier is matched against the company too, so "Geneva Trading" in Chicago
+    names a European city; an exclude term is how a profile says it does not."""
+    from core.discovery.store import Criteria
+    from core.triage import Tier
+
+    posting = _tier_corpus()[6].model_copy(update={"company": "Geneva Trading"})
+    cities = ["geneva", "london"]
+    plain = F1.model_copy(
+        update={"tiers": (Tier(name="europe", criteria=Criteria(include=cities)),)}
+    )
+    excluded = F1.model_copy(
+        update={
+            "tiers": (
+                Tier(
+                    name="europe",
+                    criteria=Criteria(include=cities, exclude=["geneva trading"]),
+                ),
+            )
+        }
+    )
+    assert rank([posting], plain, TIER_FACTS, now=NOW)[0].tier == "europe"  # premise: it collides
+    assert rank([posting], excluded, TIER_FACTS, now=NOW)[0].tier == "other"
+
+
+def test_tiers_survive_the_profile_command_rewriting_the_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Tiers are edited by hand in `profile.yaml`; `callback profile --pages 2`
+    rewrites that file and must keep them."""
+    from core.cli import main
+    from core.paths import ensure_home
+    from core.triage import load_profile
+
+    monkeypatch.setenv("CALLBACK_HOME", str(tmp_path / "cb"))
+    home = ensure_home()
+    (home / "profile.yaml").write_text(
+        "tiers:\n- name: eu\n  criteria: {include: [london], exclude: [audit]}\n"
+        "  prefer: [quant*]\n",
+        encoding="utf-8",
+    )
+    before = load_profile().tiers
+    assert main(["profile", "--pages", "2"]) == 0
+    assert load_profile().tiers == before and before[0].prefer == ("quant*",)

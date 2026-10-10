@@ -53,7 +53,7 @@ from pydantic import BaseModel, Field, ValidationError
 
 from core.aliases import ALIAS_TABLE, canonicalize
 from core.checks.grounding import checkable_entity_tokens, iso_month_dates
-from core.discovery.store import Found
+from core.discovery.store import Criteria, Found
 from core.paths import resolve_inside, write_private
 from core.profile.models import Fact
 
@@ -281,6 +281,24 @@ _QUOTE_REACH = 50
 _WEEKS_PER_MONTH = 52 / 12
 
 
+class Tier(BaseModel):
+    """A band of postings the candidate ranks above every posting in a later one.
+
+    A posting belongs to the first tier whose `criteria` match
+    `"<company> | <title> | <location>"`, so a tier can name a city as well as
+    a kind of role. `prefer` uses the same term syntax and orders postings
+    inside the tier, ahead of the score."""
+
+    model_config = {"extra": "forbid", "frozen": True}
+
+    name: str = Field(min_length=1, max_length=40)
+    criteria: Criteria
+    prefer: tuple[str, ...] = ()
+
+
+OTHER_TIER = "other"
+
+
 class Profile(BaseModel):
     """What is known about the candidate apart from their facts: what
     eligibility is judged against, each field of which may be unknown, and how
@@ -299,6 +317,7 @@ class Profile(BaseModel):
     resume_pages: int = Field(default=1, ge=1, le=10)
     seasons: tuple[Season, ...] = ()
     max_weeks: int | None = Field(default=None, ge=1, le=104)
+    tiers: tuple[Tier, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -652,15 +671,28 @@ class Ranked:
     eligibility: Eligibility
     coverage: tuple[list[str], list[str]] = field(default=([], []))
     age_days: int = 0
+    tier: str = OTHER_TIER
 
 
 def rank(
     postings: Sequence[Found], profile: Profile, facts: Mapping[str, Fact], *, now: datetime
 ) -> list[Ranked]:
-    """`postings`, best first: knockouts last, then by evidenced coverage and freshness."""
+    """`postings`, best first: knockouts last, then by the profile's tiers in
+    order, then a tier's preferred postings, then by evidenced coverage and
+    freshness.
+
+    The order is lexicographic, not a weighted sum: a tier is a strict
+    preference, and a weight would let a strong posting in a later tier
+    outrank a weak one in an earlier tier."""
     evidenced = {canonicalize(e) for f in facts.values() if f.selectable() for e in f.entities}
-    ranked: list[Ranked] = []
+    preferred = [Criteria(include=list(t.prefer)) if t.prefer else None for t in profile.tiers]
+    ranked: list[tuple[tuple[bool, int, bool, float], Ranked]] = []
     for posting in postings:
+        line = f"{posting.company} | {posting.title} | {posting.location}"
+        index = next(
+            (i for i, t in enumerate(profile.tiers) if t.criteria.matches(line)), len(profile.tiers)
+        )
+        prefer = preferred[index] if index < len(profile.tiers) else None
         eligibility = check_eligibility(posting.text, profile, title=posting.title)
         asked = _technologies(posting.text)
         have = sorted(asked & evidenced)
@@ -673,8 +705,11 @@ def rank(
             score -= 10
         elif eligibility.verdict == "unknown":
             score -= 0.1
-        ranked.append(Ranked(posting, round(score, 3), eligibility, (have, missing), age))
-    return sorted(ranked, key=lambda r: r.score, reverse=True)
+        tier = profile.tiers[index].name if index < len(profile.tiers) else OTHER_TIER
+        row = Ranked(posting, round(score, 3), eligibility, (have, missing), age, tier)
+        unpreferred = prefer is None or not prefer.matches(line)
+        ranked.append(((eligibility.verdict == "knockout", index, unpreferred, -row.score), row))
+    return [row for _, row in sorted(ranked, key=lambda pair: pair[0])]
 
 
 @dataclass(frozen=True)

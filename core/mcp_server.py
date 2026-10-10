@@ -304,6 +304,7 @@ def triage(days: int | None = None, limit: int = 20) -> dict[str, object]:
                 "evidenced": r.coverage[0],
                 "missing": r.coverage[1],
                 "age_days": r.age_days,
+                "tier": r.tier,
             }
             for r in ranked
         ]
