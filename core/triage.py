@@ -170,34 +170,50 @@ _SEASON_GROUP = re.compile(
     rf"\b{_SEASON_WORD}(?:\s*(?:/|,|&|\bor\b|\band\b|[-\u2013])\s*{_SEASON_WORD})*\b", re.I
 )
 # A season word names a term only beside something that makes it one -- a
-# year, a term word, a bracket -- so "Fall Risk Analytics" and "Spring Street"
-# do not, while "Winter/Spring 2027" and "(Summer or Winter)" do.
+# year, a term word, or a bracket holding nothing else -- so "Fall Risk
+# Analytics", "Spring Street", "(Spring Boot)" and "(Java/Spring)" do not,
+# while "Winter/Spring 2027" and "(Summer or Winter)" do.
 _TERM_AFTER = re.compile(
     r"\s*(?:20\d\d\b|'\d\d\b|semesters?\b|terms?\b|sessions?\b|cycles?\b|cohorts?\b"
-    r"|intern\w*|co-?ops?\b|placements?\b|analysts?\b|\))",
+    r"|intern\w*|co-?ops?\b|placements?\b|analysts?\b)",
     re.I,
 )
-_TERM_BEFORE = re.compile(r"(?:\b20\d\d|\()\s*$")
+_TERM_BEFORE = re.compile(r"\b20\d\d\s*$")
 _OFF_CYCLE = re.compile(r"\boff[\s-]?cycle\b|\bco-?op\b", re.I)
-_NUMBER = r"\d{1,3}|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve"
+# A decimal is read whole: without it, `\b` finds "5 months" in "2.5 months".
+_NUMBER = r"\d{1,3}(?:\.\d+)?|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve"
 _NUMBER_WORDS = {w: n for n, w in enumerate(_NUMBER.split("|")[1:], start=1)}
 _DURATION = re.compile(
-    rf"\b(?P<lo>{_NUMBER})(?:\s*(?:-|\u2013|\u2014|to|and)\s*(?P<hi>{_NUMBER}))?[\s-]*"
-    r"(?P<unit>weeks?|months?)\b",
+    rf"\b(?P<lo>{_NUMBER})(?:\s*(?:-|\u2013|\u2014|to|and|or)\s*(?P<hi>{_NUMBER}))?"
+    r"[\s-]*(?P<unit>weeks?|months?)\b",
     re.I,
 )
-# A length counts only near a word naming the role, so "our 6-month onboarding
-# for full-time hires" says nothing about an internship.
-_ROLE = re.compile(
-    r"\b(?:internships?|interns?|programmes?|programs?|co-?ops?|placements?|fellowships?)\b",
+# A length is the role's only when the sentence attributes it to the role, not
+# when it merely sits near a role word: "a 24-week internship" and "the
+# internship runs 6 months" state one; "6 months of Python experience", "a
+# 1-week orientation program" and "a 24-month master's program" do not.
+_ROLE_WORD = r"(?:internships?|interns?|programmes?|programs?|co-?ops?|placements?|fellowships?)"
+# The length names the role: "a 24-week internship", "a 10-week summer
+# internship". Only an internship word may follow a modifier: "program" after
+# one is often a degree or an orientation, not the role.
+_LENGTH_NAMES_ROLE = re.compile(
+    r"\s+(?:(?:[\w'-]+\s+)?(?:internships?|interns?|co-?ops?|placements?|fellowships?)"
+    r"|programmes?|programs?)\b",
     re.I,
 )
-_ROLE_REACH = 40
-_LENGTH_HEDGE = re.compile(
-    r"\b(?:up to|typically|usually|approximately|about|around|roughly|between)\s*$", re.I
+_HEDGE_WORDS = r"up to|typically|usually|approximately|about|around|roughly|between"
+# The role is the subject and the length its predicate: "the internship runs 6
+# months", "internship program: 10-26 weeks", "internships of 3 or 6 months",
+# "the internship typically lasts up to 24 weeks". A hedge may sit either side
+# of the verb.
+_ROLE_RUNS = re.compile(
+    rf"\b{_ROLE_WORD}(?:\s+(?:programmes?|programs?|period|length|duration|term))?"
+    rf"(?:\s+(?:will|{_HEDGE_WORDS}))*"
+    r"(?:\s*:|\s+(?:is|are|runs?|lasts?|spans?|of|for))"
+    rf"(?:\s+(?:{_HEDGE_WORDS}))*\s*$",
+    re.I,
 )
-# "within 12 months of graduation", "the first 6 weeks": a span, not the role's length.
-_NOT_A_LENGTH = re.compile(r"\b(?:within|past|last|first|after|before)\s*$", re.I)
+_LENGTH_HEDGE = re.compile(rf"\b(?:{_HEDGE_WORDS})\b", re.I)
 _WEEKS_PER_MONTH = 52 / 12
 
 
@@ -325,43 +341,43 @@ def _refuses(sentence: str) -> bool:
     )
 
 
-def _season_terms(text: str) -> list[frozenset[str]]:
-    """Each run of seasons `text` names as a term, as the seasons in it."""
-    terms: list[frozenset[str]] = []
+def _season_terms(text: str) -> list[tuple[int, frozenset[str]]]:
+    """Each run of seasons `text` names as a term, as its offset and the seasons in it."""
+    terms: list[tuple[int, frozenset[str]]] = []
     for match in _SEASON_GROUP.finditer(text):
-        if _TERM_AFTER.match(text, match.end()) or _TERM_BEFORE.search(text[: match.start()]):
+        before, after = text[: match.start()], text[match.end() :]
+        bracketed = before.rstrip().endswith("(") and after.lstrip().startswith(")")
+        if bracketed or _TERM_AFTER.match(after) or _TERM_BEFORE.search(before):
             words = {w.casefold() for w in re.findall(_SEASON_WORD, match.group(0), re.I)}
-            terms.append(frozenset("fall" if w == "autumn" else w for w in words))
+            terms.append((match.start(), frozenset("fall" if w == "autumn" else w for w in words)))
     return terms
 
 
 def _weeks(number: str, unit: str) -> float:
-    n = int(number) if number.isdigit() else _NUMBER_WORDS[number.casefold()]
-    return n * _WEEKS_PER_MONTH if unit.casefold().startswith("month") else float(n)
+    n = float(number) if number[0].isdigit() else _NUMBER_WORDS[number.casefold()]
+    return n * _WEEKS_PER_MONTH if unit.casefold().startswith("month") else n
 
 
-def _role_lengths(sentence: str) -> list[tuple[float, float, bool]]:
-    """Each length of the role `sentence` states, as `(low, high, hedged)` weeks.
-
-    A clause ends at a semicolon, so "a 10-week internship; full-time hires
-    complete a 6-month rotation" states one length, not two."""
-    lengths: list[tuple[float, float, bool]] = []
-    for clause in sentence.split(";"):
-        for m in _DURATION.finditer(clause):
-            near = clause[max(0, m.start() - _ROLE_REACH) : m.end() + _ROLE_REACH]
-            before = clause[: m.start()]
-            if not _ROLE.search(near) or _NOT_A_LENGTH.search(before):
-                continue
-            low = _weeks(m.group("lo"), m.group("unit"))
-            high = _weeks(m.group("hi"), m.group("unit")) if m.group("hi") else low
-            lengths.append((low, high, _LENGTH_HEDGE.search(before) is not None))
+def _role_lengths(sentence: str) -> list[tuple[float, float, bool, str]]:
+    """Each length `sentence` attributes to the role, as `(low, high, hedged,
+    text)`, the bounds in weeks."""
+    lengths: list[tuple[float, float, bool, str]] = []
+    for m in _DURATION.finditer(sentence):
+        runs = _ROLE_RUNS.search(sentence[: m.start()])
+        if runs is None and not _LENGTH_NAMES_ROLE.match(sentence, m.end()):
+            continue
+        low = _weeks(m.group("lo"), m.group("unit"))
+        high = _weeks(m.group("hi"), m.group("unit")) if m.group("hi") else low
+        hedged = runs is not None and _LENGTH_HEDGE.search(runs.group(0)) is not None
+        lengths.append((low, high, hedged, m.group(0)))
     return lengths
 
 
 def _title_of(text: str) -> str:
-    """A saved posting's title: `take` heads the file `# <title> - <company>`."""
+    """A saved posting's title: `take` heads the file `# <title> - <company>`,
+    and a title may itself hold " - ", so only the last one is cut."""
     first = text.lstrip().split("\n", 1)[0]
-    return first[2:].strip() if first.startswith("# ") else ""
+    return first[2:].strip().rsplit(" - ", 1)[0] if first.startswith("# ") else ""
 
 
 def check_eligibility(text: str, profile: Profile, *, title: str | None = None) -> Eligibility:
@@ -400,11 +416,11 @@ def check_eligibility(text: str, profile: Profile, *, title: str | None = None) 
     # knock a posting out; the body only raises a stretch. A knockout hides a
     # posting, so it needs a season stated as one, not a word that might be one.
     if allowed:
-        named = frozenset[str]().union(*_season_terms(title))
+        named = frozenset[str]().union(*(term for _, term in _season_terms(title)))
         if named - allowed or _OFF_CYCLE.search(title):
             level: Level = "stretch" if named & allowed else "knockout"
             add("season", level, title, f"term outside {', '.join(sorted(allowed))}")
-    fitting_length = False
+    fitting_length: str | None = None
     for sentence in (s for s in _SENTENCE_BREAK.split(normalised) if s.strip()):
         if _refuses(sentence):
             needs = auth is not None and _NEEDS_SPONSORSHIP.search(auth) and not _is_citizen(auth)
@@ -470,17 +486,18 @@ def check_eligibility(text: str, profile: Profile, *, title: str | None = None) 
                     "degree", "stretch", sentence, who if students else "asks for a graduate degree"
                 )
         # A graduation window names seasons too ("graduating Fall 2027 or
-        # Spring 2028"); it is the graduation rule's to judge, not a term.
-        if (
-            allowed
-            and not _GRADUATION.search(sentence)
-            and any(term - allowed for term in _season_terms(sentence))
-        ):
+        # Spring 2028"); those after a graduation word are the graduation
+        # rule's to judge, not a term. Only those after it: a list joined by
+        # tags reads as one sentence, so "Fall 2027 internship" can precede
+        # "graduate degree" in it.
+        graduation = _GRADUATION.search(sentence)
+        cut = graduation.start() if graduation else len(sentence)
+        if allowed and any(term - allowed for at, term in _season_terms(sentence) if at < cut):
             add("season", "stretch", sentence, "mentions a term you are not available for")
         if profile.max_weeks is not None:
-            for low, high, hedged in _role_lengths(sentence):
+            for low, high, hedged, stated in _role_lengths(sentence):
                 if high <= profile.max_weeks:
-                    fitting_length = True
+                    fitting_length = fitting_length or stated
                 elif low > profile.max_weeks and not hedged:
                     add("duration", "knockout", sentence, f"longer than {profile.max_weeks} weeks")
                 else:
@@ -494,7 +511,7 @@ def check_eligibility(text: str, profile: Profile, *, title: str | None = None) 
     # role, or more than one option; which applies is a question, not a knockout.
     if fitting_length:
         findings = [
-            replace(f, level="stretch", reason=f"{f.reason}; another sentence states one that fits")
+            replace(f, level="stretch", reason=f"{f.reason}; it also states {fitting_length!r}")
             if f.rule == "duration" and f.level == "knockout"
             else f
             for f in findings

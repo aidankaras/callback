@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -528,6 +529,7 @@ def kinds_titled(text: str, title: str, profile: Profile) -> list[tuple[str, str
     [
         ("Data Science Intern (Winter 2027)", [("season", "knockout")]),
         ("Data Science Intern (Fall 2027)", [("season", "knockout")]),
+        ("Data Science Intern (Winter)", [("season", "knockout")]),
         ("Quant Researcher (Off-Cycle - Winter/Spring 2027 Intern)", [("season", "knockout")]),
         ("Co-op, Data Engineering", [("season", "knockout")]),
         ("Autumn 2027 Analyst", [("season", "knockout")]),
@@ -554,7 +556,7 @@ def test_the_title_states_the_term(title: str, expected: list[tuple[str, str]]) 
         ("Data Intern", "Our office is on Spring Street, New York.", "spring"),
         # A verb and a noun.
         ("Data Intern", "Tasks that fall under the team. A spring in your step.", "fall"),
-        # A company in the heading line of a saved posting.
+        # A company named in the body.
         ("Summer Analyst Intern", "Spring Health is our client.", "spring"),
     ],
 )
@@ -576,8 +578,19 @@ def test_a_graduation_window_naming_seasons_is_not_a_term() -> None:
     sat in summer postings, and reading it as a term made 13 of them a stretch.
     Mutation: drop the `_GRADUATION` guard -- this becomes a stretch."""
     text = "Students graduating in Fall 2027 or Spring 2028 are eligible."
-    assert "Fall 2027" in text  # premise
+    between = "Expecting to graduate between Winter 2027 and Summer 2028."
+    assert "Fall 2027" in text and "Winter 2027" in between  # premise
     assert season(text, "Data Intern (Summer 2027)") == []
+    assert season(between, "Data Intern (Summer 2027)") == []
+
+
+def test_a_term_before_a_graduation_word_is_still_a_term() -> None:
+    """A list joined by tags reads as one sentence, so the term and a degree
+    requirement share it. Mutation: skip every season in a sentence naming
+    graduation -- this loses its stretch."""
+    text = "<ul><li>Fall 2027 internship</li><li>Pursuing a bachelor or graduate degree</li></ul>"
+    assert text.index("Fall 2027") < text.index("graduate")  # premise
+    assert season(text, "Data Intern") == [("season", "stretch")]
 
 
 @pytest.mark.parametrize(
@@ -591,6 +604,14 @@ def test_a_graduation_window_naming_seasons_is_not_a_term() -> None:
         ("Internship program: 10-26 weeks, full-time.", [("duration", "stretch")]),
         ("Internship program: 12 - 24 weeks, full-time.", [("duration", "stretch")]),
         ("The internship lasts up to 24 weeks.", [("duration", "stretch")]),
+        ("This internship runs 6 months.", [("duration", "knockout")]),
+        ("The minimum internship period is 6 months.", [("duration", "knockout")]),
+        # 2.5 months is 10.8 weeks. Read as "5-month internship", the second is
+        # a knockout; the first would only go unread.
+        ("The internship lasts 2.5 months.", []),
+        ("This is a 2.5-month internship.", []),
+        # The lower option fits.
+        ("We offer internships of 3 or 6 months.", [("duration", "stretch")]),
     ],
 )
 def test_the_role_s_stated_length(text: str, expected: list[tuple[str, str]]) -> None:
@@ -601,9 +622,9 @@ def test_the_role_s_stated_length(text: str, expected: list[tuple[str, str]]) ->
 
 
 def test_a_length_that_is_not_the_role_s_is_not_counted() -> None:
-    """Mutation: drop the role-word condition -- the onboarding sentence knocks
-    the internship out. The semicolon case is a length of something else in the
-    same sentence."""
+    """Mutation: count every length, dropping the check that the sentence
+    attributes it to the role -- the onboarding sentence knocks the internship
+    out. The semicolon case is a length of something else in the same sentence."""
     onboarding = "Our 6-month onboarding for full-time hires starts in March."
     semicolon = "This is a 10-week internship; full-time hires complete a 6-month rotation."
     graduation = "Apply as a 3rd year internship, or within 12 months of graduation."
@@ -622,6 +643,92 @@ def test_a_posting_stating_a_length_that_fits_is_never_a_duration_knockout() -> 
         "The minimum internship period is 6 months."
     )
     assert season(text, "Quant Intern") == [("duration", "stretch")]
+    [finding] = check_eligibility(text, SUMMER_ONLY, title="Quant Intern").findings
+    assert "'10-week'" in finding.reason
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Summer 2027. Offers go out 4 months before the internship starts.",
+        "Internship candidates should have 6 months of Python experience.",
+        "Data Science Intern. Applicants must be enrolled in a 24-month master's program.",
+        "Summer 2027. Past interns have joined our 18-month rotational program.",
+    ],
+)
+def test_a_length_near_a_role_word_is_not_the_role_s(text: str) -> None:
+    """Each length here exceeds 14 weeks and sits beside a role word, but is
+    the length of something else. Mutation: count every length -- each becomes
+    a duration knockout."""
+    assert re.search(r"\b(?:4|6|24|18)[ -]months?\b", text)  # premise: a length too long
+    assert ("duration", "knockout") not in season(text, "")
+
+
+@pytest.mark.parametrize(
+    "other",
+    [
+        "Interns receive 2 weeks of paid time off.",
+        "Interns begin with a 1-week orientation program.",
+    ],
+)
+def test_a_short_span_that_is_not_the_role_s_does_not_soften_a_knockout(other: str) -> None:
+    """Mutation: let "program" follow a modifier in `_LENGTH_NAMES_ROLE` -- the
+    orientation program becomes a fitting length and the knockout a stretch."""
+    knockout = "Data Science Intern. This internship runs 6 months."
+    assert season(knockout, "") == [("duration", "knockout")]  # premise
+    assert season(f"{knockout} {other}", "") == [("duration", "knockout")]
+
+
+@pytest.mark.parametrize(
+    ("text", "hedge"),
+    [
+        ("The internship lasts up to 24 weeks.", "up to "),
+        ("The internship typically lasts 24 weeks.", "typically "),
+        ("The internship usually lasts 24 weeks.", "usually "),
+        ("The internship lasts approximately 24 weeks.", "approximately "),
+        ("The internship lasts about 24 weeks.", "about "),
+        ("The internship lasts around 24 weeks.", "around "),
+        ("The internship lasts roughly 24 weeks.", "roughly "),
+        ("The internship lasts between 20 and 24 weeks.", "between "),
+    ],
+)
+def test_each_hedge_makes_a_length_a_stretch(text: str, hedge: str) -> None:
+    """Mutation: drop any one word from `_HEDGE_WORDS` -- its case fails."""
+    assert season(text.replace(hedge, ""), "") == [("duration", "knockout")]  # premise
+    assert season(text, "") == [("duration", "stretch")]
+
+
+@pytest.mark.parametrize(
+    ("title", "text"),
+    [
+        ("Backend Engineering Intern (Spring Boot)", "This is a 12-week Summer 2027 internship."),
+        ("Software Engineer Intern (Java/Spring)", "Summer 2027 internship in Boston."),
+        ("Data Science Intern (Spring Health)", "Join us for Summer 2027."),
+    ],
+)
+def test_a_season_word_in_a_bracket_with_other_words_is_not_a_term(title: str, text: str) -> None:
+    """Mutation: count an opening bracket alone before a season word as a term --
+    each title becomes a knockout."""
+    assert "(" in title and "Spring" in title  # premise
+    assert check_eligibility(text, SUMMER_ONLY, title=title).verdict == "eligible"
+
+
+def test_a_saved_posting_s_heading_names_the_company_last() -> None:
+    """Mutation: read the whole heading line as the title -- REI's "Co-op"
+    knocks the posting out."""
+    body = "Join our summer 2027 internship."
+    # premise: the company's "Co-op", read as part of the title, is a knockout
+    assert season(body, "Data Analyst Intern - REI Co-op") == [("season", "knockout")]
+    assert (
+        check_eligibility(f"# Data Analyst Intern - REI Co-op\n\n{body}\n", SUMMER_ONLY).findings
+        == ()
+    )
+    # Only the last " - " is the company's; the title keeps its own.
+    assert season("Python.", "Intern") == []  # premise: cutting at the first loses the term
+    saved = "# Intern - Winter 2027 - Acme\n\nPython.\n"
+    assert [(f.rule, f.level) for f in check_eligibility(saved, SUMMER_ONLY).findings] == [
+        ("season", "knockout")
+    ]
 
 
 def test_the_season_rules_run_only_when_the_profile_asks() -> None:
