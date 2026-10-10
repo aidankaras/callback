@@ -47,22 +47,28 @@ UNCONDITIONAL = (
 )
 PHRASE_ONLY = (
     r"leverag(?:e|es|ed|ing) (?:my|our|the)",
-    r"leveraging (?:cutting|state)",
+    r"leveraging state[- ]of[- ]the[- ]art",
     r"robust solutions?",
     r"dynamic teams?",
     r"data[- ]driven insights?",
 )
 
 
-def _whole(body: str) -> re.Pattern[str]:
-    return re.compile(rf"(?<!\w){body.replace(' ', r'\s+')}(?!\w)", re.IGNORECASE)
+def _whole(body: str, edge: str = r"\w") -> re.Pattern[str]:
+    return re.compile(rf"(?<!{edge}){body.replace(' ', r'\s+')}(?!{edge})", re.IGNORECASE)
 
 
 _BUILT_IN = tuple(_whole(p) for p in (*UNCONDITIONAL, *PHRASE_ONLY))
 
 
-def _literal(phrase: str) -> re.Pattern[str]:
-    return _whole(" ".join(re.escape(w) for w in phrase.split()))
+def _literal(phrase: str, edge: str = r"\w") -> re.Pattern[str]:
+    return _whole(" ".join(re.escape(w) for w in phrase.split()), edge)
+
+
+def _entity(name: str) -> re.Pattern[str]:
+    # A one-letter name ("R", "C") sits inside compounds like "R-squared",
+    # "R&D", "C++" and "C-suite"; those are not the name used on its own.
+    return _literal(name, r"[\w&+#-]" if len(name.strip()) == 1 else r"\w")
 
 
 def stock_phrases(text: str, extra: Iterable[str] = ()) -> list[str]:
@@ -100,7 +106,7 @@ def is_specific(text: str, cited: Sequence[Fact]) -> bool:
     if any(c.isdigit() for c in text):
         return True
     entities = [e for f in cited for e in f.entities]
-    if any(_literal(e).search(text) for e in entities if e.split()):
+    if any(_entity(e).search(text) for e in entities if e.split()):
         return True
     canonical = {canonicalize(e) for e in entities}
     return any(canonicalize(t) in canonical for t in checkable_entity_tokens(text))

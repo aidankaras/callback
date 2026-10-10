@@ -50,7 +50,7 @@ PLANTED = (
     ("I'm excited to apply for the analyst role", "I'm excited to apply"),
     ("I am writing to express my interest in the role", "I am writing to express"),
     ("Leveraged the cluster to train 3 models", "Leveraged the"),
-    ("Leveraging state-of-the-art tools for 2 projects", "Leveraging state"),
+    ("Leveraging state-of-the-art tools for 2 projects", "Leveraging state-of-the-art"),
     ("Delivered a robust solution for 5 clients", "robust solution"),
     ("Joined a dynamic team of 8", "dynamic team"),
     ("Produced data-driven insights for 3 desks", "data-driven insights"),
@@ -75,6 +75,8 @@ COLLISIONS = (
     ("Drove a 3\u00d7 speed-up in the nightly ETL job", "drove"),
     ("Screened synergistic drug combinations across 200 cell lines", "synergistic"),
     ("Modelled retention for 2M Steam players", "team player"),
+    ("Leveraging state-space models to forecast 3 series", "state"),
+    ("Leveraging cutting-plane methods for 2 solvers", "cutting"),
 )
 
 
@@ -129,6 +131,26 @@ def test_a_bullet_is_specific_by_a_digit_an_entity_or_an_alias() -> None:
     assert is_specific(literal, [org])
     assert is_specific(alias, [db])
     assert not is_specific("Shipped the loader", [org, db])
+
+
+@pytest.mark.parametrize(
+    ("entity", "text", "specific"),
+    [
+        ("R", "Reported R-squared gains", False),
+        ("R", "Worked in the R&D group", False),
+        ("C", "Studied the C++ guide", False),
+        ("C", "Briefed the C-suite", False),
+        ("C", "Wrote the driver in C", True),
+        ("R", "Built models in R.", True),
+    ],
+)
+def test_a_one_letter_entity_counts_only_as_a_word_of_its_own(
+    entity: str, text: str, specific: bool
+) -> None:
+    assert not any(c.isdigit() for c in text)  # premise: no digit to rescue it
+    assert entity in text  # premise: the letter is present
+    cited = _fact("lang", f"Used {entity}", [entity])
+    assert is_specific(text, [cited]) is specific
 
 
 ROLE = Fact(
