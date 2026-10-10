@@ -340,3 +340,65 @@ def test_the_postings_add_command(tmp_path: Path, capsys: pytest.CaptureFixture[
     assert main([*args, "--url", "nope"]) == 3
     assert main([*args, "--url", DAAD_URL, "--deadline", "30/11/2026"]) == 3
     assert "30/11/2026" in capsys.readouterr().err
+
+
+@pytest.mark.usefixtures("new_york")
+@pytest.mark.parametrize("value", ["20261130", "2026-W48-1", "2026-11-30T", "2026-11"])
+def test_a_deadline_in_another_iso_shape_is_refused(value: str) -> None:
+    """`20261130` and `2026-W48-1` are valid ISO and parse to midnight, a day
+    early for an end-of-day deadline. Mutation: pass every non-date string to
+    `fromisoformat` -- the first two are then accepted."""
+    from core.discovery.store import parse_deadline
+
+    with pytest.raises(DiscoveryError):
+        parse_deadline(value)
+    assert datetime.fromisoformat("20261130") is not None  # the premise: Python reads it
+    assert parse_deadline("2026-11-30 17:00").isoformat() == "2026-11-30T17:00:00-05:00"
+
+
+def test_one_page_in_five_spellings_is_one_posting() -> None:
+    """Mutation: store and hash the URL as given -- five ids, not one."""
+    from core.discovery.store import add_manual
+
+    base = "https://www.example.org/rise/germany"
+    spellings = [
+        base,
+        base + "/",
+        base + "#apply",
+        "HTTPS://www.example.org/rise/germany",
+        "https://WWW.Example.ORG/rise/germany",
+    ]
+    assert len(set(spellings)) == 5  # the premise
+    later = NOW + timedelta(days=1)
+    first = add_manual("Example", "Summer Research", base, "Old.", None, now=NOW)
+    for spelling in spellings[1:]:
+        again = add_manual("Example", "Summer Research", spelling, "New.", None, now=later)
+        assert again.id == first.id
+        assert again.first_seen == NOW
+        assert again.url == base
+    assert len(load_postings()) == 1
+    other = add_manual("Example", "Summer Research", base + "?year=2027", "x", None, now=NOW)
+    assert other.id != first.id
+    assert add_manual("E", "T", "https://x.org/", "x", None, now=NOW).url == "https://x.org/"
+
+
+@pytest.mark.parametrize("url", ["https://[bad", "https://x.org:99999999"])
+def test_a_malformed_url_is_a_discovery_error(url: str) -> None:
+    from core.discovery.store import add_manual
+
+    with pytest.raises(DiscoveryError):
+        add_manual("Example", "Summer Research", url, "Text.", None, now=NOW)
+
+
+def test_postings_add_refuses_a_text_file_that_is_not_utf8(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from core.cli import main
+
+    text = tmp_path / "bad.txt"
+    text.write_bytes(b"\xff\xfe\x00bad")
+    with pytest.raises(UnicodeDecodeError):
+        text.read_text(encoding="utf-8")  # the premise
+    args = ["postings", "add", "--company", "E", "--title", "T", "--url", DAAD_URL]
+    assert main([*args, "--text-file", str(text)]) == 3
+    assert "callback postings add" in capsys.readouterr().err

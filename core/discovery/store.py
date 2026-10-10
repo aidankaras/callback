@@ -31,7 +31,7 @@ from dataclasses import dataclass, field
 from datetime import date, datetime, time
 from pathlib import Path
 from typing import Protocol, cast
-from urllib.parse import urlsplit
+from urllib.parse import urlsplit, urlunsplit
 
 import yaml
 from pydantic import BaseModel, Field, ValidationError
@@ -300,13 +300,29 @@ def parse_deadline(value: str) -> datetime:
     try:
         if re.fullmatch(r"\d{4}-\d{2}-\d{2}", text):
             moment = datetime.combine(date.fromisoformat(text), time(23, 59))
-        else:
+        elif re.match(r"\d{4}-\d{2}-\d{2}[T ]\d", text):
             moment = datetime.fromisoformat(text)
+        else:
+            raise ValueError(text)
     except ValueError as exc:
         raise DiscoveryError(
             f"deadline {value!r} is not YYYY-MM-DD or an ISO date and time"
         ) from exc
     return moment if moment.tzinfo is not None else moment.astimezone()
+
+
+def _normal_url(url: str) -> str:
+    """The URL as one page has one spelling: scheme and host lower-cased, no
+    fragment, one trailing slash dropped from a non-root path, query kept."""
+    try:
+        parts = urlsplit(url.strip())
+        parts.port  # noqa: B018 -- reading it is what rejects a malformed port
+    except ValueError as exc:
+        raise DiscoveryError(f"{url!r} is not a URL: {exc}") from exc
+    if parts.scheme.lower() not in {"http", "https"} or not parts.netloc:
+        raise DiscoveryError(f"{url!r} is not an http(s) URL")
+    path = parts.path[:-1] if len(parts.path) > 1 and parts.path.endswith("/") else parts.path
+    return urlunsplit((parts.scheme.lower(), parts.netloc.lower(), path, parts.query, ""))
 
 
 def add_manual(
@@ -321,9 +337,7 @@ def add_manual(
     No watch fetches it, and a watch only ever adds to the store, so it stays."""
     if not (company.strip() and title.strip() and text.strip()):
         raise DiscoveryError("a posting needs a company, a title and its text")
-    parts = urlsplit(url)
-    if parts.scheme not in {"http", "https"} or not parts.netloc:
-        raise DiscoveryError(f"{url!r} is not an http(s) URL")
+    url = _normal_url(url)
     slug = re.sub(r"[^a-z0-9]+", "-", company.casefold()).strip("-")[:40].strip("-") or "posting"
     stored = load_postings()
     previous = next((p for p in stored.values() if p.ats == "manual" and p.url == url), None)

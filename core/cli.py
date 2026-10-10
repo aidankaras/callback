@@ -467,7 +467,7 @@ def _cmd_postings_add(args: argparse.Namespace) -> int:
         found = add_manual(
             args.company, args.title, args.url, text, deadline, now=datetime.now(tz=UTC)
         )
-    except _discovery_errors() as exc:
+    except (*_discovery_errors(), UnicodeDecodeError) as exc:
         print(f"callback postings add: {exc}", file=sys.stderr)
         return 3
     print(f"{found.id}  {found.company} / {found.title}")
