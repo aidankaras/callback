@@ -1122,3 +1122,74 @@ def test_tiers_survive_the_profile_command_rewriting_the_file(
     before = load_profile().tiers
     assert main(["profile", "--pages", "2"]) == 0
     assert load_profile().tiers == before and before[0].prefer == ("quant*",)
+
+
+@pytest.mark.parametrize("term", ["", "  ", "*", "* *"])
+def test_a_tier_term_that_can_never_match_is_refused_and_names_the_tier(term: str) -> None:
+    """`Criteria` skips terms with no word character, so such a tier would be silently dead.
+    Premise: the term really does match nothing. Mutation: drop `_terms_can_match`."""
+    from pydantic import ValidationError
+
+    from core.discovery.store import Criteria
+    from core.triage import Tier
+
+    assert not Criteria(include=[term, "x"]).matches("only a title")
+    assert not Criteria(include=[term]).matches(term or "anything")
+    with pytest.raises(ValidationError, match="'dead'"):
+        Tier(name="dead", criteria=Criteria(include=[term]))
+    with pytest.raises(ValidationError, match=r"'dead'.*prefer"):
+        Tier(name="dead", criteria=Criteria(include=["ok"]), prefer=(term,))
+
+
+def test_tier_names_are_unique_and_never_other() -> None:
+    """Mutation: drop `_tier_names_unique`, or the reserved-name check in `Tier`."""
+    from pydantic import ValidationError
+
+    from core.discovery.store import Criteria
+    from core.triage import Tier
+
+    def tier(name: str) -> Tier:
+        return Tier(name=name, criteria=Criteria(include=["x"]))
+
+    assert Profile(tiers=(tier("a"), tier("b"))).tiers  # premise: distinct names are fine
+    with pytest.raises(ValidationError, match="unique"):
+        Profile(tiers=(tier("a"), tier("A")))
+    with pytest.raises(ValidationError, match="reserved"):
+        tier("other")
+    with pytest.raises(ValidationError, match="reserved"):
+        tier("Other")
+
+
+def test_triage_refuses_a_profile_with_a_blank_tier_term(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from core.cli import main
+    from core.paths import ensure_home
+
+    monkeypatch.setenv("CALLBACK_HOME", str(tmp_path / "cb"))
+    home = ensure_home()
+    (home / "profile.yaml").write_text(
+        "tiers:\n- name: typo\n  criteria: {include: ['']}\n", encoding="utf-8"
+    )
+    assert main(["triage"]) == 3
+    assert "typo" in capsys.readouterr().err
+
+
+def test_the_other_row_lines_up_under_a_short_tier_name(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from core.cli import main
+    from core.discovery.store import add_manual
+    from core.paths import ensure_home
+
+    monkeypatch.setenv("CALLBACK_HOME", str(tmp_path / "cb"))
+    home = ensure_home()
+    for title, url in (("Research Intern", "https://e.org/a"), ("Sales Intern", "https://e.org/b")):
+        add_manual("Example Exchange", title, url, "Ten weeks.", None, now=NOW)
+    (home / "profile.yaml").write_text(
+        "tiers:\n- name: ai\n  criteria: {include: [research]}\n", encoding="utf-8"
+    )
+    assert main(["triage"]) == 0
+    rows = [ln for ln in capsys.readouterr().out.splitlines() if ln[:2] in ("ai", "ot")]
+    assert [ln.startswith("ai     ") for ln in rows] == [True, False]  # premise: two rows
+    assert rows[1].startswith("other  ")

@@ -542,7 +542,7 @@ def _cmd_triage(args: argparse.Namespace) -> int:
 
     from core.discovery.store import load_postings
     from core.profile.store import StoreError, load_facts
-    from core.triage import load_profile, rank
+    from core.triage import OTHER_TIER, load_profile, rank
 
     now = datetime.now(tz=UTC)
     try:
@@ -555,6 +555,7 @@ def _cmd_triage(args: argparse.Namespace) -> int:
     if args.days is not None:
         postings = [p for p in postings if now - p.first_seen <= timedelta(days=args.days)]
     width = max((len(t.name) for t in profile.tiers), default=0)
+    width = max(width, len(OTHER_TIER)) if profile.tiers else 0
     for r in rank(postings, profile, facts, now=now)[: args.limit]:
         have, missing = r.coverage
         # The tier is the first thing the order is decided by, so it is shown

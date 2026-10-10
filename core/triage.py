@@ -49,7 +49,7 @@ from datetime import datetime
 from typing import Literal
 
 import yaml
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, Field, ValidationError, model_validator
 
 from core.aliases import ALIAS_TABLE, canonicalize
 from core.checks.grounding import checkable_entity_tokens, iso_month_dates
@@ -286,14 +286,28 @@ class Tier(BaseModel):
 
     A posting belongs to the first tier whose `criteria` match
     `"<company> | <title> | <location>"`, so a tier can name a city as well as
-    a kind of role. `prefer` uses the same term syntax and orders postings
-    inside the tier, ahead of the score."""
+    a kind of role. The line includes the company, so a short include term can
+    place a posting through its company name ("AI Corp | Accountant" lands in
+    an `ai` tier); a tier `exclude` is the remedy. `prefer` uses the same term
+    syntax and orders postings inside the tier, ahead of the score."""
 
     model_config = {"extra": "forbid", "frozen": True}
 
     name: str = Field(min_length=1, max_length=40)
     criteria: Criteria
     prefer: tuple[str, ...] = ()
+
+    @model_validator(mode="after")
+    def _terms_can_match(self) -> Tier:
+        """A term with no word character never matches (`Criteria` skips blank
+        terms), which would leave the tier silently dead."""
+        if self.name.casefold() == OTHER_TIER:
+            raise ValueError(f"tier name {OTHER_TIER!r} is reserved for postings in no tier")
+        for where, terms in (("include", self.criteria.include), ("prefer", self.prefer)):
+            for term in terms:
+                if not re.search(r"\w", term):
+                    raise ValueError(f"tier {self.name!r}: {where} term {term!r} can never match")
+        return self
 
 
 OTHER_TIER = "other"
@@ -318,6 +332,13 @@ class Profile(BaseModel):
     seasons: tuple[Season, ...] = ()
     max_weeks: int | None = Field(default=None, ge=1, le=104)
     tiers: tuple[Tier, ...] = ()
+
+    @model_validator(mode="after")
+    def _tier_names_unique(self) -> Profile:
+        names = [t.name.casefold() for t in self.tiers]
+        if len(set(names)) != len(names):
+            raise ValueError("tier names must be unique (compared without case)")
+        return self
 
 
 @dataclass(frozen=True)
