@@ -191,28 +191,66 @@ _DURATION = re.compile(
 # A length is the role's only when the sentence attributes it to the role, not
 # when it merely sits near a role word: "a 24-week internship" and "the
 # internship runs 6 months" state one; "6 months of Python experience", "a
-# 1-week orientation program" and "a 24-month master's program" do not.
-_ROLE_WORD = r"(?:internships?|interns?|programmes?|programs?|co-?ops?|placements?|fellowships?)"
-# The length names the role: "a 24-week internship", "a 10-week summer
-# internship". Only an internship word may follow a modifier: "program" after
-# one is often a degree or an orientation, not the role.
+# 1-week orientation program" and "a 24-month master's program" do not. The
+# same reading decides a knockout and the downgrade a fitting length gives, so
+# a phrasing left unread can admit a posting or leave a knockout standing.
+_ROLE_NOUN = r"(?:internships?|co-?ops?|placements?|fellowships?)"
+_PROGRAM = r"(?:programmes?|programs?)"
+# The length names the role: "a 24-week internship", "a six-month-long
+# internship", "a 6-month full-time paid internship". The words between are
+# modifiers, so a preposition, article or pronoun there ends it ("6 months of
+# internship experience", "2 weeks before internship start"). A role word
+# followed by one of `_ADJUNCT` modifies that noun instead ("6 months
+# internship experience"). "intern" counts only in "intern program", so "a
+# 1-week intern bootcamp" is not the role. "program" alone counts only straight
+# after the length: after a modifier it is often a degree or an orientation.
+_NOT_A_MODIFIER = (
+    r"of|before|after|within|prior|post|from|for|in|at|to|into|since|until|ago|by|on|per"
+    r"|than|with|without|as|the|a|an|and|or|is|are|was|will|you|we|our|your|their|its"
+    r"|which|that|who|where"
+)
+_ADJUNCT = (
+    r"experience|completion|interviews?|applications?|offers?|orientation|onboarding"
+    r"|training|bootcamp|alumni|credits?"
+)
 _LENGTH_NAMES_ROLE = re.compile(
-    r"\s+(?:(?:[\w'-]+\s+)?(?:internships?|interns?|co-?ops?|placements?|fellowships?)"
-    r"|programmes?|programs?)\b",
+    r"(?:[\s-]long)?,?"
+    rf"(?:\s+(?!(?:{_NOT_A_MODIFIER})\b)[\w'-]+){{0,3}}"
+    rf"\s+(?:{_ROLE_NOUN}|intern\s+{_PROGRAM})\b(?!\s+(?:{_ADJUNCT})\b)"
+    rf"|\s+{_PROGRAM}\b",
     re.I,
 )
 _HEDGE_WORDS = r"up to|typically|usually|approximately|about|around|roughly|between"
-# The role is the subject and the length its predicate: "the internship runs 6
-# months", "internship program: 10-26 weeks", "internships of 3 or 6 months",
-# "the internship typically lasts up to 24 weeks". A hedge may sit either side
-# of the verb.
+# The role is the subject and the length its predicate: "the internship will
+# be 10 weeks", "internships are offered for 6 months", "the internship lasts a
+# minimum of 6 months", "Internship (6 months)", "Duration of internship - 24
+# weeks", or a line opening "Duration:". Only the words in `_LINK_WORDS` may
+# come between, and a hedge among them makes the length a stretch. "interns"
+# is never the subject: "the notice period for interns is 2 weeks" and "our
+# interns are 6 months from graduation" are lengths of something else.
+_LINK_WORDS = (
+    rf"{_HEDGE_WORDS}|at least|will|would|can|may|be|is|are|runs?|running|lasts?|lasting"
+    r"|spans?|spanning|takes?|place|scheduled|offered|for|over|of|from|a|the|full|minimum"
+    r"|period"
+)
 _ROLE_RUNS = re.compile(
-    rf"\b{_ROLE_WORD}(?:\s+(?:programmes?|programs?|period|length|duration|term))?"
-    rf"(?:\s+(?:will|{_HEDGE_WORDS}))*"
-    r"(?:\s*:|\s+(?:is|are|runs?|lasts?|spans?|of|for))"
-    rf"(?:\s+(?:{_HEDGE_WORDS}))*\s*$",
+    r"(?:(?P<prev>[\w'-]+)\s+)??\b"
+    r"(?:(?:(?:duration|length)\s+of\s+(?:the\s+|this\s+|your\s+|an?\s+)?)?"
+    rf"(?:{_ROLE_NOUN}(?:\s+{_PROGRAM})?|intern\s+{_PROGRAM})"
+    rf"|(?P<bare>{_PROGRAM})|^\s*(?:duration|length))"
+    r"(?:\s+(?:period|length|duration|term|contract))?"
+    rf"(?P<tail>(?:\s*[:(,]|\s+[-\u2013\u2014])?(?:\s+(?:{_LINK_WORDS})\b)*)\s*$",
     re.I,
 )
+# A role word after one of these is not the subject: "prior internships of 6
+# months", "the notice period for internships is 2 weeks".
+_NOT_THE_SUBJECT = (
+    r"for|to|as|of|with|from|in|during|after|before|than|about|prior|previous|past|former"
+)
+# A bare "program" is the role only after an article or a season: "the
+# programme runs six months", "our summer program", but not "our graduate
+# program is 24 months" or "our rotational program runs 18 months".
+_PROGRAM_OWNERS = r"the|this|our|a|an|each|your|summer|winter|fall|autumn|spring"
 _LENGTH_HEDGE = re.compile(rf"\b(?:{_HEDGE_WORDS})\b", re.I)
 _WEEKS_PER_MONTH = 52 / 12
 
@@ -358,17 +396,30 @@ def _weeks(number: str, unit: str) -> float:
     return n * _WEEKS_PER_MONTH if unit.casefold().startswith("month") else n
 
 
+def _role_link(before: str) -> str | None:
+    """The words linking a role subject to a length that follows `before`, or
+    None when `before` does not end in a role subject and a link."""
+    runs = _ROLE_RUNS.search(before)
+    if runs is None or not runs.group("tail").strip():
+        return None
+    prev = runs.group("prev") or ""
+    if runs.group("bare"):
+        owned = not prev or re.fullmatch(_PROGRAM_OWNERS, prev, re.I)
+        return runs.group("tail") if owned else None
+    return None if re.fullmatch(_NOT_THE_SUBJECT, prev, re.I) else runs.group("tail")
+
+
 def _role_lengths(sentence: str) -> list[tuple[float, float, bool, str]]:
     """Each length `sentence` attributes to the role, as `(low, high, hedged,
     text)`, the bounds in weeks."""
     lengths: list[tuple[float, float, bool, str]] = []
     for m in _DURATION.finditer(sentence):
-        runs = _ROLE_RUNS.search(sentence[: m.start()])
-        if runs is None and not _LENGTH_NAMES_ROLE.match(sentence, m.end()):
+        link = _role_link(sentence[: m.start()])
+        if link is None and not _LENGTH_NAMES_ROLE.match(sentence, m.end()):
             continue
         low = _weeks(m.group("lo"), m.group("unit"))
         high = _weeks(m.group("hi"), m.group("unit")) if m.group("hi") else low
-        hedged = runs is not None and _LENGTH_HEDGE.search(runs.group(0)) is not None
+        hedged = link is not None and _LENGTH_HEDGE.search(link) is not None
         lengths.append((low, high, hedged, m.group(0)))
     return lengths
 

@@ -612,6 +612,9 @@ def test_a_term_before_a_graduation_word_is_still_a_term() -> None:
         ("This is a 2.5-month internship.", []),
         # The lower option fits.
         ("We offer internships of 3 or 6 months.", [("duration", "stretch")]),
+        ("The internship lasts from 6 to 12 months.", [("duration", "knockout")]),
+        # Measured on a real board: read as nothing, this posting lost its stretch.
+        ("The internship will be 3-6 months, including the summer.", [("duration", "stretch")]),
     ],
 )
 def test_the_role_s_stated_length(text: str, expected: list[tuple[str, str]]) -> None:
@@ -654,6 +657,16 @@ def test_a_posting_stating_a_length_that_fits_is_never_a_duration_knockout() -> 
         "Internship candidates should have 6 months of Python experience.",
         "Data Science Intern. Applicants must be enrolled in a 24-month master's program.",
         "Summer 2027. Past interns have joined our 18-month rotational program.",
+        "Return offers are made within 6 months of internship completion.",
+        "Candidates must have 6 months of internship experience.",
+        "Requirements: 6 months internship experience",
+        "Apply 6 months before internship start.",
+        "Our rotational program runs 18 months.",
+        "Our graduate program is 24 months.",
+        "Applicants should have worked as interns for 6 months.",
+        "Candidates with prior internships of 6 months are preferred.",
+        "Our interns are 6 months from graduation.",
+        "Return offers remain open to interns for 6 months.",
     ],
 )
 def test_a_length_near_a_role_word_is_not_the_role_s(text: str) -> None:
@@ -669,6 +682,11 @@ def test_a_length_near_a_role_word_is_not_the_role_s(text: str) -> None:
     [
         "Interns receive 2 weeks of paid time off.",
         "Interns begin with a 1-week orientation program.",
+        "Offers go out 2 weeks before internship start.",
+        "Expect a decision within 2 weeks of internship interviews.",
+        "It opens with a 1-week intern bootcamp.",
+        "The notice period for interns is 2 weeks.",
+        "Paid time off for interns: 2 weeks.",
     ],
 )
 def test_a_short_span_that_is_not_the_role_s_does_not_soften_a_knockout(other: str) -> None:
@@ -677,6 +695,49 @@ def test_a_short_span_that_is_not_the_role_s_does_not_soften_a_knockout(other: s
     knockout = "Data Science Intern. This internship runs 6 months."
     assert season(knockout, "") == [("duration", "knockout")]  # premise
     assert season(f"{knockout} {other}", "") == [("duration", "knockout")]
+
+
+@pytest.mark.parametrize(
+    ("template", "long", "short", "level"),
+    [
+        ("The internship will be {}.", "6 months", "10 weeks", "knockout"),
+        ("Our internships run for {}.", "6 months", "10 weeks", "knockout"),
+        ("An internship lasting {}.", "6 months", "10 weeks", "knockout"),
+        ("Internship ({}) in Paris.", "6 months", "10 weeks", "knockout"),
+        ("The internship will run for {}.", "6 months", "10 weeks", "knockout"),
+        ("The internship can last up to {}.", "6 months", "10 weeks", "stretch"),
+        ("The internship is scheduled for {}.", "6 months", "10 weeks", "knockout"),
+        ("Internships are offered for {}.", "6 months", "10 weeks", "knockout"),
+        ("The internship takes {}.", "6 months", "10 weeks", "knockout"),
+        ("The internship will be for {}.", "6 months", "10 weeks", "knockout"),
+        ("The internship duration will be {}.", "6 months", "10 weeks", "knockout"),
+        ("The internship lasts at least {}.", "6 months", "10 weeks", "knockout"),
+        ("The internship lasts a minimum of {}.", "6 months", "10 weeks", "knockout"),
+        ("The internship runs for a period of {}.", "6 months", "10 weeks", "knockout"),
+        ("The internship lasts a full {}.", "6 months", "10 weeks", "knockout"),
+        ("The internship runs over {}.", "24 weeks", "10 weeks", "knockout"),
+        ("A {}-long internship.", "six-month", "10-week", "knockout"),
+        ("A {}-long internship.", "24-week", "10-week", "knockout"),
+        ("A {} full-time paid internship.", "6-month", "10-week", "knockout"),
+        ("A {}, full-time internship.", "6 month", "10 week", "knockout"),
+        ("Internship length - {}", "6 months", "10 weeks", "knockout"),
+        ("Duration of internship - {}", "24 weeks", "10 weeks", "knockout"),
+        ("Contract type: Internship ({})", "6 months", "10 weeks", "knockout"),
+        ("Contract: Internship, {}", "6 months", "10 weeks", "knockout"),
+        ("Duration: {}", "6 months", "10 weeks", "knockout"),
+    ],
+)
+def test_a_phrasing_that_states_the_role_s_length_is_read_at_either_length(
+    template: str, long: str, short: str, level: str
+) -> None:
+    """One reading serves both the knockout and the downgrade, so each phrasing
+    is pinned twice: too long, it is a finding; fitting, beside another
+    sentence's knockout, it softens that knockout. Mutation: drop "will" from
+    `_LINK_WORDS` -- every "will" phrasing fails both ways."""
+    knockout = "Data Science Intern. This internship runs 6 months."
+    assert season(knockout, "") == [("duration", "knockout")]  # premise
+    assert season(template.format(long), "") == [("duration", level)]
+    assert season(f"{knockout} {template.format(short)}", "") == [("duration", "stretch")]
 
 
 @pytest.mark.parametrize(
