@@ -353,7 +353,9 @@ def add_manual(
     Its id is `manual:<company slug>:<8 hex of the URL's sha256>`. The URL is
     what identifies it: adding the same URL again, under any spelling of the
     company, replaces the text and keeps the id and `first_seen`, and keeps the
-    deadline and location unless new ones are given. `location` is what a city
+    location unless a new one is given. It keeps the deadline too, unless a new one is given or
+    the old one has passed by `now`: a programme that reuses its URL each year would otherwise
+    carry last cycle's deadline and drop off the agenda. `location` is what a city
     tier reads, since a hand-added posting has no other. No watch fetches it,
     and a watch only ever adds to the store, so it stays, provided no watch is
     running at the same moment: a watch saves the store it loaded, so a posting
@@ -365,6 +367,9 @@ def add_manual(
     stored = load_postings()
     previous = next(
         (p for p in stored.values() if p.ats == "manual" and _same_page(p.url, url)), None
+    )
+    kept_deadline = (
+        previous.deadline if previous and previous.deadline and previous.deadline > now else None
     )
     posting_id = (
         previous.id if previous else f"manual:{slug}:{hashlib.sha256(url.encode()).hexdigest()[:8]}"
@@ -378,7 +383,7 @@ def add_manual(
         location=location.strip() or (previous.location if previous else ""),
         url=url,
         text=text,
-        deadline=deadline if deadline is not None or previous is None else previous.deadline,
+        deadline=deadline if deadline is not None else kept_deadline,
         first_seen=previous.first_seen if previous else now,
     )
     stored[posting_id] = found

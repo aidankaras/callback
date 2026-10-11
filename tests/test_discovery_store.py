@@ -420,6 +420,29 @@ def test_a_re_add_keeps_the_deadline_and_location_unless_new_ones_are_given() ->
     assert (moved.deadline, moved.location) == (later, "Zurich")
 
 
+def test_a_re_add_without_a_deadline_drops_one_that_has_passed() -> None:
+    """Mutation: always keep the previous deadline -- a yearly programme's
+    old deadline hides it from the agenda."""
+    from core.discovery.store import add_manual
+
+    old = NOW - timedelta(days=30)
+    stored = add_manual(
+        "CERN", "Summer Student", DAAD_URL, "Old.", old, now=NOW - timedelta(days=60)
+    )
+    assert stored.deadline is not None and stored.deadline < NOW
+    again = add_manual("CERN", "Summer Student", DAAD_URL, "New.", None, now=NOW)
+    assert again.deadline is None
+    assert load_postings()[again.id].deadline is None
+
+
+def test_a_re_add_without_a_deadline_keeps_one_still_ahead() -> None:
+    from core.discovery.store import add_manual
+
+    ahead = NOW + timedelta(days=30)
+    add_manual("CERN", "Summer Student", DAAD_URL, "Old.", ahead, now=NOW)
+    assert add_manual("CERN", "Summer Student", DAAD_URL, "New.", None, now=NOW).deadline == ahead
+
+
 def test_a_hand_edited_stored_url_still_identifies_the_posting() -> None:
     """A stored URL edited by hand into another spelling of the same page.
     Mutation: compare the stored URL as written -- `first_seen` is reset."""
