@@ -315,3 +315,44 @@ def test_the_window_edges_are_inclusive_at_a_week_and_a_month(home: Path) -> Non
     postings = [_programme(k, f"Lab {k}", v) for k, v in edges.items()]
     shown = {line.split()[1] for line in _deadline_lines(postings)}
     assert shown == {"a", "c", "e"}
+
+
+def _apply_rows(postings: list[Found], applications: list[Application]) -> list[str]:
+    result = agenda(postings, applications, PROFILE, FACTS, now=NOW)
+    return [item.command for item in result.items if item.kind == "apply"]
+
+
+def test_a_programme_applied_to_under_a_longer_company_name_is_not_suggested(home: Path) -> None:
+    """The deadline line was suppressed while the shortlist still offered the
+    posting. Mutation: drop the shortlist's `_is_applied` skip -- the row shows."""
+    cern = _programme("ssp", "CERN", NOW + timedelta(days=10)).model_copy(
+        update={"title": "Summer Student", "url": "https://cern.ch/ssp"}
+    )
+    applied = _application(
+        "cern-ssp", "CERN (European Organization for Nuclear Research)", days_ago=1
+    ).model_copy(update={"title": "Summer Student", "url": "https://cern.ch/ssp/"})
+    assert applied.company.casefold() != cern.company.casefold()  # premise: names differ
+    assert _apply_rows([cern], []) != [] and _deadline_lines([cern]) != []  # premise: offered
+    assert _deadline_lines([cern], [applied]) == []
+    assert _apply_rows([cern], [applied]) == []
+
+
+def test_a_last_cycle_application_does_not_hide_this_cycle_s_posting(home: Path) -> None:
+    """Different URLs are different postings, whatever the titles; the same
+    URL in another spelling is the same one. Mutation: let only a shared URL
+    decide, falling back to names otherwise -- the 2027 posting is hidden."""
+    posting = _programme("lab", "Lab", NOW + timedelta(days=10)).model_copy(
+        update={"title": "Lab / Summer Research Intern", "url": "https://lab.org/ssr/2027"}
+    )
+    last = _application("lab-2026", "Lab", days_ago=300).model_copy(
+        update={"title": "Lab / Summer Research Intern", "url": "https://lab.org/ssr/2026"}
+    )
+    same = last.model_copy(update={"url": "HTTPS://Lab.org/ssr/2027/"})
+    target = Target(job_id="x", company="Lab", title=posting.title, source="other")
+    assert last.same_posting(target)  # premise: the names alone match
+    assert len(_deadline_lines([posting], [last])) == 1
+    assert len(_apply_rows([posting], [last])) == 0  # the same company stays skipped
+    renamed = last.model_copy(update={"company": "Lab Inc."})
+    assert renamed.same_posting(target)  # premise: the names alone still match
+    assert len(_apply_rows([posting], [renamed])) == 1
+    assert _deadline_lines([posting], [same]) == []

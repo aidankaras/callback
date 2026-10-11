@@ -22,7 +22,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import cast
 
-from core.apply import MAX_PER_DAY, Application, Target
+from core.apply import MAX_PER_DAY, Application, Target, same_url
 from core.discovery.store import Found
 from core.funnel import POSITIVE, REPLIES, STALE_DAYS
 from core.paths import resolve_inside
@@ -33,7 +33,7 @@ from core.triage import Profile, rank
 # read, not the whole ranked list, which `callback triage` already prints.
 SHORTLIST = 5
 # How far ahead a deadline is worth listing, and how long a passed one stays
-# listed as closed, so that it is seen once rather than vanishing overnight.
+# listed as closed, so that it is seen at least once rather than vanishing overnight.
 DEADLINE_DAYS = 30
 CLOSED_DAYS = 7
 # An application is waiting on nobody once it has a reply or the candidate has
@@ -172,13 +172,16 @@ def agenda(
 
     # Then the freshest postings worth applying to, skipping companies already
     # applied to: a second application to the same employer is a decision, not
-    # a suggestion.
+    # a suggestion. A posting already applied to under another spelling of its
+    # company is skipped by the test the deadlines use.
     ranked = rank(list(postings), profile, facts, now=now)
     suggested = 0
     for row in ranked:
         if suggested >= SHORTLIST:
             break
         if row.posting.id in applied_to or row.posting.company.casefold() in taken:
+            continue
+        if any(_is_applied(a, _target(row.posting)) for a in applications):
             continue
         if row.eligibility.verdict == "knockout":
             continue
@@ -221,28 +224,43 @@ def _term(title: str) -> str | None:
     return " ".join(match.group(1).casefold().split()) if match else None
 
 
+def _target(posting: Found) -> Target:
+    """A stored posting as `apply` describes one: applications record no posting id."""
+    return Target(
+        job_id="posting",
+        company=posting.company,
+        title=posting.title,
+        location=posting.location,
+        url=posting.url,
+        source="other",
+    )
+
+
 def _is_applied(application: Application, posting: Target) -> bool:
-    """`same_posting`, except that two programmes whose titles differ only in
-    a bracketed term ("(Summer 2027)" against "(Winter 2027)") are different
-    postings unless they share a URL. `same_posting` leans towards matching so
-    that `apply` never reopens a posting; here that bias would hide a deadline."""
+    """Whether `application` was made to `posting`, leaning the other way from
+    `same_posting`, which leans towards matching so that `apply` never reopens
+    a posting; here that bias would hide a deadline or a suggestion.
+
+    Two URLs, when both are given, decide it either way: a last cycle's
+    "/2026" application is not this cycle's "/2027" posting, whatever the
+    title. With a URL missing on either side, `same_posting`'s company and
+    title rule applies, except that titles differing only in a bracketed term
+    ("(Summer 2027)" against "(Winter 2027)") are different postings."""
+    if application.url and posting.url:
+        return same_url(application.url, posting.url)
     if not application.same_posting(posting):
         return False
     a, b = _term(application.title), _term(posting.title)
-    if a is None or b is None or a == b:
-        return True
-    # Only a shared URL is decisive now: probe with a target that can match on
-    # nothing else.
-    by_url = posting.model_copy(update={"company": "\0", "title": "\0", "location": ""})
-    return application.same_posting(by_url)
+    return a is None or b is None or a == b
 
 
 def _deadlines(
     postings: Sequence[Found], applications: Sequence[Application], *, now: datetime
 ) -> list[Item]:
     """Postings closing in the next `DEADLINE_DAYS` days, or closed in the last
-    `CLOSED_DAYS`, that have not been applied to. Days are counted in the
-    deadline's own timezone, as the employer counts them."""
+    `CLOSED_DAYS`, that have not been applied to. Days are counted at the
+    deadline's own UTC offset: the one typed with it, or for a bare date this
+    machine's offset on that date."""
     dated: list[tuple[datetime, Found]] = []
     for posting in postings:
         deadline = posting.deadline
@@ -250,15 +268,7 @@ def _deadlines(
             continue
         if deadline > now + timedelta(days=DEADLINE_DAYS):
             continue
-        # Applications record no posting id, so match them as `apply` does.
-        this = Target(
-            job_id="posting",
-            company=posting.company,
-            title=posting.title,
-            location=posting.location,
-            url=posting.url,
-            source="other",
-        )
+        this = _target(posting)
         if not any(_is_applied(a, this) for a in applications):
             dated.append((deadline, posting))
     items: list[Item] = []

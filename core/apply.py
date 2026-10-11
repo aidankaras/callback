@@ -81,6 +81,11 @@ def _norm_url(url: str) -> str:
     return url.strip().casefold().rstrip("/").removeprefix("https://").removeprefix("http://")
 
 
+def same_url(a: str, b: str) -> bool:
+    """Whether two URLs name one page, as `Target.same_posting` compares them."""
+    return _norm_url(a) == _norm_url(b)
+
+
 class Target(BaseModel):
     """The posting being applied to, as the candidate describes it."""
 
@@ -101,7 +106,7 @@ class Target(BaseModel):
         and a parenthetical ("(Summer 2027)"), and a blank location matches
         any: a variant spelling must not reopen a posting already applied to.
         """
-        if self.url and other.url and _norm_url(self.url) == _norm_url(other.url):
+        if self.url and other.url and same_url(self.url, other.url):
             return True
         same_location = (
             not self.location
