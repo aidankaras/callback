@@ -367,7 +367,10 @@ def postings_add(
         "title": found.title,
         "location": found.location,
         "deadline": found.deadline.isoformat() if found.deadline else None,
-        "warning": "the deadline has already passed; the agenda drops it after 7 days"
+        "warning": (
+            "the deadline has already passed; the agenda lists a deadline for only 7 days "
+            "after it passes"
+        )
         if passed
         else None,
     }

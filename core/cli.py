@@ -491,7 +491,7 @@ def _cmd_postings_add(args: argparse.Namespace) -> int:
         if found.deadline < now:
             print(
                 f"callback postings add: warning: the deadline {found.deadline.isoformat()} "
-                "has already passed; the agenda drops it after 7 days",
+                "has already passed; the agenda lists a deadline for only 7 days after it passes",
                 file=sys.stderr,
             )
     return 0
