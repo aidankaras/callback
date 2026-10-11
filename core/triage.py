@@ -46,10 +46,10 @@ import re
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import datetime
-from typing import Literal
+from typing import Annotated, Literal
 
 import yaml
-from pydantic import BaseModel, Field, ValidationError, model_validator
+from pydantic import BaseModel, Field, StringConstraints, ValidationError, model_validator
 
 from core.aliases import ALIAS_TABLE, canonicalize
 from core.checks.grounding import checkable_entity_tokens, iso_month_dates
@@ -97,6 +97,15 @@ _GRADUATION = re.compile(r"\bgraduat\w*\b|\bclass of 20\d\d\b", re.IGNORECASE)
 _GRAD_YEAR = re.compile(
     r"\bclass of\s+(20\d\d)\b"
     r"|\bgraduat\w+\s+(?:in|by|before|after|during|no later than)?\s*(20\d\d)\b",
+    re.IGNORECASE,
+)
+# A graduation date naming seasons ("a graduation date in Fall 2027 or Spring
+# 2028", "graduate between Winter 2027 and Summer 2028"): a graduation word
+# joined to the seasons only by date words. "Graduate students" and "recent
+# graduates" name people, not a date, so a season after them is still a term.
+_GRAD_DATE = re.compile(
+    r"\bgraduat\w*(?:[\s,/:\u2013-]+(?:in|by|between|from|dates?|of|and|or|the|before|after"
+    r"|during|until|to|expected|summer|fall|autumn|winter|spring|20\d\d|'\d\d)\b)+",
     re.IGNORECASE,
 )
 _BETWEEN = re.compile(r"\bbetween\b", re.IGNORECASE)
@@ -236,13 +245,17 @@ _LINK_WORDS = (
     r"|spans?|spanning|takes?|place|scheduled|offered|for|over|of|from|a|the|full|minimum"
     r"|period"
 )
+# A label opens a line, after any list marker or bold ("- Duration:",
+# "**Duration:**", "• Duration:"), or follows a " | " in a line of fields
+# ("Location: London | Duration: 10 weeks").
+_LABEL_START = r"(?:^|\|)[\s*\u2022-]*"
 _ROLE_RUNS = re.compile(
-    r"(?:(?P<prev>[\w'-]+)\s+)??\b"
-    r"(?:(?:(?:duration|length)\s+of\s+(?:the\s+|this\s+|your\s+|an?\s+)?)?"
+    r"(?:(?P<prev>[\w'-]+)\s+)??"
+    r"(?P<role>\b(?:(?:(?:duration|length)\s+of\s+(?:the\s+|this\s+|your\s+|an?\s+)?)?"
     rf"(?:{_ROLE_NOUN}(?:\s+{_PROGRAM})?|intern\s+{_PROGRAM})"
-    rf"|(?P<bare>{_PROGRAM})|(?P<label>^\s*(?:duration|length)))"
+    rf"|(?P<bare>{_PROGRAM}))|(?P<label>{_LABEL_START}(?:duration|length)\b\**))"
     r"(?:\s+(?:period|length|duration|term|contract))?"
-    rf"(?P<tail>(?:\s*[:(,]|\s+[-\u2013\u2014])?(?:\s+(?:{_LINK_WORDS})\b)*)\s*$",
+    rf"(?P<tail>(?:\s*[:(,]\**|\s+[-\u2013\u2014])?(?:\s+(?:{_LINK_WORDS})\b)*)\s*$",
     re.I,
 )
 # A role word after one of these is not the subject: "prior internships of 6
@@ -271,7 +284,7 @@ _LENGTH_HEDGE = re.compile(rf"\b(?:{_HEDGE_WORDS})\b", re.I)
 _ROLE_WORD = re.compile(
     r"\b(?:intern(?:ship)?s?|programmes?|programs?|co-?ops?|placements?|fellowships?)\b", re.I
 )
-_LENGTH_LABEL = re.compile(r"^\s*(?:duration|length|period)\b", re.I)
+_LENGTH_LABEL = re.compile(rf"{_LABEL_START}(?:duration|length|period)\b", re.I)
 # A clause ends at "." or ";" before a space; not at a decimal point, and not
 # at ":", which would leave "Paid time off for interns: 2 weeks" as "2 weeks".
 _CLAUSE_END = re.compile(r"[.;](?=\s|$)")
@@ -293,20 +306,33 @@ class Tier(BaseModel):
 
     model_config = {"extra": "forbid", "frozen": True}
 
-    name: str = Field(min_length=1, max_length=40)
+    # Stripped before the reserved-name and uniqueness checks see it, so " other "
+    # and "ai " are the names they look like.
+    name: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=40)]
     criteria: Criteria
     prefer: tuple[str, ...] = ()
 
     @model_validator(mode="after")
     def _terms_can_match(self) -> Tier:
-        """A term with no word character never matches (`Criteria` skips blank
-        terms), which would leave the tier silently dead."""
+        """A term with no word character cannot do what it says, so it is refused.
+        A blank or `*` term is skipped by `Criteria` and matches nothing, which
+        leaves an `include` or `require` of only such terms matching no posting;
+        punctuation such as `|` matches the " | " separators every tier line
+        holds, so it matches every posting, and as an `exclude` it empties the
+        tier. Either way the tier's postings land somewhere else silently."""
         if self.name.casefold() == OTHER_TIER:
             raise ValueError(f"tier name {OTHER_TIER!r} is reserved for postings in no tier")
-        for where, terms in (("include", self.criteria.include), ("prefer", self.prefer)):
+        for where, terms in (
+            ("include", self.criteria.include),
+            ("require", self.criteria.require),
+            ("exclude", self.criteria.exclude),
+            ("prefer", self.prefer),
+        ):
             for term in terms:
                 if not re.search(r"\w", term):
-                    raise ValueError(f"tier {self.name!r}: {where} term {term!r} can never match")
+                    raise ValueError(
+                        f"tier {self.name!r}: {where} term {term!r} has no letter or digit"
+                    )
         return self
 
 
@@ -330,7 +356,8 @@ class Profile(BaseModel):
     degree: DegreeLevel | None = None
     resume_pages: int = Field(default=1, ge=1, le=10)
     seasons: tuple[Season, ...] = ()
-    max_weeks: int | None = Field(default=None, ge=1, le=104)
+    # Strict, so a YAML `true` is refused rather than read as 1 week.
+    max_weeks: int | None = Field(default=None, ge=1, le=104, strict=True)
     tiers: tuple[Tier, ...] = ()
 
     @model_validator(mode="after")
@@ -462,36 +489,45 @@ def _weeks(number: str, unit: str) -> float:
     return n * _WEEKS_PER_MONTH if unit.casefold().startswith("month") else n
 
 
-def _role_link(before: str, after: str) -> str | None:
-    """The words linking a role subject to a length between `before` and
-    `after`, or None when `before` does not end in a role subject and a link."""
+def _role_link(before: str, after: str) -> re.Match[str] | None:
+    """The role subject and the words linking it to a length between `before`
+    and `after` (groups `role`/`label` and `tail`), or None when `before` does
+    not end in a role subject and a link."""
     runs = _ROLE_RUNS.search(before)
     if runs is None or not runs.group("tail").strip() or _LENGTH_FOR_A_TASK.match(after):
         return None
-    if runs.group("label") and not _VALUE_ENDS.match(after):
-        return None
+    if runs.group("label"):
+        return runs if _VALUE_ENDS.match(after) else None
     prev = runs.group("prev") or ""
     if runs.group("bare"):
         owned = not prev or re.fullmatch(_PROGRAM_OWNERS, prev, re.I)
-        return runs.group("tail") if owned else None
-    return None if re.fullmatch(_NOT_THE_SUBJECT, prev, re.I) else runs.group("tail")
+        return runs if owned else None
+    return None if re.fullmatch(_NOT_THE_SUBJECT, prev, re.I) else runs
 
 
 def _role_lengths(sentence: str) -> list[tuple[float, float, bool, str]]:
     """Each length `sentence` attributes to the role, as `(low, high, hedged,
-    text)`, the bounds in weeks."""
+    quote)`, the bounds in weeks and the quote running from the role word (or
+    label) to the length, or from the length to the role noun it names."""
     lengths: list[tuple[float, float, bool, str]] = []
     for m in _DURATION.finditer(sentence):
         before = sentence[: m.start()]
         if _CANDIDATE_HISTORY.search(before):
             continue
         link = _role_link(before, sentence[m.end() :])
-        if link is None and not _LENGTH_NAMES_ROLE.match(sentence, m.end()):
+        names = _LENGTH_NAMES_ROLE.match(sentence, m.end())
+        if link is None and not names:
             continue
         low = _weeks(m.group("lo"), m.group("unit"))
         high = _weeks(m.group("hi"), m.group("unit")) if m.group("hi") else low
-        hedged = link is not None and _LENGTH_HEDGE.search(link) is not None
-        lengths.append((low, high, hedged, m.group(0)))
+        hedged = link is not None and _LENGTH_HEDGE.search(link.group("tail")) is not None
+        if link is not None:
+            quote = sentence[
+                link.start("role") if link.group("role") else link.start("label") : m.end()
+            ]
+        else:
+            quote = sentence[m.start() : names.end() if names else m.end()]
+        lengths.append((low, high, hedged, quote.strip(" |*\u2022-")))
     return lengths
 
 
@@ -522,16 +558,24 @@ def _fitting_length(sentence: str, max_weeks: int) -> str | None:
     attribution checks apply: "Interns receive 2 weeks of paid time off" counts
     as fitting, as does "Duration: 10 weeks starting June". The role word must
     sit inside the quoted clause, so tag-stripped HTML that reads as one long
-    sentence does not let a role word anywhere vouch for a length anywhere."""
+    sentence does not let a role word anywhere vouch for a length anywhere.
+
+    Every fitting length `_role_lengths` reads counts too, quoted from its role
+    word: a role word more than `_QUOTE_REACH` characters before its length
+    ("The internship is typically offered for a period of about 10 weeks") is
+    outside the clause quoted here, and a reader looser than the knockout
+    reader must not miss what the knockout reader sees."""
     for m in _DURATION.finditer(sentence):
         if _weeks(m.group("hi") or m.group("lo"), m.group("unit")) > max_weeks:
             continue
         left, right = _clause_around(sentence, m.start(), m.end())
-        if _ROLE_WORD.search(sentence, left, right) or (
-            left == 0 and _LENGTH_LABEL.match(sentence)
+        # `^` in the label matches only at the true start, so only a clause
+        # opening the sentence can open with one; a " | " label may sit anywhere in it.
+        if _ROLE_WORD.search(sentence, left, right) or _LENGTH_LABEL.search(
+            sentence, left, m.start()
         ):
             return sentence[left:right].strip()
-    return None
+    return next((quote for _, high, _, quote in _role_lengths(sentence) if high <= max_weeks), None)
 
 
 def _title_of(text: str) -> str:
@@ -646,14 +690,16 @@ def check_eligibility(text: str, profile: Profile, *, title: str | None = None) 
                 add(
                     "degree", "stretch", sentence, who if students else "asks for a graduate degree"
                 )
-        # A graduation window names seasons too ("graduating Fall 2027 or
-        # Spring 2028"); those after a graduation word are the graduation
-        # rule's to judge, not a term. Only those after it: a list joined by
-        # tags reads as one sentence, so "Fall 2027 internship" can precede
-        # "graduate degree" in it.
-        graduation = _GRADUATION.search(sentence)
-        cut = graduation.start() if graduation else len(sentence)
-        if allowed and any(term - allowed for at, term in _season_terms(sentence) if at < cut):
+        # A graduation date names seasons too ("graduating in Fall 2027 or
+        # Spring 2028"); those inside one are the graduation rule's to judge,
+        # not a term. Only those: "graduate students for our Fall 2027 cohort"
+        # names a term, and a list joined by tags reads as one sentence, so
+        # "Fall 2027 internship" can sit beside "graduate degree" in it.
+        dates = [m.span() for m in _GRAD_DATE.finditer(sentence)]
+        terms = [
+            term for at, term in _season_terms(sentence) if not any(a <= at < b for a, b in dates)
+        ]
+        if allowed and any(term - allowed for term in terms):
             add("season", "stretch", sentence, "mentions a term you are not available for")
         if profile.max_weeks is not None:
             fitting_length = fitting_length or _fitting_length(sentence, profile.max_weeks)

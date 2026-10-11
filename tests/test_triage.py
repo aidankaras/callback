@@ -8,7 +8,7 @@ import pytest
 
 from core.discovery.store import Found
 from core.profile.models import Fact, FactKind, Provenance, Trust
-from core.triage import Profile, check_eligibility, rank
+from core.triage import Profile, Tier, check_eligibility, rank
 
 NOW = datetime(2026, 9, 22, 12, 0, tzinfo=UTC)
 US_JUNIOR = Profile(work_authorization="US citizen", graduation="May 2028", degree="bachelor")
@@ -576,12 +576,15 @@ def test_a_term_mentioned_in_the_body_is_only_a_stretch() -> None:
 def test_a_graduation_window_naming_seasons_is_not_a_term() -> None:
     """Measured on a real board: "a graduation date in Fall 2027 or Spring 2028"
     sat in summer postings, and reading it as a term made 13 of them a stretch.
-    Mutation: drop the `_GRADUATION` guard -- this becomes a stretch."""
-    text = "Students graduating in Fall 2027 or Spring 2028 are eligible."
-    between = "Expecting to graduate between Winter 2027 and Summer 2028."
-    assert "Fall 2027" in text and "Winter 2027" in between  # premise
-    assert season(text, "Data Intern (Summer 2027)") == []
-    assert season(between, "Data Intern (Summer 2027)") == []
+    Mutation: drop the `_GRAD_DATE` skip -- each becomes a stretch."""
+    for text in (
+        "Students graduating in Fall 2027 or Spring 2028 are eligible.",
+        "Expecting to graduate between Winter 2027 and Summer 2028.",
+        "A graduation date in Fall 2027 or Spring 2028.",
+        "Open to students graduating in Fall 2027.",
+    ):
+        assert re.search(r"(?:Fall|Winter) 2027", text)  # premise: a term outside summer
+        assert season(text, "Data Intern (Summer 2027)") == [], text
 
 
 def test_a_term_before_a_graduation_word_is_still_a_term() -> None:
@@ -593,30 +596,30 @@ def test_a_term_before_a_graduation_word_is_still_a_term() -> None:
     assert season(text, "Data Intern") == [("season", "stretch")]
 
 
-@pytest.mark.parametrize(
-    ("text", "expected"),
-    [
-        ("This is a 24-week internship based in Berlin.", [("duration", "knockout")]),
-        ("The programme runs six months from January.", [("duration", "knockout")]),
-        ("The internship runs 4 months.", [("duration", "knockout")]),
-        ("The internship runs 3 months.", []),
-        ("Interns typically spend 12 weeks with us.", []),
-        ("Internship program: 10-26 weeks, full-time.", [("duration", "stretch")]),
-        ("Internship program: 12 - 24 weeks, full-time.", [("duration", "stretch")]),
-        ("The internship lasts up to 24 weeks.", [("duration", "stretch")]),
-        ("This internship runs 6 months.", [("duration", "knockout")]),
-        ("The minimum internship period is 6 months.", [("duration", "knockout")]),
-        # 2.5 months is 10.8 weeks. Read as "5-month internship", the second is
-        # a knockout; the first would only go unread.
-        ("The internship lasts 2.5 months.", []),
-        ("This is a 2.5-month internship.", []),
-        # The lower option fits.
-        ("We offer internships of 3 or 6 months.", [("duration", "stretch")]),
-        ("The internship lasts from 6 to 12 months.", [("duration", "knockout")]),
-        # Measured on a real board: read as nothing, this posting lost its stretch.
-        ("The internship will be 3-6 months, including the summer.", [("duration", "stretch")]),
-    ],
-)
+_STATED_LENGTHS: list[tuple[str, list[tuple[str, str]]]] = [
+    ("This is a 24-week internship based in Berlin.", [("duration", "knockout")]),
+    ("The programme runs six months from January.", [("duration", "knockout")]),
+    ("The internship runs 4 months.", [("duration", "knockout")]),
+    ("The internship runs 3 months.", []),
+    ("Interns typically spend 12 weeks with us.", []),
+    ("Internship program: 10-26 weeks, full-time.", [("duration", "stretch")]),
+    ("Internship program: 12 - 24 weeks, full-time.", [("duration", "stretch")]),
+    ("The internship lasts up to 24 weeks.", [("duration", "stretch")]),
+    ("This internship runs 6 months.", [("duration", "knockout")]),
+    ("The minimum internship period is 6 months.", [("duration", "knockout")]),
+    # 2.5 months is 10.8 weeks. Read as "5-month internship", the second is
+    # a knockout; the first would only go unread.
+    ("The internship lasts 2.5 months.", []),
+    ("This is a 2.5-month internship.", []),
+    # The lower option fits.
+    ("We offer internships of 3 or 6 months.", [("duration", "stretch")]),
+    ("The internship lasts from 6 to 12 months.", [("duration", "knockout")]),
+    # Measured on a real board: read as nothing, this posting lost its stretch.
+    ("The internship will be 3-6 months, including the summer.", [("duration", "stretch")]),
+]
+
+
+@pytest.mark.parametrize(("text", "expected"), _STATED_LENGTHS)
 def test_the_role_s_stated_length(text: str, expected: list[tuple[str, str]]) -> None:
     """A range counts from its low end, and a hedge is a stretch: either way the
     candidate may fit. Mutation: use the high end of a range -- "10-26 weeks"
@@ -819,36 +822,36 @@ def test_the_candidate_s_past_internship_is_not_this_role_s_length(
     assert season(text, "") == []
 
 
-@pytest.mark.parametrize(
-    ("template", "long", "short", "level"),
-    [
-        ("The internship will be {}.", "6 months", "10 weeks", "knockout"),
-        ("Our internships run for {}.", "6 months", "10 weeks", "knockout"),
-        ("An internship lasting {}.", "6 months", "10 weeks", "knockout"),
-        ("Internship ({}) in Paris.", "6 months", "10 weeks", "knockout"),
-        ("The internship will run for {}.", "6 months", "10 weeks", "knockout"),
-        ("The internship can last up to {}.", "6 months", "10 weeks", "stretch"),
-        ("The internship is scheduled for {}.", "6 months", "10 weeks", "knockout"),
-        ("Internships are offered for {}.", "6 months", "10 weeks", "knockout"),
-        ("The internship takes {}.", "6 months", "10 weeks", "knockout"),
-        ("The internship will be for {}.", "6 months", "10 weeks", "knockout"),
-        ("The internship duration will be {}.", "6 months", "10 weeks", "knockout"),
-        ("The internship lasts at least {}.", "6 months", "10 weeks", "knockout"),
-        ("The internship lasts a minimum of {}.", "6 months", "10 weeks", "knockout"),
-        ("The internship runs for a period of {}.", "6 months", "10 weeks", "knockout"),
-        ("The internship lasts a full {}.", "6 months", "10 weeks", "knockout"),
-        ("The internship runs over {}.", "24 weeks", "10 weeks", "knockout"),
-        ("A {}-long internship.", "six-month", "10-week", "knockout"),
-        ("A {}-long internship.", "24-week", "10-week", "knockout"),
-        ("A {} full-time paid internship.", "6-month", "10-week", "knockout"),
-        ("A {}, full-time internship.", "6 month", "10 week", "knockout"),
-        ("Internship length - {}", "6 months", "10 weeks", "knockout"),
-        ("Duration of internship - {}", "24 weeks", "10 weeks", "knockout"),
-        ("Contract type: Internship ({})", "6 months", "10 weeks", "knockout"),
-        ("Contract: Internship, {}", "6 months", "10 weeks", "knockout"),
-        ("Duration: {}", "6 months", "10 weeks", "knockout"),
-    ],
-)
+_PHRASINGS = [
+    ("The internship will be {}.", "6 months", "10 weeks", "knockout"),
+    ("Our internships run for {}.", "6 months", "10 weeks", "knockout"),
+    ("An internship lasting {}.", "6 months", "10 weeks", "knockout"),
+    ("Internship ({}) in Paris.", "6 months", "10 weeks", "knockout"),
+    ("The internship will run for {}.", "6 months", "10 weeks", "knockout"),
+    ("The internship can last up to {}.", "6 months", "10 weeks", "stretch"),
+    ("The internship is scheduled for {}.", "6 months", "10 weeks", "knockout"),
+    ("Internships are offered for {}.", "6 months", "10 weeks", "knockout"),
+    ("The internship takes {}.", "6 months", "10 weeks", "knockout"),
+    ("The internship will be for {}.", "6 months", "10 weeks", "knockout"),
+    ("The internship duration will be {}.", "6 months", "10 weeks", "knockout"),
+    ("The internship lasts at least {}.", "6 months", "10 weeks", "knockout"),
+    ("The internship lasts a minimum of {}.", "6 months", "10 weeks", "knockout"),
+    ("The internship runs for a period of {}.", "6 months", "10 weeks", "knockout"),
+    ("The internship lasts a full {}.", "6 months", "10 weeks", "knockout"),
+    ("The internship runs over {}.", "24 weeks", "10 weeks", "knockout"),
+    ("A {}-long internship.", "six-month", "10-week", "knockout"),
+    ("A {}-long internship.", "24-week", "10-week", "knockout"),
+    ("A {} full-time paid internship.", "6-month", "10-week", "knockout"),
+    ("A {}, full-time internship.", "6 month", "10 week", "knockout"),
+    ("Internship length - {}", "6 months", "10 weeks", "knockout"),
+    ("Duration of internship - {}", "24 weeks", "10 weeks", "knockout"),
+    ("Contract type: Internship ({})", "6 months", "10 weeks", "knockout"),
+    ("Contract: Internship, {}", "6 months", "10 weeks", "knockout"),
+    ("Duration: {}", "6 months", "10 weeks", "knockout"),
+]
+
+
+@pytest.mark.parametrize(("template", "long", "short", "level"), _PHRASINGS)
 def test_a_phrasing_that_states_the_role_s_length_is_read_at_either_length(
     template: str, long: str, short: str, level: str
 ) -> None:
@@ -1126,8 +1129,9 @@ def test_tiers_survive_the_profile_command_rewriting_the_file(
 
 @pytest.mark.parametrize("term", ["", "  ", "*", "* *"])
 def test_a_tier_term_that_can_never_match_is_refused_and_names_the_tier(term: str) -> None:
-    """`Criteria` skips terms with no word character, so such a tier would be silently dead.
-    Premise: the term really does match nothing. Mutation: drop `_terms_can_match`."""
+    """`Criteria` skips a blank or `*` term, so a tier whose include or require is
+    only such a term matches nothing. Premise: the term really does match nothing.
+    Mutation: drop `_terms_can_match`, or `require` from its loop."""
     from pydantic import ValidationError
 
     from core.discovery.store import Criteria
@@ -1139,6 +1143,9 @@ def test_a_tier_term_that_can_never_match_is_refused_and_names_the_tier(term: st
         Tier(name="dead", criteria=Criteria(include=[term]))
     with pytest.raises(ValidationError, match=r"'dead'.*prefer"):
         Tier(name="dead", criteria=Criteria(include=["ok"]), prefer=(term,))
+    assert not Criteria(include=["only"], require=[term]).matches("only a title")
+    with pytest.raises(ValidationError, match=r"'dead'.*require"):
+        Tier(name="dead", criteria=Criteria(include=["only"], require=[term]))
 
 
 def test_tier_names_are_unique_and_never_other() -> None:
@@ -1193,3 +1200,130 @@ def test_the_other_row_lines_up_under_a_short_tier_name(
     rows = [ln for ln in capsys.readouterr().out.splitlines() if ln[:2] in ("ai", "ot")]
     assert [ln.startswith("ai     ") for ln in rows] == [True, False]  # premise: two rows
     assert rows[1].startswith("other  ")
+
+
+def test_a_punctuation_tier_term_matches_every_posting_and_is_refused() -> None:
+    """A term with no word character is not always dead: `|` matches the " | "
+    separators of every tier line, so as an include it takes every posting and
+    as an exclude it empties the tier. Mutation: drop `_terms_can_match`."""
+    from pydantic import ValidationError
+
+    from core.discovery.store import Criteria
+    from core.triage import Tier
+
+    line = "Acme | Accountant | Chicago"
+    assert Criteria(include=["|"]).matches(line)  # premise: it matches every tier line
+    assert not Criteria(include=["acme"], exclude=["|"]).matches(line)  # ... and excludes them
+    with pytest.raises(ValidationError, match=r"'p'.*include"):
+        Tier(name="p", criteria=Criteria(include=["|"]))
+    with pytest.raises(ValidationError, match=r"'p'.*exclude"):
+        Tier(name="p", criteria=Criteria(include=["acme"], exclude=["|"]))
+
+
+def _tier(name: str) -> Tier:
+    from core.discovery.store import Criteria
+
+    return Tier(name=name, criteria=Criteria(include=["x"]))
+
+
+@pytest.mark.parametrize(
+    ("names", "match"),
+    [((" other ",), "reserved"), (("   ",), "at least 1"), (("ai", "ai "), "unique")],
+)
+def test_tier_names_are_checked_stripped(names: tuple[str, ...], match: str) -> None:
+    """Mutation: drop `strip_whitespace=True` from `Tier.name` -- each loads."""
+    from pydantic import ValidationError
+
+    assert _tier(" ai ").name == "ai"
+    with pytest.raises(ValidationError, match=match):
+        Profile(tiers=tuple(_tier(n) for n in names))
+
+
+def test_max_weeks_refuses_a_boolean(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """YAML reads `true` as a bool, which a lax int field takes as 1 week.
+    Mutation: drop `strict=True` from `max_weeks` -- it loads as 1."""
+    import yaml
+
+    from core.paths import ensure_home
+    from core.triage import ProfileError, load_profile
+
+    monkeypatch.setenv("CALLBACK_HOME", str(tmp_path / "cb"))
+    home = ensure_home()
+    assert yaml.safe_load("max_weeks: true") == {"max_weeks": True}  # premise
+    (home / "profile.yaml").write_text("max_weeks: true\n", encoding="utf-8")
+    with pytest.raises(ProfileError, match="max_weeks"):
+        load_profile()
+    (home / "profile.yaml").write_text("max_weeks: 14\n", encoding="utf-8")
+    assert load_profile().max_weeks == 14
+
+
+_LABELLED = [
+    "- Duration: {}",
+    "**Duration:** {}",
+    "\u2022 Duration: {}",
+    "Location: London | Duration: {}",
+]
+
+
+_TEN_WEEKS_FAR = (
+    "The internship is typically offered for a period of about 10 weeks. "
+    "Returning students may do a 24-week internship."
+)
+
+
+def test_a_fitting_length_far_from_its_role_word_still_softens_a_knockout() -> None:
+    """The role word sits further before "10 weeks" than the loose reader's
+    clause window reaches, but the knockout reader attributes the length to it.
+    Mutation: drop the strict-read fallback ending `_fitting_length` -- both are
+    knockouts."""
+    first, second = _TEN_WEEKS_FAR.split(". ")
+    assert first.index("10 weeks") - first.index("internship") > 50  # premise: outside the window
+    assert season(second, "") == [("duration", "knockout")]  # premise: the long role alone
+    [finding] = check_eligibility(_TEN_WEEKS_FAR, SUMMER_ONLY, title="").findings
+    assert finding.level == "stretch"
+    assert finding.reason.endswith(
+        '"internship is typically offered for a period of about 10 weeks"'
+    )
+    off_cycle = "For our off-cycle roles, the minimum internship period is 6 months."
+    two_roles = f"Summer 2027 Analyst.\n{_TEN_WEEKS_FAR}\n{off_cycle}"
+    assert season(two_roles, "Summer Analyst Intern") == [("duration", "stretch")]
+
+
+def test_every_fitting_length_the_strict_reader_finds_the_loose_reader_finds() -> None:
+    """A false fitting length only softens a knockout, so the loose reader must
+    see at least what the knockout reader sees. Mutation: drop the strict-read
+    fallback ending `_fitting_length` -- the far role word is missed."""
+    from core.triage import _fitting_length, _role_lengths  # pyright: ignore[reportPrivateUsage]
+
+    texts = [text for text, _ in _STATED_LENGTHS]
+    texts += [t.format(x) for t, long, short, _ in _PHRASINGS for x in (long, short)]
+    texts += [t.format("10 weeks") for t in _LABELLED] + _TEN_WEEKS_FAR.split(". ")
+    fitting = [t for t in texts if any(high <= 14 for _, high, _, _ in _role_lengths(t))]
+    assert len(fitting) >= 30  # premise: the fixtures exercise the strict reader
+    assert [t for t in fitting if _fitting_length(t, 14) is None] == []
+
+
+@pytest.mark.parametrize("template", _LABELLED)
+def test_a_marked_or_piped_duration_label_is_read_by_both_readers(template: str) -> None:
+    """A list marker, bold, or a preceding " | " field must not hide the label.
+    Mutation: make `_LABEL_START` a bare line start -- none is read."""
+    knockout = "Data Science Intern. This internship runs 6 months."
+    assert season("Duration: 6 months", "") == [("duration", "knockout")]  # premise
+    assert season(template.format("6 months"), "") == [("duration", "knockout")]
+    assert season(f"{knockout}\n{template.format('10 weeks')}", "") == [("duration", "stretch")]
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "We hire graduate and undergraduate students for our Fall 2027 cohort.",
+        "<ul><li>Recent graduates and current students welcome</li></ul>"
+        "<p>Interns start in Fall 2027 for one semester.</p>",
+    ],
+)
+def test_a_season_after_graduates_who_are_people_is_still_a_term(text: str) -> None:
+    """ "Graduate students" and "recent graduates" are not a date. Mutation: skip
+    every season after a graduation word -- each loses its stretch."""
+    assert "graduat" in text and "Fall 2027" in text  # premise
+    assert text.index("graduat") < text.index("Fall 2027")
+    assert season(text, "Data Intern") == [("season", "stretch")]
