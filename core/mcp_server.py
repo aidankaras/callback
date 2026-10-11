@@ -277,7 +277,8 @@ def watch() -> dict[str, object]:
 
 @_tool
 def triage(days: int | None = None, limit: int = 20) -> dict[str, object]:
-    """Stored postings ranked: knockouts last, then by evidenced technologies and freshness."""
+    """Stored postings ranked: knockouts last whatever their tier, then by your
+    priority tiers, then by evidenced technologies and freshness."""
     from datetime import timedelta
 
     from core.discovery.store import load_postings
@@ -334,26 +335,41 @@ def postings_resolve(url: str, company: str) -> dict[str, object]:
 
 @_tool
 def postings_add(
-    company: str, title: str, url: str, text: str, deadline: str | None = None
+    company: str,
+    title: str,
+    url: str,
+    text: str,
+    deadline: str | None = None,
+    location: str = "",
 ) -> dict[str, object]:
     """Store a posting no watch can read, such as a research programme, with its
-    deadline: `YYYY-MM-DD` (23:59 local time) or an ISO date and time."""
+    deadline: `YYYY-MM-DD` (23:59 local time) or an ISO date and time, and its
+    location, which a city tier reads. Adding the same URL again keeps the
+    deadline and location unless new ones are given. `warning` is set when the
+    deadline has already passed."""
     from core.discovery.store import add_manual, parse_deadline
 
     ensure_home()
+    now = _now()
     found = add_manual(
         company,
         title,
         url,
         text,
         parse_deadline(deadline) if deadline else None,
-        now=_now(),
+        now=now,
+        location=location,
     )
+    passed = found.deadline is not None and found.deadline < now
     return {
         "id": found.id,
         "company": found.company,
         "title": found.title,
+        "location": found.location,
         "deadline": found.deadline.isoformat() if found.deadline else None,
+        "warning": "the deadline has already passed; the agenda drops it after 7 days"
+        if passed
+        else None,
     }
 
 

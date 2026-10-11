@@ -314,9 +314,9 @@ def new_york(monkeypatch: pytest.MonkeyPatch) -> object:
 
 @pytest.mark.usefixtures("new_york")
 def test_a_bare_date_is_the_end_of_that_day_in_that_day_s_local_offset() -> None:
-    """30 November is after the clocks change: -05:00, where today's offset in
-    October would be -04:00. Mutation: attach today's local zone instead --
-    this reads -04:00."""
+    """30 November is after the clocks change: -05:00, where 20 October's offset
+    is -04:00. Mutation: attach the offset in force when the test runs -- one of
+    the two dates then gets the other's offset."""
     from core.discovery.store import parse_deadline
 
     assert parse_deadline("2026-11-30").isoformat() == "2026-11-30T23:59:00-05:00"
@@ -402,3 +402,110 @@ def test_postings_add_refuses_a_text_file_that_is_not_utf8(
     args = ["postings", "add", "--company", "E", "--title", "T", "--url", DAAD_URL]
     assert main([*args, "--text-file", str(text)]) == 3
     assert "callback postings add" in capsys.readouterr().err
+
+
+def test_a_re_add_keeps_the_deadline_and_location_unless_new_ones_are_given() -> None:
+    """Mutation: store the deadline and location given, even when none is --
+    the re-add erases both."""
+    from core.discovery.store import add_manual
+
+    deadline = datetime(2026, 11, 30, 23, 59, tzinfo=UTC)
+    add_manual("CERN", "Summer Student", DAAD_URL, "Old.", deadline, now=NOW, location="Geneva")
+    again = add_manual("CERN", "Summer Student", DAAD_URL, "New.", None, now=NOW)
+    assert (again.text, again.deadline, again.location) == ("New.", deadline, "Geneva")
+    later = deadline + timedelta(days=30)
+    moved = add_manual(
+        "CERN", "Summer Student", DAAD_URL, "New.", later, now=NOW, location="Zurich"
+    )
+    assert (moved.deadline, moved.location) == (later, "Zurich")
+
+
+def test_a_hand_edited_stored_url_still_identifies_the_posting() -> None:
+    """A stored URL edited by hand into another spelling of the same page.
+    Mutation: compare the stored URL as written -- `first_seen` is reset."""
+    import json
+
+    from core.discovery.store import add_manual
+    from core.paths import resolve_inside
+
+    first = add_manual("Acme", "Research Intern", "https://acme.org/jobs/1", "Old.", None, now=NOW)
+    path = resolve_inside("postings.json")
+    raw = json.loads(path.read_text(encoding="utf-8"))
+    raw[first.id]["url"] = "HTTPS://Acme.org/jobs/1/"
+    path.write_text(json.dumps(raw), encoding="utf-8")
+    assert load_postings()[first.id].url != first.url  # premise: the edit is stored
+    again = add_manual(
+        "Acme",
+        "Research Intern",
+        "https://acme.org/jobs/1",
+        "New.",
+        None,
+        now=NOW + timedelta(days=2),
+    )
+    assert (again.id, again.first_seen) == (first.id, NOW)
+    assert len(load_postings()) == 1
+
+
+def test_a_city_tier_reads_a_hand_added_posting_s_location() -> None:
+    """EPFL and CERN name their city only in their text. Mutation: drop
+    `location` from the stored posting -- both fall to `other`, below Chicago."""
+    from core.discovery.store import Found, add_manual
+    from core.triage import Profile, Tier, rank
+
+    europe = Tier(name="europe", criteria=Criteria(include=["geneva", "lausanne"]))
+    us = Tier(name="us", criteria=Criteria(include=["chicago"]))
+    profile = Profile(tiers=(europe, us))
+    cern = add_manual(
+        "CERN",
+        "Summer Student",
+        "https://cern.ch/ssp",
+        "Ten weeks.",
+        None,
+        now=NOW,
+        location="Geneva",
+    )
+    epfl = add_manual(
+        "EPFL", "Summer@EPFL", "https://epfl.ch/s", "Ten weeks.", None, now=NOW, location="Lausanne"
+    )
+    bare = add_manual(
+        "CERN", "Summer Student", "https://cern.ch/other", "Ten weeks in Geneva.", None, now=NOW
+    )
+    chicago = Found(
+        id="greenhouse:c:1",
+        ats="greenhouse",
+        board="c",
+        company="Chi",
+        title="Analyst",
+        location="Chicago, IL",
+        url="https://c.com/1",
+        text="Ten weeks.",
+        first_seen=NOW,
+    )
+    assert rank([bare], profile, {}, now=NOW)[0].tier == "other"  # premise: the text is not read
+    ranked = rank([chicago, cern, epfl], profile, {}, now=NOW)
+    assert [(r.posting.company, r.tier) for r in ranked] == [
+        ("CERN", "europe"),
+        ("EPFL", "europe"),
+        ("Chi", "us"),
+    ]
+
+
+def test_postings_add_warns_of_a_deadline_already_past(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A wrong year stores a posting the agenda drops a week later. Mutation:
+    drop the warning -- stderr is empty."""
+    from core.cli import main
+
+    text = tmp_path / "rise.txt"
+    text.write_text("A 10-week internship.\n", encoding="utf-8")
+    args = ["postings", "add", "--company", "CERN", "--title", "Summer Student"]
+    args += ["--text-file", str(text), "--url", "https://cern.ch/ssp", "--location", "Geneva"]
+    assert main([*args, "--deadline", "2099-10-20"]) == 0
+    assert "warning" not in capsys.readouterr().err  # premise: a future deadline is quiet
+    assert main([*args, "--deadline", "2025-10-20"]) == 0
+    assert "has already passed" in capsys.readouterr().err
+    (stored,) = load_postings().values()
+    assert (
+        stored.deadline is not None and stored.deadline.year == 2025 and stored.location == "Geneva"
+    )

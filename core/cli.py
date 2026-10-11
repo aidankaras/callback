@@ -78,7 +78,17 @@ def build_parser() -> argparse.ArgumentParser:
     p_add.add_argument("--title", required=True)
     p_add.add_argument("--url", required=True)
     p_add.add_argument("--text-file", required=True, type=Path, help="the posting's text")
-    p_add.add_argument("--deadline", help="YYYY-MM-DD (23:59 local time) or an ISO date and time")
+    p_add.add_argument(
+        "--deadline",
+        help="YYYY-MM-DD (23:59 local time) or an ISO date and time; "
+        "a re-add keeps the deadline unless a new one is given",
+    )
+    p_add.add_argument(
+        "--location",
+        default="",
+        help="where the role is, which a city tier reads; a re-add keeps it unless a new one "
+        "is given",
+    )
     p_add.set_defaults(handler=_cmd_postings_add)
     p_take = postings_sub.add_parser("take", help="save a posting as the posting for a job")
     p_take.add_argument("posting_id")
@@ -102,7 +112,11 @@ def build_parser() -> argparse.ArgumentParser:
     profile.add_argument("--max-weeks", type=int, help="the longest internship you can take")
     profile.set_defaults(handler=_cmd_profile)
 
-    triage = sub.add_parser("triage", help="rank stored postings: eligibility, evidence, freshness")
+    triage = sub.add_parser(
+        "triage",
+        help="rank stored postings: knockouts last whatever their tier, then by your priority "
+        "tiers, then by evidenced technologies and freshness",
+    )
     triage.add_argument(
         "--days", type=int, default=None, help="only postings first seen this recently"
     )
@@ -464,8 +478,9 @@ def _cmd_postings_add(args: argparse.Namespace) -> int:
     try:
         deadline = parse_deadline(args.deadline) if args.deadline else None
         text = cast("Path", args.text_file).read_text(encoding="utf-8")
+        now = datetime.now(tz=UTC)
         found = add_manual(
-            args.company, args.title, args.url, text, deadline, now=datetime.now(tz=UTC)
+            args.company, args.title, args.url, text, deadline, now=now, location=args.location
         )
     except (*_discovery_errors(), UnicodeDecodeError) as exc:
         print(f"callback postings add: {exc}", file=sys.stderr)
@@ -473,6 +488,12 @@ def _cmd_postings_add(args: argparse.Namespace) -> int:
     print(f"{found.id}  {found.company} / {found.title}")
     if found.deadline is not None:
         print(f"deadline {found.deadline.isoformat()}")
+        if found.deadline < now:
+            print(
+                f"callback postings add: warning: the deadline {found.deadline.isoformat()} "
+                "has already passed; the agenda drops it after 7 days",
+                file=sys.stderr,
+            )
     return 0
 
 

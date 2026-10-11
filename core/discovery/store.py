@@ -295,7 +295,11 @@ def parse_deadline(value: str) -> datetime:
     ISO date and time without an offset is read, in this machine's timezone.
 
     The zone is the one in force on that date, not today's: a deadline set in
-    October for 30 November in New York is -05:00, not October's -04:00."""
+    October for 30 November in New York is -05:00, not October's -04:00.
+    `astimezone()` resolves the offset per instant: a time skipped by a
+    spring-forward change moves an hour later, and a repeated time takes the
+    first, daylight-saving offset. The result is a fixed offset, not a named
+    zone."""
     text = value.strip()
     try:
         if re.fullmatch(r"\d{4}-\d{2}-\d{2}", text):
@@ -325,22 +329,43 @@ def _normal_url(url: str) -> str:
     return urlunsplit((parts.scheme.lower(), parts.netloc.lower(), path, parts.query, ""))
 
 
+def _same_page(stored: str, url: str) -> bool:
+    """Whether a stored URL, which may have been edited by hand, is `url`'s page."""
+    try:
+        return _normal_url(stored) == url
+    except DiscoveryError:
+        return False
+
+
 def add_manual(
-    company: str, title: str, url: str, text: str, deadline: datetime | None, *, now: datetime
+    company: str,
+    title: str,
+    url: str,
+    text: str,
+    deadline: datetime | None,
+    *,
+    now: datetime,
+    location: str = "",
 ) -> Found:
     """Store a posting no watch can read -- a research programme, a careers page
     with no structured data -- from the text the candidate saw on it.
 
     Its id is `manual:<company slug>:<8 hex of the URL's sha256>`. The URL is
     what identifies it: adding the same URL again, under any spelling of the
-    company, replaces the text and deadline and keeps the id and `first_seen`.
-    No watch fetches it, and a watch only ever adds to the store, so it stays."""
+    company, replaces the text and keeps the id and `first_seen`, and keeps the
+    deadline and location unless new ones are given. `location` is what a city
+    tier reads, since a hand-added posting has no other. No watch fetches it,
+    and a watch only ever adds to the store, so it stays, provided no watch is
+    running at the same moment: a watch saves the store it loaded, so a posting
+    added while one runs is lost."""
     if not (company.strip() and title.strip() and text.strip()):
         raise DiscoveryError("a posting needs a company, a title and its text")
     url = _normal_url(url)
     slug = re.sub(r"[^a-z0-9]+", "-", company.casefold()).strip("-")[:40].strip("-") or "posting"
     stored = load_postings()
-    previous = next((p for p in stored.values() if p.ats == "manual" and p.url == url), None)
+    previous = next(
+        (p for p in stored.values() if p.ats == "manual" and _same_page(p.url, url)), None
+    )
     posting_id = (
         previous.id if previous else f"manual:{slug}:{hashlib.sha256(url.encode()).hexdigest()[:8]}"
     )
@@ -350,9 +375,10 @@ def add_manual(
         board=previous.board if previous else slug,
         company=company.strip(),
         title=title.strip(),
+        location=location.strip() or (previous.location if previous else ""),
         url=url,
         text=text,
-        deadline=deadline,
+        deadline=deadline if deadline is not None or previous is None else previous.deadline,
         first_seen=previous.first_seen if previous else now,
     )
     stored[posting_id] = found

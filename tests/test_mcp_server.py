@@ -337,3 +337,8 @@ def test_a_manual_posting_can_be_added_as_a_tool(
         call("postings_add", {**args, "deadline": "30/11/2026"})
     assert not isinstance(raised.value, UnexpectedToolError) and "30/11/2026" in str(raised.value)
     assert load_postings()[added["id"]].deadline is not None  # the bad call stored nothing new
+    future = call("postings_add", {**args, "deadline": "2099-10-20"}).structured_content  # type: ignore[attr-defined]
+    assert future["warning"] is None  # premise: a future deadline is quiet
+    past = call("postings_add", {**args, "deadline": "2025-10-20", "location": "Geneva"})
+    result = past.structured_content  # type: ignore[attr-defined]
+    assert result["location"] == "Geneva" and "already passed" in result["warning"]
