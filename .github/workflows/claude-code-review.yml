@@ -58,7 +58,19 @@ jobs:
           # plugin makes. Without them it stops mid-review to ask permission, and
           # an unattended run that ends on a question still reports success: one
           # review ended after 7 turns asking to read the pull request's comments.
-          claude_args: >-
-            --allowedTools "mcp__github_inline_comment__create_inline_comment,Bash(gh api
-            repos/*/issues/*/comments:*),Bash(gh api repos/*/pulls/*/comments:*),Bash(gh pr
-            view:*),Bash(gh pr diff:*)"
+          #
+          # Reads go through `gh pr view` and `gh pr diff`, which cannot write;
+          # raw `gh api` is not allowed at all. An earlier allow rule of the form
+          # `gh api repos/*/.../comments:*` never matched (a `*` inside a
+          # `prefix:*` rule is literal), and the glob form that does match also
+          # admits writes such as `-X POST`, or `-iF body=...`, which slips past
+          # any deny list of flag substrings. Measured with a headless
+          # `claude -p` run before this landed.
+          #
+          # wc, head, tail and grep let a large diff be read through a pipe. The
+          # run cannot write files, shell redirection included, so the appended
+          # prompt says so up front: one review of a 130 KB diff made 63 refused
+          # calls, mostly attempts to save the diff to a file.
+          claude_args: |
+            --allowedTools "mcp__github_inline_comment__create_inline_comment,Bash(gh pr view:*),Bash(gh pr diff:*),Bash(wc:*),Bash(head:*),Bash(tail:*),Bash(grep:*)"
+            --append-system-prompt "This run cannot write files: shell redirection, mkdir and file-writing tools are refused, and so are commands using exit-status variables or command substitution. Read the diff through pipes instead, for example gh pr diff N | grep -n '^diff --git' to find each file, then gh pr diff N | head -n END | tail -n COUNT to read a range, or read changed files from the checkout. For comments, commits and files use gh pr view N --comments or gh pr view N --json comments,reviews,commits,files; gh api is refused. The review instructions are already loaded, so do not invoke them again as a skill. Pass these constraints to any agent you start."
