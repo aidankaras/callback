@@ -82,7 +82,7 @@ def test_traversal_and_symlinks_resolve_before_comparison(home: Path, tmp_path: 
 
 
 def test_a_finalised_document_is_not_writable(home: Path) -> None:
-    for sub in ("final", "released"):
+    for sub in ("final", "packet"):
         path = home / "outputs" / "job" / sub / "resume.pdf"
         assert denied(run_guard(_write(str(path)), home)), sub
 
@@ -540,6 +540,66 @@ def test_a_long_chain_of_directory_changes_is_refused_within_the_hook_timeout(
     result = run_guard(_bash(chain), home, cwd=home.parent)
     assert denied(result), result.stderr
     assert time.monotonic() - start < 5
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        'rm "${{CALLBACK_HOME:-$HOME/.callback}}/facts.yaml"',
+        "rm ${{CALLBACK_HOME:-{home}}}/facts.yaml",
+        'echo x >> "${{CALLBACK_HOME-{home}}}/facts.yaml"',
+        'rm "${{CALLBACK_HOME:={home}}}/facts.yaml"',
+    ],
+)
+def test_a_default_value_expansion_is_expanded_as_the_shell_would(home: Path, command: str) -> None:
+    """`${CALLBACK_HOME:-~/.callback}` is how the docs' "default `~/.callback`"
+    is written in a shell; it names the store whether or not the variable is set."""
+    unset = {"PATH": "/usr/bin:/bin", "HOME": str(home.parent)}
+    (home.parent / ".callback").mkdir(exist_ok=True)
+    (home.parent / ".callback" / "facts.yaml").write_text("{}\n")
+    for env in (unset, {**unset, "CALLBACK_HOME": str(home)}):
+        guard_home = Path(env.get("CALLBACK_HOME", home.parent / ".callback"))
+        result = subprocess.run(
+            [sys.executable, str(GUARD)],
+            input=json.dumps({**_bash(command.format(home=guard_home)), "cwd": str(home.parent)}),
+            capture_output=True,
+            text=True,
+            env=env,
+            check=False,
+        )
+        assert denied(result), (command, env.get("CALLBACK_HOME"), result.stderr)
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "cd && rm cb/facts.yaml",
+        "cd; sed -i s/a/b/ cb/facts.yaml",
+        "cd -P {home}/inbox && rm ../facts.yaml",
+        "cd -- {home}/inbox && rm ../facts.yaml",
+        "cd -L {home}/inbox && rm ../facts.yaml",
+        "if cd {home}/inbox; then rm ../facts.yaml; fi",
+        "while cd {home}/inbox; do rm ../facts.yaml; done",
+        "echo facts.yaml | (cd {home} && xargs rm)",
+        "rm facts.yaml; cd {home}",
+    ],
+)
+def test_every_directory_a_command_can_run_in_is_checked(home: Path, command: str) -> None:
+    """A bare `cd` goes home, `cd`'s flags are not its directory, a keyword
+    before `cd` does not hide it, and a path named before the `cd` that
+    reaches it (through a pipe into a subshell) is checked against it too."""
+    elsewhere = home.parent / "repo"
+    elsewhere.mkdir()
+    result = run_guard(_bash(command.format(home=home)), home, cwd=elsewhere)
+    assert denied(result), (command, result.stderr)
+
+
+def test_a_packet_built_by_apply_is_sealed(home: Path) -> None:
+    packet = home / "outputs" / "job" / "packet"
+    packet.mkdir()
+    for name in ("resume.pdf", "answers.md"):
+        assert denied(run_guard(_write(str(packet / name)), home)), name
+    assert denied(run_guard(_bash(f"cp /tmp/x.pdf {packet}/resume.pdf"), home, cwd=home.parent))
 
 
 def test_a_few_directory_changes_are_still_checked_not_refused(home: Path) -> None:

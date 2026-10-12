@@ -15,7 +15,7 @@ What is protected, under `$CALLBACK_HOME` (default `~/.callback`):
 - `notes.yaml`, the candidate's standing preferences. An assistant may
   propose or retire a note through `callback`; only the candidate activates
   one, with `callback notes activate` at their own terminal.
-- anything under an `outputs/<job>/final/` or `released/` directory.
+- anything under an `outputs/<job>/final/` or `packet/` directory.
 - `applications.yaml`, the application record the volume limits read.
 - key, ledger and database files.
 - and, wherever the plugin lives, this guard and its `hooks.json`.
@@ -77,7 +77,7 @@ PROTECTED_NAMES = {
     "callback.db",
     "callback.db-wal",
 }
-SEALED_DIRS = {"final", "released"}
+SEALED_DIRS = {"final", "packet"}
 GUARD_FILES = {Path(__file__).resolve(), Path(__file__).resolve().with_name("hooks.json")}
 
 _OPERATORS = {";", "&&", "||", "|", "&", "(", ")"}
@@ -102,10 +102,23 @@ def data_home() -> Path:
     return (Path(raw) if raw else Path.home() / ".callback").expanduser().resolve()
 
 
+# `${NAME:-default}` and its kin: the variable's value if it is set (and, with
+# the colon, not empty), the default otherwise. The docs' "default
+# `~/.callback`" is written `${CALLBACK_HOME:-$HOME/.callback}` in a shell.
+_DEFAULTED = re.compile(r"\$\{(\w+)(:?)[-=]([^{}]*)\}")
+
+
 def _expand(raw: str) -> str:
     """`raw` with `~`, `$HOME` and `$CALLBACK_HOME` spelled out, as a shell would."""
     home = str(data_home())
     user_home = str(Path.home())
+
+    def defaulted(m: re.Match[str]) -> str:
+        value = os.environ.get(m[1])
+        unset = value is None or (m[2] == ":" and value == "")
+        return m[3] if unset else f"${{{m[1]}}}"
+
+    raw = _DEFAULTED.sub(defaulted, raw)
     for var, value in (
         ("${CALLBACK_HOME}", home),
         ("$CALLBACK_HOME", home),
@@ -198,6 +211,28 @@ def _command_words(segment: list[str]) -> list[str]:
     while words and re.fullmatch(r"[A-Za-z_]\w*=.*", words[0]):
         words.pop(0)
     return words[2:] if words[:2] == ["uv", "run"] else words
+
+
+# Words that may precede a command in the same simple command.
+_KEYWORDS = {"if", "then", "elif", "else", "while", "until", "do", "!", "time", "{"}
+
+
+def _cd_target(words: list[str]) -> str | None:
+    """The directory a `cd` or `pushd` in `words` moves to, or None if there is none.
+
+    A keyword before it does not hide it (`if cd x; then ...`), its flags are
+    not its directory (`cd -P x`, `cd -- x`), and a bare `cd` goes home.
+    """
+    while words and words[0] in _KEYWORDS:
+        words = words[1:]
+    if not words or words[0] not in {"cd", "pushd"}:
+        return None
+    rest = words[1:]
+    while rest and rest[0] in {"-P", "-L", "-e", "-@"}:
+        rest = rest[1:]
+    if rest and rest[0] == "--":
+        rest = rest[1:]
+    return rest[0] if rest else "~"
 
 
 def _runs(words: list[str], wanted: list[str]) -> bool:
@@ -304,8 +339,20 @@ def _check_paths(words: list[str], bases: list[Path]) -> None:
 
 
 def check_bash(command: str, cwd: Path) -> None:
+    # Every directory any part of the command may run in, gathered before any
+    # path is checked: `echo facts.yaml | (cd ~/.callback && xargs rm)` names
+    # the file before the `cd` that it is relative to. Each `cd` may or may not
+    # have run, so it doubles the candidates; past a few, checking them all
+    # outlasts the hook's timeout, and a hook that times out does not block.
+    segments = _segments(command)
     bases = [cwd]
-    for segment in _segments(command):
+    for segment in segments:
+        target = _cd_target(_command_words(segment))
+        if target is not None:
+            bases += [base / _expand(target) for base in bases]
+            if len(bases) > _MAX_BASES:
+                deny("too many directory changes in one command to check; run them separately")
+    for segment in segments:
         words = _command_words(segment)
         # The raw segment, assignments included: `C='callback facts confirm';
         # script -qc "$C"` carries the command in a variable, and a leading
@@ -355,16 +402,8 @@ def check_bash(command: str, cwd: Path) -> None:
         # A substitution runs a command inside the argument: `ls "$(rm x)"` is
         # an `rm`, whatever runs first.
         substitutes = any(_SUBSTITUTION.search(w) for w in segment)
-        if words[0] in {"cd", "pushd"} and len(words) > 1:
-            # Each `cd` may or may not have run, so it doubles the directories a
-            # later path could be relative to. Past a few, checking them all
-            # outlasts the hook's timeout, and a hook that times out does not
-            # block: refuse instead.
-            bases += [base / _expand(words[1]) for base in bases]
-            if len(bases) > _MAX_BASES:
-                deny("too many directory changes in one command to check; run them separately")
-            if not redirects and not substitutes:
-                continue
+        if _cd_target(words) is not None and not redirects and not substitutes:
+            continue
         if words[0] in _LOOK_ONLY and not redirects and not substitutes:
             continue
         _check_paths(words, bases)
