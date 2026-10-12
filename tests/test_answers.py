@@ -216,3 +216,20 @@ def test_callback_answers_refuses_a_brief_that_fails_its_check(
     store_brief(home, "ml-research", sources=[{**SOURCE, "url": "https://www.linkedin.com/x"}])
     assert main(["answers", str(source)]) == 3
     assert "source 's1' is on linkedin.com" in capsys.readouterr().err
+
+
+def test_answers_record_the_hash_taken_before_their_facts_were_loaded(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The store is not re-hashed after checking: an edit made meanwhile was not
+    checked, so recording it would let a stale draft through at apply."""
+    import json
+
+    from core.answers import build_answers
+    from tests.test_briefs import store_brief
+
+    home, source = _answers_file(tmp_path, monkeypatch)
+    store_brief(home, "ml-research", "A sentence no answer here repeats.")
+    _, out_dir = build_answers(source, FACTS, "hash-taken-before-loading")
+    record = json.loads((out_dir / "answers-report.json").read_text())
+    assert record["facts_sha256"] == "hash-taken-before-loading"

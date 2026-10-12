@@ -511,3 +511,35 @@ def test_callback_letter_refuses_a_brief_that_fails_its_check(
     source.write_text(dump_letter(letter(brief="ml-research")), encoding="utf-8")
     assert main(["letter", str(source)]) == 3
     assert "source 's1' is on linkedin.com" in capsys.readouterr().err
+
+
+@pytest.mark.slow
+def test_a_letter_report_records_the_facts_it_graded_not_an_edit_made_during_the_build(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import core.letter.cmd
+    from core.cli import main
+    from core.letter.io import dump_letter
+    from core.paths import ensure_home
+    from core.profile.store import save_facts
+
+    monkeypatch.setenv("CALLBACK_HOME", str(tmp_path / "cb"))
+    home = ensure_home()
+    save_facts(FACTS)
+    (home / "inbox" / "acme-ml-intern.md").write_text(POSTING, encoding="utf-8")
+    source = tmp_path / "letter.yaml"
+    source.write_text(dump_letter(letter()), encoding="utf-8")
+    store = home / "facts.yaml"
+    graded = store.read_bytes()
+    real = core.letter.cmd.check_letter
+
+    def edit_then_check(*args: object, **kwargs: object) -> object:
+        store.write_bytes(graded + b"# edited mid-build\n")
+        return real(*args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr("core.letter.cmd.check_letter", edit_then_check)
+    assert main(["letter", str(source)]) == 0
+    draft = home / "outputs" / "acme-ml-intern" / "draft"
+    record = json.loads((draft / "letter-report.json").read_text())
+    assert store.read_bytes() != graded  # premise: the store changed during the build
+    assert record["facts_sha256"] == hashlib.sha256(graded).hexdigest()
