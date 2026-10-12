@@ -606,6 +606,28 @@ def test_a_packet_built_by_apply_is_sealed(home: Path) -> None:
     assert denied(run_guard(_bash(f"cp /tmp/x.pdf {packet}/resume.pdf"), home, cwd=home.parent))
 
 
+@pytest.mark.parametrize(
+    "command",
+    [
+        'rm "${CALLBACK_HOME:+$CALLBACK_HOME}/facts.yaml"',
+        'rm "$DATA_DIR/facts.yaml"',
+        "rm ${SOMEWHERE}/notes.yaml",
+        'cp x "${OUT:?}/ledger.log"',
+    ],
+)
+def test_a_protected_name_behind_a_variable_the_guard_cannot_expand_is_refused(
+    home: Path, command: str
+) -> None:
+    """Which directory an unknown variable names cannot be judged here, and a
+    guard that cannot judge refuses rather than guesses."""
+    assert denied(run_guard(_bash(command), home, cwd=home.parent)), command
+
+
+def test_an_unexpanded_variable_before_an_ordinary_name_is_allowed(home: Path) -> None:
+    result = run_guard(_bash('rm "$TMPDIR/build.log"'), home, cwd=home.parent)
+    assert result.returncode == 0, result.stderr
+
+
 def test_a_few_directory_changes_are_still_checked_not_refused(home: Path) -> None:
     short = " && ".join(["cd a"] * 3) + " && ls"
     assert run_guard(_bash(short), home, cwd=home.parent).returncode == 0

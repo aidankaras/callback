@@ -337,8 +337,16 @@ def _check_paths(words: list[str], bases: list[Path]) -> None:
         # A word may carry a path inside quotes or code, e.g. open('<path>','w').
         candidates = {word, *re.findall(r"[\w~$./@+{}*?-]+", word)}
         for candidate in candidates:
+            expanded = _expand(candidate)
+            # A variable left unexpanded names a directory this guard cannot
+            # know; before a protected file name, refuse rather than guess.
+            if "$" in expanded and Path(expanded).name in PROTECTED_NAMES:
+                deny(
+                    f"command names {Path(expanded).name} behind a variable the guard "
+                    f"cannot expand ({candidate})"
+                )
             for base in local:
-                reason = protected(base / _expand(candidate))
+                reason = protected(base / expanded)
                 if reason:
                     deny(
                         f"command names a protected path ({candidate}): {reason}; "
