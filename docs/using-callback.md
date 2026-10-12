@@ -368,7 +368,7 @@ and exits 0 pass, 2 fail, 3 could not run.
 **The write guard.** Loaded as a plugin, callback installs a `PreToolUse` hook
 (`hooks/write_guard.py`) that refuses an assistant's attempt to:
 - write the fact store;
-- write anything under `final/` or `released/`;
+- write anything under `final/` or `packet/`;
 - write the guard itself;
 - run `callback facts confirm`, `callback facts retire` or
   `callback notes activate`.
