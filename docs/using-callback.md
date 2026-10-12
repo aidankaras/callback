@@ -83,11 +83,14 @@ postings anyway.
 | `callback triage [--days N]` | Stored postings ranked: knockouts last, then by your priority tiers, then by evidenced technologies and freshness. With tiers set, each line starts with its tier | 0, 3 |
 | `callback gaps [--days N]` | Technologies the eligible stored postings name that no confirmed fact backs, most frequent first, with how many rejected applications' saved postings named each; a rejection with no saved posting is listed, not counted | 0, 3 |
 
-**Network access.** Discovery is the only part of callback that uses the
-network:
-- It reaches only those APIs (the three applicant-tracking systems and
-  Algolia's Hacker News API), over HTTPS, with an honest User-Agent and at
-  least a second between requests to a host.
+**Network access.** Three things use the network, each only over HTTPS,
+with an honest User-Agent and at least a second between requests to a host:
+- Discovery reaches only those APIs (the three applicant-tracking systems
+  and Algolia's Hacker News API).
+- `postings resolve <url>` reads one employer careers page's
+  `schema.org/JobPosting` data, honouring its `robots.txt`.
+- `facts github <user>` reads that user's public repositories from
+  `api.github.com`, on an allowlist of that one host.
 - LinkedIn, Indeed, Handshake, Workday and Glassdoor forbid automated
   access, and callback refuses them by name.
 - For a posting found there, find the same role on the employer's own

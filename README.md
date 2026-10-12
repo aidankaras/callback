@@ -123,7 +123,7 @@ likewise not a tool. Everything else is conversational:
 
 ## Evaluating the skill
 
-The tests check `core`. `evals/` checks the half that runs in Claude: five
+The tests check `core`. `evals/` checks the half that runs in Claude: seven
 cases run with and without the plugin through `claude plugin eval`. Without
 it, Claude fetched a LinkedIn job page in 3 of 3 runs and told the user an
 unconfirmed fact was confirmed in 3 of 3; with it, neither happened. On

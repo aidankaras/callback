@@ -36,7 +36,7 @@ Three runs per case per arm, Claude Code 2.1.280, on the skill as merged:
 
 The last two rows are Claude Code 2.1.281, on the skill with notes.
 
-Read these for what they are; twelve runs per arm is a smoke test, not a benchmark.
+Read these for what they are; twenty-one runs per arm, three per case, is a smoke test, not a benchmark.
 
 - **Where the plugin changes behaviour.** Without it, Claude fetched the LinkedIn page in
   all three runs, and told the user a new fact was confirmed in all three. With it, neither
