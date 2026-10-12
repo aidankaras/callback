@@ -549,6 +549,8 @@ def test_a_long_chain_of_directory_changes_is_refused_within_the_hook_timeout(
         "rm ${{CALLBACK_HOME:-{home}}}/facts.yaml",
         'echo x >> "${{CALLBACK_HOME-{home}}}/facts.yaml"',
         'rm "${{CALLBACK_HOME:={home}}}/facts.yaml"',
+        'rm "${{CALLBACK_HOME:-${{HOME}}/.callback}}/facts.yaml"',
+        'rm "${{CALLBACK_HOME:-${{UNSET_VAR:-$HOME/.callback}}}}/facts.yaml"',
     ],
 )
 def test_a_default_value_expansion_is_expanded_as_the_shell_would(home: Path, command: str) -> None:
@@ -578,6 +580,8 @@ def test_a_default_value_expansion_is_expanded_as_the_shell_would(home: Path, co
         "cd -P {home}/inbox && rm ../facts.yaml",
         "cd -- {home}/inbox && rm ../facts.yaml",
         "cd -L {home}/inbox && rm ../facts.yaml",
+        "cd -LP {home}/inbox && rm ../facts.yaml",
+        "cd -eP -- {home}/inbox && rm ../facts.yaml",
         "if cd {home}/inbox; then rm ../facts.yaml; fi",
         "while cd {home}/inbox; do rm ../facts.yaml; done",
         "echo facts.yaml | (cd {home} && xargs rm)",

@@ -1352,7 +1352,7 @@ def test_a_season_after_graduates_who_are_people_is_still_a_term(text: str) -> N
     assert season(text, "Data Intern") == [("season", "stretch")]
 
 
-# --- boundaries a review found unpinned ----------------------------------------------
+# --- boundaries: inclusive date-range edges, exact-limit values ----------------------
 
 
 def _graduating(when: str) -> Profile:

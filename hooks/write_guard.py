@@ -118,14 +118,21 @@ def _expand(raw: str) -> str:
         unset = value is None or (m[2] == ":" and value == "")
         return m[3] if unset else f"${{{m[1]}}}"
 
-    raw = _DEFAULTED.sub(defaulted, raw)
-    for var, value in (
-        ("${CALLBACK_HOME}", home),
-        ("$CALLBACK_HOME", home),
-        ("${HOME}", user_home),
-        ("$HOME", user_home),
-    ):
-        raw = raw.replace(var, value)
+    # Innermost first, until nothing changes: a default may itself hold a
+    # braced variable, `${CALLBACK_HOME:-${HOME}/.callback}`. Bounded, since a
+    # value could in principle spell a variable again.
+    for _ in range(8):
+        before = raw
+        for var, value in (
+            ("${CALLBACK_HOME}", home),
+            ("$CALLBACK_HOME", home),
+            ("${HOME}", user_home),
+            ("$HOME", user_home),
+        ):
+            raw = raw.replace(var, value)
+        raw = _DEFAULTED.sub(defaulted, raw)
+        if raw == before:
+            break
     if raw == "~" or raw.startswith("~/"):
         raw = user_home + raw[1:]
     return raw
@@ -220,15 +227,16 @@ _KEYWORDS = {"if", "then", "elif", "else", "while", "until", "do", "!", "time", 
 def _cd_target(words: list[str]) -> str | None:
     """The directory a `cd` or `pushd` in `words` moves to, or None if there is none.
 
-    A keyword before it does not hide it (`if cd x; then ...`), its flags are
-    not its directory (`cd -P x`, `cd -- x`), and a bare `cd` goes home.
+    A keyword before it does not hide it (`if cd x; then ...`), its flags,
+    clustered or not, are not its directory (`cd -P x`, `cd -LP x`, `cd -- x`),
+    and a bare `cd` goes home.
     """
     while words and words[0] in _KEYWORDS:
         words = words[1:]
     if not words or words[0] not in {"cd", "pushd"}:
         return None
     rest = words[1:]
-    while rest and rest[0] in {"-P", "-L", "-e", "-@"}:
+    while rest and re.fullmatch(r"-[A-Za-z@]+", rest[0]):
         rest = rest[1:]
     if rest and rest[0] == "--":
         rest = rest[1:]
