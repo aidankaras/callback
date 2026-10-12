@@ -157,6 +157,15 @@ def build_parser() -> argparse.ArgumentParser:
     t_use.add_argument("--overwrite", action="store_true", help="replace an existing draft")
     t_use.set_defaults(handler=_cmd_template_use)
 
+    brief = sub.add_parser("brief", help="the field briefs a draft is written and checked against")
+    brief_sub = brief.add_subparsers(dest="brief_command", required=True)
+    b_show = brief_sub.add_parser("show", help="print a brief's claims and exemplars")
+    b_show.add_argument("field")
+    b_show.set_defaults(handler=_cmd_brief_show)
+    b_check = brief_sub.add_parser("check", help="check a brief's sources, citations and exemplars")
+    b_check.add_argument("field")
+    b_check.set_defaults(handler=_cmd_brief_check)
+
     answers = sub.add_parser(
         "answers", help="check free-text application-form answers and write them paste-ready"
     )
@@ -672,6 +681,56 @@ def _cmd_template_list(_args: argparse.Namespace) -> int:
         print(f"{template.name:<24} {template.bytes_:>6} bytes")
     if not templates:
         print("no templates saved; `callback template save <job> --name <name>`")
+    return 0
+
+
+def _cmd_brief_check(args: argparse.Namespace) -> int:
+    from datetime import UTC, datetime
+
+    from core.briefs import BriefError, check_brief, load_brief
+
+    try:
+        report = check_brief(load_brief(args.field), now=datetime.now(tz=UTC))
+    except BriefError as exc:
+        print(f"callback brief check: {exc}", file=sys.stderr)
+        return 3
+    print(report.verdict.upper())
+    for finding in (*report.fails, *report.warns):
+        print(f"  {finding}")
+    return {"pass": 0, "warn": 1, "fail": 2}[report.verdict]
+
+
+def _cmd_brief_show(args: argparse.Namespace) -> int:
+    from datetime import UTC, datetime
+
+    from core.briefs import BriefError, check_brief, load_brief
+
+    try:
+        brief = load_brief(args.field)
+    except BriefError as exc:
+        print(f"callback brief show: {exc}", file=sys.stderr)
+        return 3
+    report = check_brief(brief, now=datetime.now(tz=UTC))
+    if report.verdict == "fail":
+        print(
+            "callback brief show: this brief fails its check; "
+            f"run `callback brief check {args.field}`",
+            file=sys.stderr,
+        )
+        return 2
+    sources = {s.id: f"{s.publisher}, {s.title}" for s in brief.sources}
+    print(f"# {brief.field} (built {brief.built_at.date().isoformat()}; check: {report.verdict})")
+    for warning in report.warns:
+        print(f"  warning: {warning}")
+    print("\n## What screeners in this field look for")
+    for claim in brief.claims:
+        print(f"- {claim.text} [{sources[claim.source]}]")
+    print("\n## Exemplars: imitate the structure, never the words")
+    for ex in brief.exemplars:
+        print(f"- ({ex.kind}) {ex.text}\n  why: {ex.why} [{sources[ex.source]}]")
+    if brief.phrases_to_avoid:
+        print("\n## Phrases this field reads as filler")
+        print(", ".join(brief.phrases_to_avoid))
     return 0
 
 

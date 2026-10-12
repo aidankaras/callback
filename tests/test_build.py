@@ -42,9 +42,13 @@ FACTS = {
             kind=FactKind.EXPERIENCE_DETAIL,
             parent="role",
             text=text,
+            entities=[entity],
             provenance=CONFIRMED,
         )
-        for fid, text in (("loader", "Shipped the loader"), ("runbook", "Wrote the runbook"))
+        for fid, text, entity in (
+            ("loader", "Shipped the Airflow loader", "Airflow"),
+            ("runbook", "Wrote the Terraform runbook", "Terraform"),
+        )
     },
     "contact": Fact(
         id="contact",
@@ -72,8 +76,8 @@ def sample_doc(bullet: str = "Cut the review queue to 300 items using Python") -
                         sources=["role"],
                         bullets=[
                             Bullet(text=bullet, sources=["queue"]),
-                            Bullet(text="Shipped the loader", sources=["loader"]),
-                            Bullet(text="Wrote the runbook", sources=["runbook"]),
+                            Bullet(text="Shipped the Airflow loader", sources=["loader"]),
+                            Bullet(text="Wrote the Terraform runbook", sources=["runbook"]),
                         ],
                     )
                 ],
@@ -126,6 +130,7 @@ def test_the_report_names_the_exact_pdf_and_document_it_judged(tmp_path: Path) -
         "hidden",
         "skills",
         "lints",
+        "style",
     ]
 
 
@@ -251,3 +256,66 @@ def test_a_build_holds_the_resume_to_the_candidates_own_page_limit(
     assert len(page_fill(draft / "resume.pdf")) == 2
     lints = next(o for o in result.report.outcomes if o.gate == "lints")
     assert any(f.startswith("page_count") for f in lints.findings) is flagged
+
+
+@pytest.mark.slow
+def test_a_document_naming_a_missing_brief_cannot_build(tmp_path: Path, home: Path) -> None:
+    doc = sample_doc().model_copy(update={"brief": "absent"})
+    with pytest.raises(BuildError, match="no brief named 'absent'"):
+        build(_write(tmp_path, doc), "northwind-de")
+
+
+@pytest.mark.slow
+def test_a_report_written_before_the_style_gate_still_reads(tmp_path: Path, home: Path) -> None:
+    """A stored report is read as JSON by field, never rebuilt into a
+    `GateReport`, so one with fewer gates than `GATES` stays usable."""
+    from core.recurring import recurring
+    from core.templates import save
+
+    build(_write(tmp_path, sample_doc()), "northwind-de")
+    path = home / "outputs" / "northwind-de" / "draft" / "report.json"
+    record = json.loads(path.read_text())
+    record["outcomes"] = [o for o in record["outcomes"] if o["gate"] != "style"]
+    path.write_text(json.dumps(record))
+    assert [o["gate"] for o in record["outcomes"]][-1] == "lints"  # premise: pre-style shape
+    assert save("northwind-de", "base").is_file()
+    assert recurring().unreadable == ()
+
+
+@pytest.mark.slow
+def test_a_build_checks_against_the_brief_it_names(tmp_path: Path, home: Path) -> None:
+    """Mutation: drop `brief=brief` where the build calls `run_gates` -- the
+    style gate then fails as naming a brief not loaded, not as copying."""
+    from tests.test_briefs import store_brief
+
+    store_brief(home, "data-eng", "Ran a dependable nightly batch scheduler for the finance team")
+    bullet = (
+        "Cut the review queue to 300 items with a dependable nightly batch scheduler for Python"
+    )
+    # Premise: the shared run is not the cited fact's own wording.
+    assert "dependable" not in FACTS["queue"].text
+    doc = sample_doc(bullet).model_copy(update={"brief": "data-eng"})
+    result = build(_write(tmp_path, doc), "northwind-de")
+    style = next(o for o in result.report.outcomes if o.gate == "style")
+    assert style.findings == (
+        "bullet 0: copies an exemplar of the data-eng brief: "
+        "'a dependable nightly batch scheduler for'",
+    )
+
+
+@pytest.mark.slow
+def test_a_build_refuses_a_brief_that_fails_its_check_and_clears_the_old_draft(
+    tmp_path: Path, home: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from core.cli import main
+    from tests.test_briefs import SOURCE, store_brief
+
+    build(_write(tmp_path, sample_doc()), "northwind-de")
+    draft = home / "outputs" / "northwind-de" / "draft"
+    assert (draft / "report.json").is_file()  # premise: a previous build's draft is there
+    store_brief(home, "data-eng", sources=[{**SOURCE, "url": "https://www.linkedin.com/x"}])
+    doc = sample_doc().model_copy(update={"brief": "data-eng"})
+    assert main(["build", str(_write(tmp_path, doc)), "--job", "northwind-de"]) == 3
+    assert "source 's1' is on linkedin.com" in capsys.readouterr().err
+    assert not (draft / "report.json").exists()
+    assert not (draft / "resume.pdf").exists()

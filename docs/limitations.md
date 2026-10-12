@@ -11,7 +11,9 @@ by design rather than merely unimplemented.
 - **Ordinary wording.** Bullets and cover-letter sentences are checked for numbers, dates,
   technologies, mid-sentence capitalised names, a fixed list of claim words, and spelled-out
   numbers. Ordinary verbs and nouns are not compared: "led the migration" and "helped with the
-  migration" ground identically.
+  migration" ground identically. The `style` gate adds only a fixed list of stock phrases, copying
+  from a brief's exemplars, and a warning on a resume bullet with no digit and none of its cited
+  facts' entities; it does not judge whether a sentence is good.
 - **Which occurrence of a value a claim means.** Numbers match by value against the cited facts,
   not by position. A quantity recorded with a percent unit cannot back a plain count, but a quantity
   recorded with no unit can back either.

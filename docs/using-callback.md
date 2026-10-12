@@ -44,6 +44,7 @@ which only you can run.
 | `callback notes families [--set a,b]` | Shows, or replaces, the role families applications can be sorted into | 0, 3 invalid name |
 | `callback build <resume.yaml> --job <id>` | Renders the PDF and runs every gate, writing to `outputs/<id>/draft/` | 0 pass, 1 warn, 2 fail, 3 could not build |
 | `callback export <resume.yaml>` | Prints the resume as plain text for forms that want it pasted, and checks every critical field survived | 0, 2 if a field was lost, 3 unreadable document |
+| `callback brief show <field>` / `callback brief check <field>` | Prints a field brief's claims and exemplars, refusing one that fails its check; checks a brief's sources, citations and exemplar lengths | `check`: 0 pass, 1 warn, 2 fail, 3 unreadable; `show`: 0, 2 fails its check, 3 |
 | `callback letter <letter.yaml>` | Renders a cover letter and checks it against your facts and the saved posting | 0 pass, 2 fail, 3 could not run |
 | `callback apply <id> --company … --title … --source …` | Builds the application packet from a gated draft and records it. A draft, letter or set of answers checked against facts that have since changed (one confirmed, replaced or retired) is refused until it is built again. Records it with the template it started from, the facts it cites and an optional `--role-family`; `--refresh` rebuilds it after the draft improves, keeping every earlier send and what happened to it. **Never submits** | 0, 3 refused |
 | `callback outcome <id> <kind>` / `callback applications` | Records what happened; lists applications | 0, 3 unreadable record |
@@ -262,6 +263,7 @@ job_id: acme-ml-intern
 company: Acme Robotics
 role: Machine Learning Intern
 greeting: Dear Hiring Team,
+brief: ai-ml-engineering   # optional: the field brief the style check uses
 paragraphs:
 - - {kind: courtesy, text: I am applying for the Machine Learning Intern role at Acme Robotics.}
   - {kind: employer, text: Acme Robotics is building a perception data platform., sources: [posting]}
@@ -292,6 +294,10 @@ Also checked:
   language (salary, compensation, availability, "available to start",
   relocation, visa or sponsorship, start date, notice period, "willing to"),
   or reuses a resume bullet verbatim.
+- Every sentence but a courtesy one from the fixed list is held to the style
+  rules: a stock phrase fails, and so, when the letter names a brief, do that
+  brief's phrases to avoid and six words copied from one of its exemplars (see
+  **Style** below).
 - The PDF is screened for hidden text.
 
 ## Form answers and outreach
@@ -304,6 +310,7 @@ job_id: acme-ml-intern
 company: Acme Robotics
 role: Machine Learning Intern
 candidate_name: Dana Vex
+brief: ai-ml-engineering   # optional, as in a letter
 answers:
 - question: Why are you interested in Acme Robotics?
   max_chars: 400
@@ -370,6 +377,18 @@ recording where a fact came from. Put that text in a file and pass the file's
 path. It guards against accidental writes; it is not a sandbox. A command that builds
 its path at run time is not caught.
 
+**Style** fails a stock phrase from a fixed list ("spearheaded",
+"results-driven", "passionate about"; words that are technical terms in some
+field, such as "leverage", only in the filler phrases listed) and,
+when a document names a brief with `brief: <field>`, that brief's own
+phrases to avoid and any six consecutive words copied from one of its exemplars.
+Words are counted as tokens, so a hyphen, apostrophe or decimal point splits
+one, and a run of six words the cited facts also contain is not copying. A
+brief whose `callback brief check` fails is refused before any document is
+checked against it. Style runs on resume bullets and on every letter,
+form-answer and outreach sentence but a courtesy one from the fixed list, and
+warns on a resume bullet with no digit and none of its cited facts' entities.
+
 **Layout lints** (a bullet over two lines, fewer than 2 or more than 6
 bullets for a role, more pages than your profile allows, a near-empty last
 page) can only warn. They never fail a document. The page limit is one unless
@@ -396,7 +415,7 @@ rewritten from scratch fails even when every entry chains correctly, and
 
 The plugin registers `callback-mcp` (see `.mcp.json`), which serves the same
 checks as tools: `build`, `letter`, `answers`, `outreach`, `facts_add`,
-`facts_list`, `facts_check`, `notes_list`, `notes_propose`, `notes_retire`, `watch`, `triage`, `fit`, `agenda`, `postings_add`, `postings_take`, `postings_resolve`,
+`facts_list`, `facts_check`, `brief`, `notes_list`, `notes_propose`, `notes_retire`, `watch`, `triage`, `fit`, `agenda`, `postings_add`, `postings_take`, `postings_resolve`,
 `applications`, `funnel`, `insights`, `gaps`,
 `eligibility`, `apply`, `interview` and `verify`. Each wraps the function the
 command line calls, so a result is identical whichever way it is reached, and

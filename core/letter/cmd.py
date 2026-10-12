@@ -14,8 +14,10 @@ import json
 import shutil
 import tempfile
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 
+from core.briefs import BriefError, load_checked_brief
 from core.buildcmd import BuildError
 from core.checks.hidden import check_hidden
 from core.draft import LETTER_ARTIFACTS
@@ -62,7 +64,11 @@ def build_letter(path: Path) -> LetterBuild:
     for name in LETTER_ARTIFACTS:
         (out_dir / name).unlink(missing_ok=True)
 
-    result = check_letter(letter, facts, posting, resume_bullets=bullets)
+    try:
+        brief = load_checked_brief(letter.brief, now=datetime.now(tz=UTC)) if letter.brief else None
+    except BriefError as exc:
+        raise BuildError(str(exc)) from exc
+    result = check_letter(letter, facts, posting, resume_bullets=bullets, brief=brief)
     staging = Path(tempfile.mkdtemp(dir=out_dir, prefix=".letter."))
     try:
         staged = staging / "cover-letter.pdf"

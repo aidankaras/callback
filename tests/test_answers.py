@@ -141,3 +141,78 @@ def test_the_answers_name_must_be_the_confirmed_one() -> None:
     )
     found = check_answers(doc, FACTS, POSTING).findings
     assert any("links fact" in f for f in found), found
+
+
+def test_a_stock_phrase_in_an_answer_fails() -> None:
+    filler = Sentence(
+        kind="employer", text="The team is passionate about building robots.", sources=["posting"]
+    )
+    doc = answers({"question": "Why Acme?", "sentences": [filler, CLAIM]})
+    found = check_answers(doc, FACTS, POSTING).findings
+    assert any("stock phrase 'passionate about'" in f for f in found), found
+
+
+@pytest.mark.parametrize("loaded", [None, "quant-research"])
+def test_answers_naming_a_brief_that_was_not_loaded_fail(loaded: str | None) -> None:
+    """Otherwise the copy check and that brief's phrases silently do not run.
+    Mutation: drop the guard -- both pass."""
+    from tests.test_style import BRIEF
+
+    doc = answers({"question": "Why Acme?", "sentences": [WHY, CLAIM]}).model_copy(
+        update={"brief": "ml-research"}
+    )
+    other = None if loaded is None else BRIEF.model_copy(update={"field": loaded})
+    found = check_answers(doc, FACTS, POSTING, brief=other).findings
+    assert found == ("the answers name brief 'ml-research', which was not loaded",)
+    assert (
+        check_answers(
+            doc, FACTS, POSTING, brief=BRIEF.model_copy(update={"field": "ml-research"})
+        ).findings
+        == ()
+    )
+
+
+def _answers_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Path, Path]:
+    import yaml
+
+    from core.paths import ensure_home
+    from core.profile.store import save_facts
+
+    monkeypatch.setenv("CALLBACK_HOME", str(tmp_path / "cb"))
+    home = ensure_home()
+    save_facts(FACTS)
+    (home / "inbox" / "acme-ml-intern.md").write_text(POSTING, encoding="utf-8")
+    doc = answers({"question": "Why Acme?", "sentences": [WHY, CLAIM]})
+    body = {**doc.model_dump(mode="json"), "brief": "ml-research"}
+    source = tmp_path / "answers.yaml"
+    source.write_text(yaml.safe_dump(body), encoding="utf-8")
+    return home, source
+
+
+def test_callback_answers_checks_against_the_brief_it_names(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Mutation: drop `brief=brief` where the command calls `check_answers` --
+    the answers then fail as naming a brief not loaded, not as copying."""
+    from core.answers import build_answers
+    from tests.test_briefs import store_brief
+
+    home, source = _answers_file(tmp_path, monkeypatch)
+    store_brief(home, "ml-research", "I trained a scikit-learn classifier with care.")
+    result, _ = build_answers(source, FACTS)
+    assert result.findings == (
+        "answer 0: sentence 0.1: copies an exemplar of the ml-research brief: "
+        "'i trained a scikit learn classifier'",
+    )
+
+
+def test_callback_answers_refuses_a_brief_that_fails_its_check(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from core.cli import main
+    from tests.test_briefs import SOURCE, store_brief
+
+    home, source = _answers_file(tmp_path, monkeypatch)
+    store_brief(home, "ml-research", sources=[{**SOURCE, "url": "https://www.linkedin.com/x"}])
+    assert main(["answers", str(source)]) == 3
+    assert "source 's1' is on linkedin.com" in capsys.readouterr().err

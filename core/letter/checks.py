@@ -24,8 +24,12 @@ both are printed. The company and role must each equal a segment of the
 posting's first line, not merely occur somewhere in it -- an injected line can
 put any name somewhere in a posting. The letter also fails on more than
 `MAX_WORDS` words, on commitment or negotiation language (which a signed
-letter must not concede and an injected posting would try to insert), and on
-reusing a resume bullet verbatim.
+letter must not concede and an injected posting would try to insert), on
+reusing a resume bullet verbatim. Every sentence but a courtesy one on the
+fixed list also fails on a stock phrase and, when the letter names a field
+brief, on that brief's own phrases and on copying one of its exemplars
+(`core.checks.style`). A letter that names a brief fails unless that brief
+was passed in, so the copy check cannot be skipped by not loading it.
 """
 
 from __future__ import annotations
@@ -36,9 +40,11 @@ from dataclasses import dataclass
 from typing import Literal
 
 from core.aliases import canonicalize
+from core.briefs import Brief
 from core.checks.claims import identity_findings
 from core.checks.grounding import check_bullet, checkable_entity_tokens
 from core.checks.numbers import parse_numbers
+from core.checks.style import text_findings
 from core.letter.models import POSTING, CoverLetter, Sentence
 from core.profile.models import Fact, FactKind, Provenance, Quantity, Trust
 
@@ -58,7 +64,6 @@ EMPLOYER_SUBJECTS = (
 COURTESY = (
     "i am applying for the {role} role at {company}",
     "i am writing to apply for the {role} position at {company}",
-    "i am excited to apply for the {role} role at {company}",
     "thank you for your consideration",
     "thank you for your time and consideration",
     "i look forward to hearing from you",
@@ -158,6 +163,7 @@ class SentenceContext:
     facts: Mapping[str, Fact]
     posting: Fact
     resume_bullets: Sequence[str] = ()
+    brief: Brief | None = None
 
 
 def context_for(
@@ -167,9 +173,12 @@ def context_for(
     facts: Mapping[str, Fact],
     posting: str,
     resume_bullets: Sequence[str] = (),
+    brief: Brief | None = None,
 ) -> SentenceContext:
     reused = [b for b in resume_bullets if len(_norm(b).split()) >= _MIN_REUSED_WORDS]
-    return SentenceContext(company, role, candidate_name, facts, _posting_fact(posting), reused)
+    return SentenceContext(
+        company, role, candidate_name, facts, _posting_fact(posting), reused, brief
+    )
 
 
 def heading_findings(company: str, role: str, posting: str) -> list[str]:
@@ -181,6 +190,15 @@ def heading_findings(company: str, role: str, posting: str) -> list[str]:
         for name, value in (("company", company), ("role", role))
         if _norm(value) not in segments
     ]
+
+
+def brief_findings(subject: str, named: str | None, brief: Brief | None) -> list[str]:
+    """A document that names a brief fails unless that brief was loaded: the
+    copy check and a brief's own phrases run only against a loaded one, so
+    checking without it would read as having passed them."""
+    if named is not None and (brief is None or brief.field != named):
+        return [f"{subject} brief {named!r}, which was not loaded"]
+    return []
 
 
 def question_findings(question: str, ctx: SentenceContext) -> list[str]:
@@ -198,10 +216,17 @@ def question_findings(question: str, ctx: SentenceContext) -> list[str]:
 def check_sentence(label: str, sentence: Sentence, ctx: SentenceContext) -> list[str]:
     """Every rule `sentence` breaks, for its declared kind -- see the module docstring."""
     findings = _kind_findings(label, sentence, ctx)
+    # A courtesy sentence that passed is one of `COURTESY`, so its wording is
+    # fixed, not written: the style check could only fail a sentence the
+    # letter is allowed to use, as when an exemplar happens to contain it.
+    fixed = sentence.kind == "courtesy" and not findings
     if _COMMITMENT.search(sentence.text):
         findings.append(f"sentence {label}: commitment or negotiation language: {sentence.text!r}")
     if any(_norm(b) in _norm(sentence.text) for b in ctx.resume_bullets):
         findings.append(f"sentence {label}: reuses a resume bullet verbatim")
+    if not fixed:
+        own = [ctx.facts[s].text for s in sentence.sources if s != POSTING and s in ctx.facts]
+        findings += text_findings(f"sentence {label}", sentence.text, ctx.brief, own=own)
     return findings
 
 
@@ -249,6 +274,7 @@ def check_letter(
     posting: str,
     *,
     resume_bullets: Sequence[str] = (),
+    brief: Brief | None = None,
 ) -> LetterResult:
     """Every way `letter` fails, given the candidate's facts and the posting text."""
     findings = heading_findings(letter.company, letter.role, posting)
@@ -262,8 +288,9 @@ def check_letter(
         findings.append(f"closing {letter.closing!r} must be one of {sorted(CLOSINGS)}")
 
     findings.extend(identity_findings(letter.identity, facts))
+    findings.extend(brief_findings("the letter names", letter.brief, brief))
     ctx = context_for(
-        letter.company, letter.role, letter.identity.name, facts, posting, resume_bullets
+        letter.company, letter.role, letter.identity.name, facts, posting, resume_bullets, brief
     )
     words = len(letter.greeting.split()) + len(letter.closing.split())
     for label, sentence in letter.sentences:

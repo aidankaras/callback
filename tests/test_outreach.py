@@ -98,3 +98,15 @@ def test_the_candidate_name_must_be_the_confirmed_one() -> None:
     """Mutation: skip the links check -- a different name signs the note."""
     found = check_outreach(note(candidate_name="Dana Vexington"), FACTS, POSTING).findings
     assert any("not an entity of any confirmed links fact" in f for f in found), found
+
+
+def test_a_stock_phrase_in_a_note_fails() -> None:
+    """A note's sentences go through the cover letter's sentence check, the
+    style rules included."""
+    filler = Sentence(
+        kind="candidate",
+        text="I am passionate about scikit-learn classifiers at Northwind Analytics.",
+        sources=["nw", "nw-model"],
+    )
+    found = check_outreach(note("email", filler, ASK), FACTS, POSTING).findings
+    assert "sentence 0.0: stock phrase 'passionate about'" in found, found

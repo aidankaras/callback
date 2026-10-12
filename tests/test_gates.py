@@ -46,9 +46,13 @@ FACTS = {
                 kind=FactKind.EXPERIENCE_DETAIL,
                 parent="role",
                 text=text,
+                entities=[entity],
                 provenance=CONFIRMED,
             )
-            for fid, text in (("loader", "Shipped the loader"), ("runbook", "Wrote the runbook"))
+            for fid, text, entity in (
+                ("loader", "Shipped the Airflow loader", "Airflow"),
+                ("runbook", "Wrote the Terraform runbook", "Terraform"),
+            )
         ),
         Fact(
             id="contact",
@@ -68,8 +72,8 @@ _NOT_SHOWN = (
 
 # Two more grounded bullets, so a clean document meets the two-per-role floor.
 EXTRA_BULLETS = [
-    Bullet(text="Shipped the loader", sources=["loader"]),
-    Bullet(text="Wrote the runbook", sources=["runbook"]),
+    Bullet(text="Shipped the Airflow loader", sources=["loader"]),
+    Bullet(text="Wrote the Terraform runbook", sources=["runbook"]),
 ]
 
 

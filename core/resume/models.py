@@ -214,3 +214,4 @@ class ResumeDoc(BaseModel):
 
     identity: Identity
     sections: list[Section] = Field(default_factory=list[Section])
+    brief: str | None = Field(default=None, pattern=r"^[a-z0-9][a-z0-9-]{0,63}$")
