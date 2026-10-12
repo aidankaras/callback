@@ -379,7 +379,7 @@ its path at run time is not caught.
 
 **Style** fails a stock phrase from a fixed list ("spearheaded",
 "results-driven", "passionate about"; words that are technical terms in some
-field, such as "leverage" or "robust", only in the filler phrases listed) and,
+field, such as "leverage", only in the filler phrases listed) and,
 when a document names a brief with `brief: <field>`, that brief's own
 phrases to avoid and any six consecutive words copied from one of its exemplars.
 Words are counted as tokens, so a hyphen, apostrophe or decimal point splits
