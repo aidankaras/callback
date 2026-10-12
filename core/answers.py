@@ -37,7 +37,6 @@ from core.letter.checks import (
 from core.letter.models import Sentence
 from core.paths import private_dir, resolve_inside, write_private
 from core.profile.models import Fact
-from core.profile.store import facts_sha256
 from core.resume.io import DocumentError, load_doc
 
 
@@ -126,8 +125,14 @@ class AnswersError(ValueError):
     """Answers that could not be checked: an unreadable file or no saved posting."""
 
 
-def build_answers(path: Path, facts: Mapping[str, Fact]) -> tuple[AnswersResult, Path]:
-    """Check the answers at `path` and write them, paste-ready, to the job's draft."""
+def build_answers(
+    path: Path, facts: Mapping[str, Fact], judged: str | None
+) -> tuple[AnswersResult, Path]:
+    """Check the answers at `path` and write them, paste-ready, to the job's draft.
+
+    `judged` is the fact-store hash taken before `facts` were loaded (see
+    `load_facts_judged`), recorded so a stale draft is refused at apply.
+    """
     try:
         doc = AnswerSet.model_validate(yaml.safe_load(path.read_text(encoding="utf-8")))
     except (OSError, yaml.YAMLError, ValidationError) as exc:
@@ -155,7 +160,7 @@ def build_answers(path: Path, facts: Mapping[str, Fact]) -> tuple[AnswersResult,
     record = {
         "verdict": result.verdict,
         "sha256": hashlib.sha256(rendered.encode("utf-8")).hexdigest(),
-        "facts_sha256": facts_sha256(),
+        "facts_sha256": judged,
         "findings": list(result.findings),
     }
     write_private(out_dir / "answers-report.json", json.dumps(record, indent=2) + "\n")

@@ -25,7 +25,7 @@ from core.letter.checks import check_letter
 from core.letter.io import parse_letter
 from core.letter.render import render_letter
 from core.paths import private_dir, resolve_inside, write_private, write_private_bytes
-from core.profile.store import facts_sha256, load_facts
+from core.profile.store import load_facts_judged
 from core.render.typst import RenderError
 from core.resume.io import DocumentError, load_doc
 
@@ -50,7 +50,7 @@ def build_letter(path: Path) -> LetterBuild:
             "the letter's company, role and claims about the job are checked against it"
         )
     posting = posting_path.read_text(encoding="utf-8")
-    facts = load_facts()
+    facts, judged = load_facts_judged()
 
     out_dir = private_dir(f"outputs/{letter.job_id}/draft")
     resume_path = out_dir / "resume.yaml"
@@ -89,7 +89,7 @@ def build_letter(path: Path) -> LetterBuild:
     record = {
         "verdict": "fail" if findings else "pass",
         "pdf_sha256": hashlib.sha256(pdf_bytes).hexdigest(),
-        "facts_sha256": facts_sha256(),
+        "facts_sha256": judged,
         "findings": list(findings),
     }
     write_private(out_dir / "letter-report.json", json.dumps(record, indent=2) + "\n")

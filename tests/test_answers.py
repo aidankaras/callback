@@ -199,7 +199,7 @@ def test_callback_answers_checks_against_the_brief_it_names(
 
     home, source = _answers_file(tmp_path, monkeypatch)
     store_brief(home, "ml-research", "I trained a scikit-learn classifier with care.")
-    result, _ = build_answers(source, FACTS)
+    result, _ = build_answers(source, FACTS, None)
     assert result.findings == (
         "answer 0: sentence 0.1: copies an exemplar of the ml-research brief: "
         "'i trained a scikit learn classifier'",

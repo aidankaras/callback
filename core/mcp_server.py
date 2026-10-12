@@ -233,9 +233,9 @@ def letter(doc_path: str) -> dict[str, object]:
 def answers(doc_path: str) -> dict[str, object]:
     """Check free-text application-form answers and write them ready to paste."""
     from core.answers import build_answers
-    from core.profile.store import load_facts
+    from core.profile.store import load_facts_judged
 
-    result, out_dir = build_answers(Path(doc_path), load_facts())
+    result, out_dir = build_answers(Path(doc_path), *load_facts_judged())
     return {
         "verdict": result.verdict,
         "file": str(out_dir / "answers.md"),
