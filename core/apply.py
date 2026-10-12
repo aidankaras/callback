@@ -77,8 +77,20 @@ def _norm_name(value: str) -> str:
     return " ".join(words)
 
 
-def _norm_url(url: str) -> str:
-    return url.strip().casefold().rstrip("/").removeprefix("https://").removeprefix("http://")
+def _url_key(url: str) -> str:
+    """`url` as two spellings of one page compare: no fragment, case-folded
+    throughout, every trailing slash and an http(s) scheme dropped, the query
+    kept, since a Greenhouse job is told apart only by its `?gh_jid=`.
+
+    Looser than the form a hand-added posting is stored under: a variant
+    spelling of a page already applied to must not read as another posting."""
+    page = url.strip().split("#", 1)[0].casefold().rstrip("/")
+    return page.removeprefix("https://").removeprefix("http://")
+
+
+def same_url(a: str, b: str) -> bool:
+    """Whether two URLs name one page: see `_url_key`."""
+    return _url_key(a) == _url_key(b)
 
 
 class Target(BaseModel):
@@ -101,7 +113,7 @@ class Target(BaseModel):
         and a parenthetical ("(Summer 2027)"), and a blank location matches
         any: a variant spelling must not reopen a posting already applied to.
         """
-        if self.url and other.url and _norm_url(self.url) == _norm_url(other.url):
+        if self.url and other.url and same_url(self.url, other.url):
             return True
         same_location = (
             not self.location

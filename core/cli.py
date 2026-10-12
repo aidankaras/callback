@@ -71,6 +71,25 @@ def build_parser() -> argparse.ArgumentParser:
     p_resolve.add_argument("url")
     p_resolve.add_argument("--company", required=True)
     p_resolve.set_defaults(handler=_cmd_postings_resolve)
+    p_add = postings_sub.add_parser(
+        "add", help="store a posting no watch can read, such as a research programme"
+    )
+    p_add.add_argument("--company", required=True)
+    p_add.add_argument("--title", required=True)
+    p_add.add_argument("--url", required=True)
+    p_add.add_argument("--text-file", required=True, type=Path, help="the posting's text")
+    p_add.add_argument(
+        "--deadline",
+        help="YYYY-MM-DD (23:59 local time) or an ISO date and time; "
+        "a re-add keeps the deadline unless a new one is given",
+    )
+    p_add.add_argument(
+        "--location",
+        default="",
+        help="where the role is, which a city tier reads; a re-add keeps it unless a new one "
+        "is given",
+    )
+    p_add.set_defaults(handler=_cmd_postings_add)
     p_take = postings_sub.add_parser("take", help="save a posting as the posting for a job")
     p_take.add_argument("posting_id")
     p_take.add_argument("--job", required=True)
@@ -87,9 +106,17 @@ def build_parser() -> argparse.ArgumentParser:
         "--degree", choices=["high school", "associate", "bachelor", "master", "phd"]
     )
     profile.add_argument("--pages", type=int, help="how many pages a resume may run to (default 1)")
+    profile.add_argument(
+        "--seasons", help='terms you can intern in, comma-separated, e.g. "summer"'
+    )
+    profile.add_argument("--max-weeks", type=int, help="the longest internship you can take")
     profile.set_defaults(handler=_cmd_profile)
 
-    triage = sub.add_parser("triage", help="rank stored postings: eligibility, evidence, freshness")
+    triage = sub.add_parser(
+        "triage",
+        help="rank stored postings: knockouts last whatever their tier, then by your priority "
+        "tiers, then by evidenced technologies and freshness",
+    )
     triage.add_argument(
         "--days", type=int, default=None, help="only postings first seen this recently"
     )
@@ -441,6 +468,35 @@ def _cmd_postings_resolve(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_postings_add(args: argparse.Namespace) -> int:
+    from datetime import UTC, datetime
+
+    from core.discovery.store import add_manual, parse_deadline
+    from core.paths import ensure_home
+
+    ensure_home()
+    try:
+        deadline = parse_deadline(args.deadline) if args.deadline else None
+        text = cast("Path", args.text_file).read_text(encoding="utf-8")
+        now = datetime.now(tz=UTC)
+        found = add_manual(
+            args.company, args.title, args.url, text, deadline, now=now, location=args.location
+        )
+    except (*_discovery_errors(), UnicodeDecodeError) as exc:
+        print(f"callback postings add: {exc}", file=sys.stderr)
+        return 3
+    print(f"{found.id}  {found.company} / {found.title}")
+    if found.deadline is not None:
+        print(f"deadline {found.deadline.isoformat()}")
+        if found.deadline < now:
+            print(
+                f"callback postings add: warning: the deadline {found.deadline.isoformat()} "
+                "has already passed; the agenda lists a deadline for only 7 days after it passes",
+                file=sys.stderr,
+            )
+    return 0
+
+
 def _cmd_postings_take(args: argparse.Namespace) -> int:
     from core.discovery.store import take
 
@@ -467,6 +523,14 @@ def _cmd_profile(args: argparse.Namespace) -> int:
                 ("graduation", args.graduation),
                 ("degree", args.degree),
                 ("resume_pages", args.pages),
+                # An empty list clears them: `--seasons ""`.
+                (
+                    "seasons",
+                    None
+                    if args.seasons is None
+                    else [s.strip() for s in args.seasons.split(",") if s.strip()],
+                ),
+                ("max_weeks", args.max_weeks),
             )
             if v is not None
         }
@@ -477,6 +541,10 @@ def _cmd_profile(args: argparse.Namespace) -> int:
         print(f"callback profile: {exc}", file=sys.stderr)
         return 3
     for key, value in profile.model_dump().items():
+        if key == "tiers":
+            value = ", ".join(t.name for t in profile.tiers) or None
+        elif key == "seasons":
+            value = ", ".join(profile.seasons) or None
         print(f"{key:<20} {value if value is not None else '(not set)'}")
     return 0
 
@@ -495,7 +563,7 @@ def _cmd_triage(args: argparse.Namespace) -> int:
 
     from core.discovery.store import load_postings
     from core.profile.store import StoreError, load_facts
-    from core.triage import load_profile, rank
+    from core.triage import OTHER_TIER, load_profile, rank
 
     now = datetime.now(tz=UTC)
     try:
@@ -507,10 +575,15 @@ def _cmd_triage(args: argparse.Namespace) -> int:
         return 3
     if args.days is not None:
         postings = [p for p in postings if now - p.first_seen <= timedelta(days=args.days)]
+    width = max((len(t.name) for t in profile.tiers), default=0)
+    width = max(width, len(OTHER_TIER)) if profile.tiers else 0
     for r in rank(postings, profile, facts, now=now)[: args.limit]:
         have, missing = r.coverage
+        # The tier is the first thing the order is decided by, so it is shown
+        # first; with no tiers set the output is as it always was.
+        tier = f"{r.tier:<{width}}  " if profile.tiers else ""
         print(
-            f"{r.score:>6.2f}  {r.eligibility.verdict:<9} {r.age_days:>3}d  "
+            f"{tier}{r.score:>6.2f}  {r.eligibility.verdict:<9} {r.age_days:>3}d  "
             f"{r.posting.company} / {r.posting.title}  [{r.posting.id}]"
         )
         if have or missing:

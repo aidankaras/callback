@@ -24,10 +24,11 @@ type the way `core.profile.store` does.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import date, datetime, time
 from pathlib import Path
 from typing import Protocol, cast
 from urllib.parse import urlsplit
@@ -43,7 +44,7 @@ from core.discovery.ats import (
     resolve_url,
 )
 from core.discovery.fetch import DiscoveryError, Fetcher, denied_domain
-from core.discovery.models import Ats, Posting
+from core.discovery.models import Ats, Posting, normal_url
 from core.paths import resolve_inside, write_private
 
 TARGETS_FILE = "targets.yaml"
@@ -287,6 +288,105 @@ def resolve(
         if posting.id == wanted:
             return _store(posting, now)
     raise DiscoveryError(f"{url} is not on {company}'s {ats} board any more")
+
+
+def parse_deadline(value: str) -> datetime:
+    """A deadline as a person types it: `YYYY-MM-DD` is 23:59 that day, and an
+    ISO date and time without an offset is read, in this machine's timezone.
+
+    The zone is the one in force on that date, not today's: a deadline set in
+    October for 30 November in New York is -05:00, not October's -04:00.
+    `astimezone()` resolves the offset per instant: a time skipped by a
+    spring-forward change moves an hour later, and a repeated time takes the
+    first, daylight-saving offset. The result is a fixed offset, not a named
+    zone."""
+    text = value.strip()
+    try:
+        if re.fullmatch(r"\d{4}-\d{2}-\d{2}", text):
+            moment = datetime.combine(date.fromisoformat(text), time(23, 59))
+        elif re.match(r"\d{4}-\d{2}-\d{2}[T ]\d", text):
+            moment = datetime.fromisoformat(text)
+        else:
+            raise ValueError(text)
+    except ValueError as exc:
+        raise DiscoveryError(
+            f"deadline {value!r} is not YYYY-MM-DD or an ISO date and time"
+        ) from exc
+    return moment if moment.tzinfo is not None else moment.astimezone()
+
+
+def _normal_url(url: str) -> str:
+    """`normal_url` of an http(s) URL, refusing anything else."""
+    try:
+        parts = urlsplit(url.strip())
+        parts.port  # noqa: B018 -- reading it is what rejects a malformed port
+    except ValueError as exc:
+        raise DiscoveryError(f"{url!r} is not a URL: {exc}") from exc
+    if parts.scheme.lower() not in {"http", "https"} or not parts.netloc:
+        raise DiscoveryError(f"{url!r} is not an http(s) URL")
+    return normal_url(url)
+
+
+def _same_page(stored: str, url: str) -> bool:
+    """Whether a stored URL, which may have been edited by hand, is `url`'s page."""
+    try:
+        return _normal_url(stored) == url
+    except DiscoveryError:
+        return False
+
+
+def add_manual(
+    company: str,
+    title: str,
+    url: str,
+    text: str,
+    deadline: datetime | None,
+    *,
+    now: datetime,
+    location: str = "",
+) -> Found:
+    """Store a posting no watch can read -- a research programme, a careers page
+    with no structured data -- from the text the candidate saw on it.
+
+    Its id is `manual:<company slug>:<8 hex of the URL's sha256>`. The URL is
+    what identifies it: adding the same URL again, under any spelling of the
+    company, replaces the text and keeps the id and `first_seen`, and keeps the
+    location unless a new one is given. It keeps the deadline too, unless a new one is given or
+    the old one has passed by `now`: a programme that reuses its URL each year would otherwise
+    carry last cycle's deadline and drop off the agenda. `location` is what a city
+    tier reads, since a hand-added posting has no other. No watch fetches it,
+    and a watch only ever adds to the store, so it stays, provided no watch is
+    running at the same moment: a watch saves the store it loaded, so a posting
+    added while one runs is lost."""
+    if not (company.strip() and title.strip() and text.strip()):
+        raise DiscoveryError("a posting needs a company, a title and its text")
+    url = _normal_url(url)
+    slug = re.sub(r"[^a-z0-9]+", "-", company.casefold()).strip("-")[:40].strip("-") or "posting"
+    stored = load_postings()
+    previous = next(
+        (p for p in stored.values() if p.ats == "manual" and _same_page(p.url, url)), None
+    )
+    kept_deadline = (
+        previous.deadline if previous and previous.deadline and previous.deadline > now else None
+    )
+    posting_id = (
+        previous.id if previous else f"manual:{slug}:{hashlib.sha256(url.encode()).hexdigest()[:8]}"
+    )
+    found = Found(
+        id=posting_id,
+        ats="manual",
+        board=previous.board if previous else slug,
+        company=company.strip(),
+        title=title.strip(),
+        location=location.strip() or (previous.location if previous else ""),
+        url=url,
+        text=text,
+        deadline=deadline if deadline is not None else kept_deadline,
+        first_seen=previous.first_seen if previous else now,
+    )
+    stored[posting_id] = found
+    _save_postings(stored)
+    return found
 
 
 def take(posting_id: str, job_id: str) -> Path:

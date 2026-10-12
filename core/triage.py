@@ -44,16 +44,16 @@ from __future__ import annotations
 import html
 import re
 from collections.abc import Iterable, Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime
-from typing import Literal
+from typing import Annotated, Literal
 
 import yaml
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, Field, StringConstraints, ValidationError, model_validator
 
 from core.aliases import ALIAS_TABLE, canonicalize
 from core.checks.grounding import checkable_entity_tokens, iso_month_dates
-from core.discovery.store import Found
+from core.discovery.store import Criteria, Found
 from core.paths import resolve_inside, write_private
 from core.profile.models import Fact
 
@@ -61,6 +61,7 @@ PROFILE_FILE = "profile.yaml"
 Level = Literal["knockout", "unknown", "stretch"]
 _SEVERITY: dict[Level, int] = {"knockout": 0, "unknown": 1, "stretch": 2}
 DegreeLevel = Literal["high school", "associate", "bachelor", "master", "phd"]
+Season = Literal["summer", "fall", "winter", "spring"]
 FRESH_DAYS = 30
 STRETCH_YEARS = 2
 COVERAGE_PRIOR = 2
@@ -96,6 +97,15 @@ _GRADUATION = re.compile(r"\bgraduat\w*\b|\bclass of 20\d\d\b", re.IGNORECASE)
 _GRAD_YEAR = re.compile(
     r"\bclass of\s+(20\d\d)\b"
     r"|\bgraduat\w+\s+(?:in|by|before|after|during|no later than)?\s*(20\d\d)\b",
+    re.IGNORECASE,
+)
+# A graduation date naming seasons ("a graduation date in Fall 2027 or Spring
+# 2028", "graduate between Winter 2027 and Summer 2028"): a graduation word
+# joined to the seasons only by date words. "Graduate students" and "recent
+# graduates" name people, not a date, so a season after them is still a term.
+_GRAD_DATE = re.compile(
+    r"\bgraduat\w*(?:[\s,/:\u2013-]+(?:in|by|between|from|dates?|of|and|or|the|before|after"
+    r"|during|until|to|expected|summer|fall|autumn|winter|spring|20\d\d|'\d\d)\b)+",
     re.IGNORECASE,
 )
 _BETWEEN = re.compile(r"\bbetween\b", re.IGNORECASE)
@@ -164,6 +174,169 @@ _YEARS = re.compile(
 )
 _NEEDS_SPONSORSHIP = re.compile(r"\b(?:f-?1|opt|h-?1b|visa|sponsor\w*|work permit)\b", re.I)
 _DEGREE_RANK = {"high school": 0, "associate": 1, "bachelor": 2, "master": 3, "phd": 4}
+_SEASON_WORD = r"(?:summer|fall|autumn|winter|spring)"
+_SEASON_GROUP = re.compile(
+    rf"\b{_SEASON_WORD}(?:\s*(?:/|,|&|\bor\b|\band\b|[-\u2013])\s*{_SEASON_WORD})*\b", re.I
+)
+# A season word names a term only beside something that makes it one -- a
+# year, a term word, or a bracket holding nothing else -- so "Fall Risk
+# Analytics", "Spring Street", "(Spring Boot)" and "(Java/Spring)" do not,
+# while "Winter/Spring 2027" and "(Summer or Winter)" do.
+_TERM_AFTER = re.compile(
+    r"\s*(?:20\d\d\b|'\d\d\b|semesters?\b|terms?\b|sessions?\b|cycles?\b|cohorts?\b"
+    r"|intern\w*|co-?ops?\b|placements?\b|analysts?\b)",
+    re.I,
+)
+_TERM_BEFORE = re.compile(r"\b20\d\d\s*$")
+_OFF_CYCLE = re.compile(r"\boff[\s-]?cycle\b|\bco-?op\b", re.I)
+# A decimal is read whole: without it, `\b` finds "5 months" in "2.5 months".
+_NUMBER = r"\d{1,3}(?:\.\d+)?|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve"
+_NUMBER_WORDS = {w: n for n, w in enumerate(_NUMBER.split("|")[1:], start=1)}
+_DURATION = re.compile(
+    rf"\b(?P<lo>{_NUMBER})(?:\s*(?:-|\u2013|\u2014|to|and|or)\s*(?P<hi>{_NUMBER}))?"
+    r"[\s-]*(?P<unit>weeks?|months?)\b",
+    re.I,
+)
+# A length is the role's only when the sentence attributes it to the role, not
+# when it merely sits near a role word: "a 24-week internship" and "the
+# internship runs 6 months" state one; "6 months of Python experience", "a
+# 1-week orientation program" and "a 24-month master's program" do not. This
+# reading decides a knockout only; the downgrade a fitting length gives reads
+# far more loosely (`_fitting_length`), because the two errors cost differently.
+_ROLE_NOUN = r"(?:internships?|co-?ops?|placements?|fellowships?)"
+_PROGRAM = r"(?:programmes?|programs?)"
+# The length names the role: "a 24-week internship", "a six-month-long
+# internship", "a 6-month full-time paid internship". The words between are
+# modifiers, so a preposition, article or pronoun there ends it ("6 months of
+# internship experience", "2 weeks before internship start"). A role word
+# followed by one of `_ADJUNCT` modifies that noun instead ("6 months
+# internship experience"). "intern" counts only in "intern program", so "a
+# 1-week intern bootcamp" is not the role. "program" alone counts only straight
+# after the length: after a modifier it is often a degree or an orientation.
+_NOT_A_MODIFIER = (
+    r"of|before|after|within|prior|post|from|for|in|at|to|into|since|until|ago|by|on|per"
+    r"|than|with|without|as|the|a|an|and|or|is|are|was|will|you|we|our|your|their|its"
+    r"|which|that|who|where|most|many|all|some|every|each|any|no|several|few|these|those|this"
+)
+_ADJUNCT = (
+    r"experience|completion|interviews?|applications?|offers?|orientation|onboarding"
+    r"|training|bootcamp|alumni|credits?"
+)
+_MODIFIER = rf"\s+(?!(?:{_NOT_A_MODIFIER})\b)[\w'-]+"
+# A comma after the length lists a modifier ("a 6 month, full-time
+# internship"); with none after it, it ends a clause ("After 6 months,
+# internship participants receive a review").
+_LENGTH_NAMES_ROLE = re.compile(
+    rf"(?:[\s-]long)?(?:,(?:{_MODIFIER}){{1,3}}|(?:{_MODIFIER}){{0,3}})"
+    rf"\s+(?:{_ROLE_NOUN}|intern\s+{_PROGRAM})\b(?!\s+(?:{_ADJUNCT})\b)"
+    rf"|\s+{_PROGRAM}\b",
+    re.I,
+)
+_HEDGE_WORDS = r"up to|typically|usually|approximately|about|around|roughly|between"
+# The role is the subject and the length its predicate: "the internship will
+# be 10 weeks", "internships are offered for 6 months", "the internship lasts a
+# minimum of 6 months", "Internship (6 months)", "Duration of internship - 24
+# weeks", or a line opening "Duration:". Only the words in `_LINK_WORDS` may
+# come between, and a hedge among them makes the length a stretch. "interns"
+# is never the subject: "the notice period for interns is 2 weeks" and "our
+# interns are 6 months from graduation" are lengths of something else.
+_LINK_WORDS = (
+    rf"{_HEDGE_WORDS}|at least|will|would|can|may|be|is|are|runs?|running|lasts?|lasting"
+    r"|spans?|spanning|takes?|place|scheduled|offered|for|over|of|from|a|the|full|minimum"
+    r"|period"
+)
+# A label opens a line, after any list marker or bold ("- Duration:",
+# "**Duration:**", "• Duration:"), or follows a " | " in a line of fields
+# ("Location: London | Duration: 10 weeks").
+_LABEL_START = r"(?:^|\|)[\s*\u2022-]*"
+_ROLE_RUNS = re.compile(
+    r"(?:(?P<prev>[\w'-]+)\s+)??"
+    r"(?P<role>\b(?:(?:(?:duration|length)\s+of\s+(?:the\s+|this\s+|your\s+|an?\s+)?)?"
+    rf"(?:{_ROLE_NOUN}(?:\s+{_PROGRAM})?|intern\s+{_PROGRAM})"
+    rf"|(?P<bare>{_PROGRAM}))|(?P<label>{_LABEL_START}(?:duration|length)\b\**))"
+    r"(?:\s+(?:period|length|duration|term|contract))?"
+    rf"(?P<tail>(?:\s*[:(,]\**|\s+[-\u2013\u2014])?(?:\s+(?:{_LINK_WORDS})\b)*)\s*$",
+    re.I,
+)
+# A role word after one of these is not the subject: "prior internships of 6
+# months", "the notice period for internships is 2 weeks".
+_NOT_THE_SUBJECT = (
+    r"for|to|as|of|with|from|in|during|after|before|than|about|prior|previous|past|former"
+)
+# A bare "program" is the role only after an article or a season: "the
+# programme runs six months", "our summer program", but not "our graduate
+# program is 24 months" or "our rotational program runs 18 months".
+_PROGRAM_OWNERS = r"the|this|our|a|an|each|your|summer|winter|fall|autumn|spring"
+# "You have completed an internship of at least 6 months", "Prior experience:
+# an internship lasting 6 months": the candidate's past role, not this one.
+_CANDIDATE_HISTORY = re.compile(
+    r"\b(?:(?:have|has|had|having)\s+(?:\w+\s+)?(?:completed|done|undertaken|finished)"
+    r"|prior|previous)\b\W+(?:[\w'-]+\W+){0,6}$",
+    re.I,
+)
+# A "Duration:" line's length must end its value: "Duration: 12 months after
+# graduation" and "Duration: 2 weeks per rotation" measure something else.
+_VALUE_ENDS = re.compile(r"\s*(?:[,;().\u2013\u2014-]|$)")
+# "The internship takes 2 weeks to set up": a length of a task, not the role.
+_LENGTH_FOR_A_TASK = re.compile(r"\s+to\b", re.I)
+_LENGTH_HEDGE = re.compile(rf"\b(?:{_HEDGE_WORDS})\b", re.I)
+# Any role word, for the downgrade only: "interns" and a bare "program" count here.
+_ROLE_WORD = re.compile(
+    r"\b(?:intern(?:ship)?s?|programmes?|programs?|co-?ops?|placements?|fellowships?)\b", re.I
+)
+_LENGTH_LABEL = re.compile(rf"{_LABEL_START}(?:duration|length|period)\b", re.I)
+# A clause ends at "." or ";" before a space; not at a decimal point, and not
+# at ":", which would leave "Paid time off for interns: 2 weeks" as "2 weeks".
+_CLAUSE_END = re.compile(r"[.;](?=\s|$)")
+# How far a run-on clause is quoted either side of a fitting length, and so how
+# far its role word may sit from it.
+_QUOTE_REACH = 50
+_WEEKS_PER_MONTH = 52 / 12
+
+
+class Tier(BaseModel):
+    """A band of postings the candidate ranks above every posting in a later one.
+
+    A posting belongs to the first tier whose `criteria` match
+    `"<company> | <title> | <location>"`, so a tier can name a city as well as
+    a kind of role. The line includes the company, so a short include term can
+    place a posting through its company name ("AI Corp | Accountant" lands in
+    an `ai` tier); a tier `exclude` is the remedy. `prefer` uses the same term
+    syntax and orders postings inside the tier, ahead of the score."""
+
+    model_config = {"extra": "forbid", "frozen": True}
+
+    # Stripped before the reserved-name and uniqueness checks see it, so " other "
+    # and "ai " are the names they look like.
+    name: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=40)]
+    criteria: Criteria
+    prefer: tuple[str, ...] = ()
+
+    @model_validator(mode="after")
+    def _terms_can_match(self) -> Tier:
+        """A term with no word character cannot do what it says, so it is refused.
+        A blank or `*` term is skipped by `Criteria` and matches nothing, which
+        leaves an `include` or `require` of only such terms matching no posting;
+        punctuation such as `|` matches the " | " separators every tier line
+        holds, so it matches every posting, and as an `exclude` it empties the
+        tier. Either way the tier's postings land somewhere else silently."""
+        if self.name.casefold() == OTHER_TIER:
+            raise ValueError(f"tier name {OTHER_TIER!r} is reserved for postings in no tier")
+        for where, terms in (
+            ("include", self.criteria.include),
+            ("require", self.criteria.require),
+            ("exclude", self.criteria.exclude),
+            ("prefer", self.prefer),
+        ):
+            for term in terms:
+                if not re.search(r"\w", term):
+                    raise ValueError(
+                        f"tier {self.name!r}: {where} term {term!r} has no letter or digit"
+                    )
+        return self
+
+
+OTHER_TIER = "other"
 
 
 class Profile(BaseModel):
@@ -182,6 +355,17 @@ class Profile(BaseModel):
     graduation: str | None = None
     degree: DegreeLevel | None = None
     resume_pages: int = Field(default=1, ge=1, le=10)
+    seasons: tuple[Season, ...] = ()
+    # Strict, so a YAML `true` is refused rather than read as 1 week.
+    max_weeks: int | None = Field(default=None, ge=1, le=104, strict=True)
+    tiers: tuple[Tier, ...] = ()
+
+    @model_validator(mode="after")
+    def _tier_names_unique(self) -> Profile:
+        names = [t.name.casefold() for t in self.tiers]
+        if len(set(names)) != len(names):
+            raise ValueError("tier names must be unique (compared without case)")
+        return self
 
 
 @dataclass(frozen=True)
@@ -288,8 +472,130 @@ def _refuses(sentence: str) -> bool:
     )
 
 
-def check_eligibility(text: str, profile: Profile) -> Eligibility:
-    """Every eligibility requirement `text` states, judged against `profile`."""
+def _season_terms(text: str) -> list[tuple[int, frozenset[str]]]:
+    """Each run of seasons `text` names as a term, as its offset and the seasons in it."""
+    terms: list[tuple[int, frozenset[str]]] = []
+    for match in _SEASON_GROUP.finditer(text):
+        before, after = text[: match.start()], text[match.end() :]
+        bracketed = before.rstrip().endswith("(") and after.lstrip().startswith(")")
+        if bracketed or _TERM_AFTER.match(after) or _TERM_BEFORE.search(before):
+            words = {w.casefold() for w in re.findall(_SEASON_WORD, match.group(0), re.I)}
+            terms.append((match.start(), frozenset("fall" if w == "autumn" else w for w in words)))
+    return terms
+
+
+def _weeks(number: str, unit: str) -> float:
+    n = float(number) if number[0].isdigit() else _NUMBER_WORDS[number.casefold()]
+    return n * _WEEKS_PER_MONTH if unit.casefold().startswith("month") else n
+
+
+def _role_link(before: str, after: str) -> re.Match[str] | None:
+    """The role subject and the words linking it to a length between `before`
+    and `after` (groups `role`/`label` and `tail`), or None when `before` does
+    not end in a role subject and a link."""
+    runs = _ROLE_RUNS.search(before)
+    if runs is None or not runs.group("tail").strip() or _LENGTH_FOR_A_TASK.match(after):
+        return None
+    if runs.group("label"):
+        return runs if _VALUE_ENDS.match(after) else None
+    prev = runs.group("prev") or ""
+    if runs.group("bare"):
+        owned = not prev or re.fullmatch(_PROGRAM_OWNERS, prev, re.I)
+        return runs if owned else None
+    return None if re.fullmatch(_NOT_THE_SUBJECT, prev, re.I) else runs
+
+
+def _role_lengths(sentence: str) -> list[tuple[float, float, bool, str]]:
+    """Each length `sentence` attributes to the role, as `(low, high, hedged,
+    quote)`, the bounds in weeks and the quote running from the role word (or
+    label) to the length, or from the length to the role noun it names."""
+    lengths: list[tuple[float, float, bool, str]] = []
+    for m in _DURATION.finditer(sentence):
+        before = sentence[: m.start()]
+        if _CANDIDATE_HISTORY.search(before):
+            continue
+        link = _role_link(before, sentence[m.end() :])
+        names = _LENGTH_NAMES_ROLE.match(sentence, m.end())
+        if link is None and not names:
+            continue
+        low = _weeks(m.group("lo"), m.group("unit"))
+        high = _weeks(m.group("hi"), m.group("unit")) if m.group("hi") else low
+        if link is not None:
+            hedged = _LENGTH_HEDGE.search(link.group("tail")) is not None
+        else:
+            # Attributed by the noun after it ("up to 24-week internships"),
+            # a length is hedged by a hedge before it in its own clause.
+            left, _ = _clause_around(sentence, m.start(), m.end())
+            hedged = _LENGTH_HEDGE.search(sentence, left, m.start()) is not None
+        if link is not None:
+            quote = sentence[
+                link.start("role") if link.group("role") else link.start("label") : m.end()
+            ]
+        else:
+            quote = sentence[m.start() : names.end() if names else m.end()]
+        lengths.append((low, high, hedged, quote.strip(" |*\u2022-")))
+    return lengths
+
+
+def _clause_around(sentence: str, start: int, end: int) -> tuple[int, int]:
+    """The bounds of the clause holding `sentence[start:end]`, cut to
+    `_QUOTE_REACH` characters either side of it, at a space, if it runs on."""
+    left = max((m.end() for m in _CLAUSE_END.finditer(sentence, 0, start)), default=0)
+    after = _CLAUSE_END.search(sentence, end)
+    right = after.start() if after else len(sentence)
+    if start - left > _QUOTE_REACH:
+        cut = sentence.find(" ", start - _QUOTE_REACH, start)
+        left = cut + 1 if cut != -1 else start
+    if right - end > _QUOTE_REACH:
+        cut = sentence.rfind(" ", end, end + _QUOTE_REACH)
+        right = cut if cut != -1 else end
+    return left, right
+
+
+def _fitting_length(sentence: str, max_weeks: int) -> str | None:
+    """The clause around the first length within `max_weeks` whose clause also
+    names a role word, or which a sentence-initial "Duration"/"Length"/"Period"
+    label opens; None when there is none.
+
+    Deliberately loose. A false fitting length only turns a duration knockout
+    into a stretch whose reason quotes this clause, so the posting stays
+    visible and the reader can see what was read; a missed one leaves the
+    knockout standing and hides the posting. So none of `_role_lengths`'
+    attribution checks apply: "Interns receive 2 weeks of paid time off" counts
+    as fitting, as does "Duration: 10 weeks starting June". The role word must
+    sit inside the quoted clause, so tag-stripped HTML that reads as one long
+    sentence does not let a role word anywhere vouch for a length anywhere.
+
+    Every fitting length `_role_lengths` reads counts too, quoted from its role
+    word: a role word more than `_QUOTE_REACH` characters before its length
+    ("The internship is typically offered for a period of about 10 weeks") is
+    outside the clause quoted here, and a reader looser than the knockout
+    reader must not miss what the knockout reader sees."""
+    for m in _DURATION.finditer(sentence):
+        if _weeks(m.group("hi") or m.group("lo"), m.group("unit")) > max_weeks:
+            continue
+        left, right = _clause_around(sentence, m.start(), m.end())
+        # `^` in the label matches only at the true start, so only a clause
+        # opening the sentence can open with one; a " | " label may sit anywhere in it.
+        if _ROLE_WORD.search(sentence, left, right) or _LENGTH_LABEL.search(
+            sentence, left, m.start()
+        ):
+            return sentence[left:right].strip()
+    return next((quote for _, high, _, quote in _role_lengths(sentence) if high <= max_weeks), None)
+
+
+def _title_of(text: str) -> str:
+    """A saved posting's title: `take` heads the file `# <title> - <company>`,
+    and a title may itself hold " - ", so only the last one is cut."""
+    first = text.lstrip().split("\n", 1)[0]
+    return first[2:].strip().rsplit(" - ", 1)[0] if first.startswith("# ") else ""
+
+
+def check_eligibility(text: str, profile: Profile, *, title: str | None = None) -> Eligibility:
+    """Every eligibility requirement `text` states, judged against `profile`.
+
+    `title` is the posting's own; omitted, it is read from a `# ` heading on
+    the first line, which is how a posting saved with `take` begins."""
     findings: list[Finding] = []
     auth = profile.work_authorization
 
@@ -315,6 +621,17 @@ def check_eligibility(text: str, profile: Profile) -> Eligibility:
     # question for someone who needs sponsorship, not a refusal.
     offers = _OFFERS_SPONSORSHIP.search(normalised) is not None
     admitted = False
+    allowed = set(profile.seasons)
+    title = _title_of(text) if title is None else title
+    # The title is the employer's own statement of the term, so it alone can
+    # knock a posting out; the body only raises a stretch. A knockout hides a
+    # posting, so it needs a season stated as one, not a word that might be one.
+    if allowed:
+        named = frozenset[str]().union(*(term for _, term in _season_terms(title)))
+        if named - allowed or _OFF_CYCLE.search(title):
+            level: Level = "stretch" if named & allowed else "knockout"
+            add("season", level, title, f"term outside {', '.join(sorted(allowed))}")
+    fitting_length: str | None = None
     for sentence in (s for s in _SENTENCE_BREAK.split(normalised) if s.strip()):
         if _refuses(sentence):
             needs = auth is not None and _NEEDS_SPONSORSHIP.search(auth) and not _is_citizen(auth)
@@ -379,11 +696,40 @@ def check_eligibility(text: str, profile: Profile) -> Eligibility:
                 add(
                     "degree", "stretch", sentence, who if students else "asks for a graduate degree"
                 )
+        # A graduation date names seasons too ("graduating in Fall 2027 or
+        # Spring 2028"); those inside one are the graduation rule's to judge,
+        # not a term. Only those: "graduate students for our Fall 2027 cohort"
+        # names a term, and a list joined by tags reads as one sentence, so
+        # "Fall 2027 internship" can sit beside "graduate degree" in it.
+        dates = [m.span() for m in _GRAD_DATE.finditer(sentence)]
+        terms = [
+            term for at, term in _season_terms(sentence) if not any(a <= at < b for a, b in dates)
+        ]
+        if allowed and any(term - allowed for term in terms):
+            add("season", "stretch", sentence, "mentions a term you are not available for")
+        if profile.max_weeks is not None:
+            fitting_length = fitting_length or _fitting_length(sentence, profile.max_weeks)
+            for low, high, hedged, _ in _role_lengths(sentence):
+                if high <= profile.max_weeks:
+                    continue
+                if low > profile.max_weeks and not hedged:
+                    add("duration", "knockout", sentence, f"longer than {profile.max_weeks} weeks")
+                else:
+                    add("duration", "stretch", sentence, f"may run past {profile.max_weeks} weeks")
         years = [int(y) for y in _YEARS.findall(sentence)]
         if years and max(years) >= STRETCH_YEARS:
             add("experience", "stretch", sentence, f"asks for {max(years)}+ years of experience")
     if admitted:
         findings = [f for f in findings if f.rule != "degree"]
+    # A posting that also states a length that fits describes more than one
+    # role, or more than one option; which applies is a question, not a knockout.
+    if fitting_length:
+        findings = [
+            replace(f, level="stretch", reason=f'{f.reason}; it also states "{fitting_length}"')
+            if f.rule == "duration" and f.level == "knockout"
+            else f
+            for f in findings
+        ]
     return Eligibility(findings=tuple(findings))
 
 
@@ -398,16 +744,29 @@ class Ranked:
     eligibility: Eligibility
     coverage: tuple[list[str], list[str]] = field(default=([], []))
     age_days: int = 0
+    tier: str = OTHER_TIER
 
 
 def rank(
     postings: Sequence[Found], profile: Profile, facts: Mapping[str, Fact], *, now: datetime
 ) -> list[Ranked]:
-    """`postings`, best first: knockouts last, then by evidenced coverage and freshness."""
+    """`postings`, best first: knockouts last, then by the profile's tiers in
+    order, then a tier's preferred postings, then by evidenced coverage and
+    freshness.
+
+    The order is lexicographic, not a weighted sum: a tier is a strict
+    preference, and a weight would let a strong posting in a later tier
+    outrank a weak one in an earlier tier."""
     evidenced = {canonicalize(e) for f in facts.values() if f.selectable() for e in f.entities}
-    ranked: list[Ranked] = []
+    preferred = [Criteria(include=list(t.prefer)) if t.prefer else None for t in profile.tiers]
+    ranked: list[tuple[tuple[bool, int, bool, float], Ranked]] = []
     for posting in postings:
-        eligibility = check_eligibility(posting.text, profile)
+        line = f"{posting.company} | {posting.title} | {posting.location}"
+        index = next(
+            (i for i, t in enumerate(profile.tiers) if t.criteria.matches(line)), len(profile.tiers)
+        )
+        prefer = preferred[index] if index < len(profile.tiers) else None
+        eligibility = check_eligibility(posting.text, profile, title=posting.title)
         asked = _technologies(posting.text)
         have = sorted(asked & evidenced)
         missing = sorted(asked - evidenced)
@@ -419,8 +778,11 @@ def rank(
             score -= 10
         elif eligibility.verdict == "unknown":
             score -= 0.1
-        ranked.append(Ranked(posting, round(score, 3), eligibility, (have, missing), age))
-    return sorted(ranked, key=lambda r: r.score, reverse=True)
+        tier = profile.tiers[index].name if index < len(profile.tiers) else OTHER_TIER
+        row = Ranked(posting, round(score, 3), eligibility, (have, missing), age, tier)
+        unpreferred = prefer is None or not prefer.matches(line)
+        ranked.append(((eligibility.verdict == "knockout", index, unpreferred, -row.score), row))
+    return [row for _, row in sorted(ranked, key=lambda pair: pair[0])]
 
 
 @dataclass(frozen=True)
@@ -470,7 +832,7 @@ def gaps(
     evidenced = {canonicalize(e) for f in facts.values() if f.selectable() for e in f.entities}
     counts: dict[str, int] = {}
     for posting in postings:
-        if check_eligibility(posting.text, profile).verdict == "knockout":
+        if check_eligibility(posting.text, profile, title=posting.title).verdict == "knockout":
             continue
         for tech in _technologies(posting.text) - evidenced:
             counts[tech] = counts.get(tech, 0) + 1

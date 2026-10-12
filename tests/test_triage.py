@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -7,7 +8,7 @@ import pytest
 
 from core.discovery.store import Found
 from core.profile.models import Fact, FactKind, Provenance, Trust
-from core.triage import Profile, check_eligibility, rank
+from core.triage import Profile, Tier, check_eligibility, rank
 
 NOW = datetime(2026, 9, 22, 12, 0, tzinfo=UTC)
 US_JUNIOR = Profile(work_authorization="US citizen", graduation="May 2028", degree="bachelor")
@@ -507,3 +508,845 @@ def test_the_page_limit_is_part_of_the_profile(
     assert main(["profile", "--pages", "0"]) == 3
     assert "resume_pages" in capsys.readouterr().err
     assert load_profile().resume_pages == 2
+
+
+# --- season and duration --------------------------------------------------------------
+
+SUMMER_ONLY = US_JUNIOR.model_copy(update={"seasons": ("summer",), "max_weeks": 14})
+
+
+def season(text: str, title: str) -> list[tuple[str, str]]:
+    return kinds_titled(text, title, SUMMER_ONLY)
+
+
+def kinds_titled(text: str, title: str, profile: Profile) -> list[tuple[str, str]]:
+    findings = check_eligibility(text, profile, title=title).findings
+    return [(f.rule, f.level) for f in findings if f.rule in {"season", "duration"}]
+
+
+@pytest.mark.parametrize(
+    ("title", "expected"),
+    [
+        ("Data Science Intern (Winter 2027)", [("season", "knockout")]),
+        ("Data Science Intern (Fall 2027)", [("season", "knockout")]),
+        ("Data Science Intern (Winter)", [("season", "knockout")]),
+        ("Quant Researcher (Off-Cycle - Winter/Spring 2027 Intern)", [("season", "knockout")]),
+        ("Co-op, Data Engineering", [("season", "knockout")]),
+        ("Autumn 2027 Analyst", [("season", "knockout")]),
+        ("Data Science Intern - Winter '27", [("season", "knockout")]),
+        ("Analyst Intern (Summer/Fall 2027)", [("season", "stretch")]),
+        ("Software Engineer, Intern (Summer or Winter)", [("season", "stretch")]),
+        ("Data Science Intern (Summer 2027)", []),
+    ],
+)
+def test_the_title_states_the_term(title: str, expected: list[tuple[str, str]]) -> None:
+    """Only the title can knock a posting out on its term: it is the employer's
+    own statement of which term the role is. Mutation: drop the allowed-season
+    check in the title rule -- the "Summer/Fall" and "Summer or Winter" titles
+    become knockouts."""
+    assert season("Python and SQL.", title) == expected
+
+
+@pytest.mark.parametrize(
+    ("title", "text", "word"),
+    [
+        # A team name, not a term: no year, term word or bracket beside it.
+        ("Fall Risk Analytics Intern", "Join the Fall Risk Analytics team.", "fall"),
+        # An address.
+        ("Data Intern", "Our office is on Spring Street, New York.", "spring"),
+        # A verb and a noun.
+        ("Data Intern", "Tasks that fall under the team. A spring in your step.", "fall"),
+        # A company named in the body.
+        ("Summer Analyst Intern", "Spring Health is our client.", "spring"),
+    ],
+)
+def test_a_season_word_that_names_no_term_is_not_one(title: str, text: str, word: str) -> None:
+    """Mutation: drop `_TERM_AFTER`/`_TERM_BEFORE` and count every season word --
+    each of these becomes a knockout or a stretch."""
+    assert word in f"{title} {text}".casefold()  # premise: the word is there
+    assert season(text, title) == []
+
+
+def test_a_term_mentioned_in_the_body_is_only_a_stretch() -> None:
+    text = "Summer 2027 Analyst; we also run winter and spring cohorts."
+    assert "winter" in text and "spring" in text  # premise
+    assert season(text, "Summer 2027 Analyst") == [("season", "stretch")]
+
+
+def test_a_graduation_window_naming_seasons_is_not_a_term() -> None:
+    """Measured on a real board: "a graduation date in Fall 2027 or Spring 2028"
+    sat in summer postings, and reading it as a term made 13 of them a stretch.
+    Mutation: drop the `_GRAD_DATE` skip -- each becomes a stretch."""
+    for text in (
+        "Students graduating in Fall 2027 or Spring 2028 are eligible.",
+        "Expecting to graduate between Winter 2027 and Summer 2028.",
+        "A graduation date in Fall 2027 or Spring 2028.",
+        "Open to students graduating in Fall 2027.",
+    ):
+        assert re.search(r"(?:Fall|Winter) 2027", text)  # premise: a term outside summer
+        assert season(text, "Data Intern (Summer 2027)") == [], text
+
+
+def test_a_term_before_a_graduation_word_is_still_a_term() -> None:
+    """A list joined by tags reads as one sentence, so the term and a degree
+    requirement share it. Mutation: skip every season in a sentence naming
+    graduation -- this loses its stretch."""
+    text = "<ul><li>Fall 2027 internship</li><li>Pursuing a bachelor or graduate degree</li></ul>"
+    assert text.index("Fall 2027") < text.index("graduate")  # premise
+    assert season(text, "Data Intern") == [("season", "stretch")]
+
+
+_STATED_LENGTHS: list[tuple[str, list[tuple[str, str]]]] = [
+    ("This is a 24-week internship based in Berlin.", [("duration", "knockout")]),
+    ("The programme runs six months from January.", [("duration", "knockout")]),
+    ("The internship runs 4 months.", [("duration", "knockout")]),
+    ("The internship runs 3 months.", []),
+    ("Interns typically spend 12 weeks with us.", []),
+    ("Internship program: 10-26 weeks, full-time.", [("duration", "stretch")]),
+    ("Internship program: 12 - 24 weeks, full-time.", [("duration", "stretch")]),
+    ("The internship lasts up to 24 weeks.", [("duration", "stretch")]),
+    ("This internship runs 6 months.", [("duration", "knockout")]),
+    ("The minimum internship period is 6 months.", [("duration", "knockout")]),
+    # 2.5 months is 10.8 weeks. Read as "5-month internship", the second is
+    # a knockout; the first would only go unread.
+    ("The internship lasts 2.5 months.", []),
+    ("This is a 2.5-month internship.", []),
+    # The lower option fits.
+    ("We offer internships of 3 or 6 months.", [("duration", "stretch")]),
+    ("The internship lasts from 6 to 12 months.", [("duration", "knockout")]),
+    # Measured on a real board: read as nothing, this posting lost its stretch.
+    ("The internship will be 3-6 months, including the summer.", [("duration", "stretch")]),
+]
+
+
+@pytest.mark.parametrize(("text", "expected"), _STATED_LENGTHS)
+def test_the_role_s_stated_length(text: str, expected: list[tuple[str, str]]) -> None:
+    """A range counts from its low end, and a hedge is a stretch: either way the
+    candidate may fit. Mutation: use the high end of a range -- "10-26 weeks"
+    becomes a knockout."""
+    assert season(text, "ML Intern") == expected
+
+
+def test_a_length_that_is_not_the_role_s_is_not_counted() -> None:
+    """Mutation: count every length, dropping the check that the sentence
+    attributes it to the role -- the onboarding sentence knocks the internship
+    out. The semicolon case is a length of something else in the same sentence."""
+    onboarding = "Our 6-month onboarding for full-time hires starts in March."
+    semicolon = "This is a 10-week internship; full-time hires complete a 6-month rotation."
+    graduation = "Apply as a 3rd year internship, or within 12 months of graduation."
+    assert "6-month" in onboarding and "6-month" in semicolon and "12 months" in graduation
+    assert season(onboarding, "ML Intern") == []
+    assert season(semicolon, "ML Intern") == []
+    assert season(graduation, "ML Intern") == []
+
+
+def test_a_posting_stating_a_length_that_fits_is_never_a_duration_knockout() -> None:
+    """Measured on a real board: one posting described several internships, most
+    "10-week", one "minimum 6 months". A knockout would hide every role in it.
+    Mutation: drop the `fitting_length` downgrade -- this is a knockout."""
+    text = (
+        "Over the 10-week internship program, you will learn. "
+        "The minimum internship period is 6 months."
+    )
+    assert season(text, "Quant Intern") == [("duration", "stretch")]
+    [finding] = check_eligibility(text, SUMMER_ONLY, title="Quant Intern").findings
+    assert finding.reason == (
+        'longer than 14 weeks; it also states "Over the 10-week internship program, you will learn"'
+    )
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Summer 2027. Offers go out 4 months before the internship starts.",
+        "Internship candidates should have 6 months of Python experience.",
+        "Data Science Intern. Applicants must be enrolled in a 24-month master's program.",
+        "Summer 2027. Past interns have joined our 18-month rotational program.",
+        "Return offers are made within 6 months of internship completion.",
+        "Candidates must have 6 months of internship experience.",
+        "Requirements: 6 months internship experience",
+        "Apply 6 months before internship start.",
+        "Our rotational program runs 18 months.",
+        "Our graduate program is 24 months.",
+        "Applicants should have worked as interns for 6 months.",
+        "Candidates with prior internships of 6 months are preferred.",
+        "Our interns are 6 months from graduation.",
+        "Return offers remain open to interns for 6 months.",
+        "Within 6 months, most internship hires convert to full-time.",
+        "After 6 months, internship participants receive a review.",
+        "Every 6 months, internship cohorts present.",
+        "Duration: 12 months after graduation",
+        "Duration: 18 months graduate programme follows",
+    ],
+)
+def test_a_length_near_a_role_word_is_not_the_role_s(text: str) -> None:
+    """Each length here exceeds 14 weeks and sits beside a role word, but is
+    the length of something else. Mutation: count every length -- each becomes
+    a duration knockout."""
+    assert re.search(r"\b(?:4|6|12|18|24)[ -]months?\b", text)  # premise: a length too long
+    assert ("duration", "knockout") not in season(text, "")
+
+
+@pytest.mark.parametrize(
+    "other",
+    [
+        "Interns receive 2 weeks of paid time off.",
+        "Interns begin with a 1-week orientation program.",
+        "Offers go out 2 weeks before internship start.",
+        "Expect a decision within 2 weeks of internship interviews.",
+        "It opens with a 1-week intern bootcamp.",
+        "The notice period for interns is 2 weeks.",
+        "Paid time off for interns: 2 weeks.",
+        "In the first 2 weeks, internship hosts run orientation.",
+        "Duration: 2 weeks onboarding",
+        "Duration: 2 weeks per rotation",
+        "The internship takes 2 weeks to set up.",
+    ],
+)
+def test_a_short_span_beside_a_role_word_softens_a_knockout_and_is_quoted(other: str) -> None:
+    """None of these spans is the role's length, but reading one as fitting only
+    makes the knockout a stretch whose reason quotes it, so the posting stays
+    visible; a knockout would hide it. Mutation: make the downgrade use the
+    strict `_role_lengths` reader -- each stays a knockout."""
+    knockout = "Data Science Intern. This internship runs 6 months."
+    assert season(knockout, "") == [("duration", "knockout")]  # premise
+    assert season(f"{knockout} {other}", "") == [("duration", "stretch")]
+    [finding] = check_eligibility(f"{knockout} {other}", SUMMER_ONLY, title="").findings
+    assert finding.reason.endswith(f'; it also states "{other.rstrip(".")}"')
+
+
+@pytest.mark.parametrize(
+    "other",
+    [
+        "No prior experience is required for this 10-week internship.",
+        "Duration: 10 weeks starting June 2027",
+        "Duration: 10 weeks full-time",
+        "Duration: 10-12 weeks during the summer",
+        "Duration: 10 weeks | Location: Boston",
+        "The internship takes 10 weeks to complete.",
+        "The internship runs 10 weeks to the end of August.",
+        "Once you have completed the 10-week internship, you join a team.",
+        "A 10-week all-expenses-paid internship.",
+    ],
+)
+def test_a_fitting_length_the_strict_reader_misses_still_softens_a_knockout(other: str) -> None:
+    """Each is this role's own fitting length in a phrasing the knockout reader
+    declines (a "prior" or "completed" before it, a "Duration:" value that runs
+    on, a "to" after it, a long modifier chain). Mutation: make the downgrade use
+    the strict `_role_lengths` reader -- each stays a knockout."""
+    knockout = "Data Science Intern. This internship runs 6 months."
+    assert season(knockout, "") == [("duration", "knockout")]  # premise
+    assert season(f"{knockout} {other}", "") == [("duration", "stretch")]
+    [finding] = check_eligibility(f"{knockout} {other}", SUMMER_ONLY, title="").findings
+    assert finding.reason.endswith(f'; it also states "{other.rstrip(".")}"')
+
+
+_RUN_ON_FILLER = (
+    " and the team works across data platforms, analytics tooling, reporting pipelines,"
+    " stakeholder dashboards, model monitoring, documentation and weekly demos with partners"
+    " from finance, operations, marketing and product"
+)
+
+
+def test_a_role_word_far_from_a_short_length_in_a_run_on_body_does_not_soften_a_knockout() -> None:
+    """Tag-stripped HTML with no sentence break reads as one sentence. Mutation:
+    look for the role word anywhere in the sentence instead of in the quoted
+    clause -- "internship" at the start vouches for "2 weeks" at the end."""
+    body = f"This internship runs 6 months{_RUN_ON_FILLER}{_RUN_ON_FILLER}"
+    text = f"<li>{body}, with 2 weeks of paid leave</li>"
+    plain = re.sub(r"<[^>]+>", " ", text)
+    assert len(plain) > 300 and not re.search(r"[.!?;\n]", plain)  # premise: one long sentence
+    assert "internship" in plain and plain.index("2 weeks") - plain.index("internship") > 200
+    assert season(text, "") == [("duration", "knockout")]
+
+
+def test_a_run_on_clause_is_quoted_only_around_its_fitting_length() -> None:
+    """Mutation: drop the cut to `_QUOTE_REACH` -- the whole run-on is quoted."""
+    other = f"Each cohort{_RUN_ON_FILLER} meets for 2 weeks of intern onboarding{_RUN_ON_FILLER}"
+    knockout = "Data Science Intern. This internship runs 6 months."
+    assert len(other) > 300  # premise: the clause runs on
+    [finding] = check_eligibility(f"{knockout} {other}", SUMMER_ONLY, title="").findings
+    assert finding.level == "stretch"
+    quote = finding.reason.split("it also states ", 1)[1].strip('"')
+    assert "2 weeks of intern onboarding" in quote and len(quote) <= 110
+
+
+@pytest.mark.parametrize(
+    "fitting",
+    [
+        "No prior experience is required for this 10-week internship.",
+        "Duration: 10 weeks starting June 2027",
+    ],
+)
+def test_a_summer_posting_naming_another_role_s_long_minimum_is_not_hidden(fitting: str) -> None:
+    """A summer posting that also describes a longer role elsewhere in the firm.
+    Mutation: make the downgrade use the strict `_role_lengths` reader -- each
+    is a knockout."""
+    other_role = "For our off-cycle roles, the minimum internship period is 6 months."
+    assert season(other_role, "") == [("duration", "knockout")]  # premise
+    text = f"Summer 2027 Analyst.\n{fitting}\n{other_role}"
+    assert season(text, "Summer Analyst Intern") == [("duration", "stretch")]
+    verdict = check_eligibility(text, SUMMER_ONLY, title="Summer Analyst Intern").verdict
+    assert verdict != "knockout"
+
+
+@pytest.mark.parametrize(
+    ("text", "role_clause"),
+    [
+        (
+            "You have completed an internship of at least 6 months.",
+            "An internship of at least 6 months.",
+        ),
+        (
+            "You have already completed a first internship of at least 6 months.",
+            "A first internship of at least 6 months.",
+        ),
+        (
+            "Ideally you have done an internship lasting 6 months.",
+            "An internship lasting 6 months.",
+        ),
+        (
+            "Prior experience: an internship lasting at least 6 months.",
+            "An internship lasting at least 6 months.",
+        ),
+    ],
+)
+def test_the_candidate_s_past_internship_is_not_this_role_s_length(
+    text: str, role_clause: str
+) -> None:
+    """A requirement about an internship the candidate has done states its
+    length too. Mutation: drop the `_CANDIDATE_HISTORY` check -- each is a
+    knockout."""
+    assert role_clause.rstrip(".").casefold() in text.casefold()  # premise: the same clause
+    assert season(role_clause, "") == [("duration", "knockout")]  # ... which alone is read
+    assert season(text, "") == []
+
+
+_PHRASINGS = [
+    ("The internship will be {}.", "6 months", "10 weeks", "knockout"),
+    ("Our internships run for {}.", "6 months", "10 weeks", "knockout"),
+    ("An internship lasting {}.", "6 months", "10 weeks", "knockout"),
+    ("Internship ({}) in Paris.", "6 months", "10 weeks", "knockout"),
+    ("The internship will run for {}.", "6 months", "10 weeks", "knockout"),
+    ("The internship can last up to {}.", "6 months", "10 weeks", "stretch"),
+    ("The internship is scheduled for {}.", "6 months", "10 weeks", "knockout"),
+    ("Internships are offered for {}.", "6 months", "10 weeks", "knockout"),
+    ("The internship takes {}.", "6 months", "10 weeks", "knockout"),
+    ("The internship will be for {}.", "6 months", "10 weeks", "knockout"),
+    ("The internship duration will be {}.", "6 months", "10 weeks", "knockout"),
+    ("The internship lasts at least {}.", "6 months", "10 weeks", "knockout"),
+    ("The internship lasts a minimum of {}.", "6 months", "10 weeks", "knockout"),
+    ("The internship runs for a period of {}.", "6 months", "10 weeks", "knockout"),
+    ("The internship lasts a full {}.", "6 months", "10 weeks", "knockout"),
+    ("The internship runs over {}.", "24 weeks", "10 weeks", "knockout"),
+    ("A {}-long internship.", "six-month", "10-week", "knockout"),
+    ("A {}-long internship.", "24-week", "10-week", "knockout"),
+    ("A {} full-time paid internship.", "6-month", "10-week", "knockout"),
+    ("A {}, full-time internship.", "6 month", "10 week", "knockout"),
+    ("Internship length - {}", "6 months", "10 weeks", "knockout"),
+    ("Duration of internship - {}", "24 weeks", "10 weeks", "knockout"),
+    ("Contract type: Internship ({})", "6 months", "10 weeks", "knockout"),
+    ("Contract: Internship, {}", "6 months", "10 weeks", "knockout"),
+    ("Duration: {}", "6 months", "10 weeks", "knockout"),
+]
+
+
+@pytest.mark.parametrize(("template", "long", "short", "level"), _PHRASINGS)
+def test_a_phrasing_that_states_the_role_s_length_is_read_at_either_length(
+    template: str, long: str, short: str, level: str
+) -> None:
+    """Each phrasing is pinned twice: too long, it is a finding; fitting, beside
+    another sentence's knockout, it softens that knockout. Mutation: drop "will"
+    from `_LINK_WORDS` -- every "will" phrasing loses its knockout."""
+    knockout = "Data Science Intern. This internship runs 6 months."
+    assert season(knockout, "") == [("duration", "knockout")]  # premise
+    assert season(template.format(long), "") == [("duration", level)]
+    assert season(f"{knockout} {template.format(short)}", "") == [("duration", "stretch")]
+
+
+@pytest.mark.parametrize(
+    ("text", "hedge"),
+    [
+        ("The internship lasts up to 24 weeks.", "up to "),
+        ("The internship typically lasts 24 weeks.", "typically "),
+        ("The internship usually lasts 24 weeks.", "usually "),
+        ("The internship lasts approximately 24 weeks.", "approximately "),
+        ("The internship lasts about 24 weeks.", "about "),
+        ("The internship lasts around 24 weeks.", "around "),
+        ("The internship lasts roughly 24 weeks.", "roughly "),
+        ("The internship lasts between 20 and 24 weeks.", "between "),
+    ],
+)
+def test_each_hedge_makes_a_length_a_stretch(text: str, hedge: str) -> None:
+    """Mutation: drop any one word from `_HEDGE_WORDS` -- its case fails."""
+    assert season(text.replace(hedge, ""), "") == [("duration", "knockout")]  # premise
+    assert season(text, "") == [("duration", "stretch")]
+
+
+@pytest.mark.parametrize(
+    ("text", "hedge"),
+    [
+        ("We offer up to 24-week internships.", "up to "),
+        ("Typically 24-week internships are offered.", "Typically "),
+        ("Internships are typically 24-week placements.", "typically "),
+    ],
+)
+def test_a_hedge_before_a_length_named_by_the_noun_after_it_is_a_stretch(
+    text: str, hedge: str
+) -> None:
+    """The first two have no role subject before the length, only the noun
+    after it, so no linking words to carry the hedge. Mutation: never hedge a
+    length attributed by the noun after it -- the first two become knockouts."""
+    assert season(text.replace(hedge, ""), "Data Intern") == [("duration", "knockout")]  # premise
+    assert season(text, "Data Intern") == [("duration", "stretch")]
+
+
+def test_an_unhedged_length_named_by_the_noun_after_it_stays_a_knockout() -> None:
+    for text in ("This is a 24-week internship.", "We offer 24-week internships."):
+        assert season(text, "Data Intern") == [("duration", "knockout")], text
+
+
+@pytest.mark.parametrize(
+    ("title", "text"),
+    [
+        ("Backend Engineering Intern (Spring Boot)", "This is a 12-week Summer 2027 internship."),
+        ("Software Engineer Intern (Java/Spring)", "Summer 2027 internship in Boston."),
+        ("Data Science Intern (Spring Health)", "Join us for Summer 2027."),
+    ],
+)
+def test_a_season_word_in_a_bracket_with_other_words_is_not_a_term(title: str, text: str) -> None:
+    """Mutation: count an opening bracket alone before a season word as a term --
+    each title becomes a knockout."""
+    assert "(" in title and "Spring" in title  # premise
+    assert check_eligibility(text, SUMMER_ONLY, title=title).verdict == "eligible"
+
+
+def test_a_saved_posting_s_heading_names_the_company_last() -> None:
+    """Mutation: read the whole heading line as the title -- REI's "Co-op"
+    knocks the posting out."""
+    body = "Join our summer 2027 internship."
+    # premise: the company's "Co-op", read as part of the title, is a knockout
+    assert season(body, "Data Analyst Intern - REI Co-op") == [("season", "knockout")]
+    assert (
+        check_eligibility(f"# Data Analyst Intern - REI Co-op\n\n{body}\n", SUMMER_ONLY).findings
+        == ()
+    )
+    # Only the last " - " is the company's; the title keeps its own.
+    assert season("Python.", "Intern") == []  # premise: cutting at the first loses the term
+    saved = "# Intern - Winter 2027 - Acme\n\nPython.\n"
+    assert [(f.rule, f.level) for f in check_eligibility(saved, SUMMER_ONLY).findings] == [
+        ("season", "knockout")
+    ]
+
+
+def test_the_season_rules_run_only_when_the_profile_asks() -> None:
+    text = "This is a 24-week internship."
+    assert kinds_titled(text, "Data Intern (Winter 2027)", US_JUNIOR) == []
+
+
+def test_a_saved_posting_s_heading_is_its_title() -> None:
+    """`take` writes `# <title> - <company>`; `eligibility` and `fit` pass no title."""
+    saved = "# Data Science Intern (Winter 2027) - Acme\n\nPython and SQL.\n"
+    assert [(f.rule, f.level) for f in check_eligibility(saved, SUMMER_ONLY).findings] == [
+        ("season", "knockout")
+    ]
+
+
+def test_seasons_round_trip_through_the_profile_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An existing profile file gains the fields without losing what it held."""
+    from core.triage import load_profile, save_profile
+
+    monkeypatch.setenv("CALLBACK_HOME", str(tmp_path))
+    save_profile(SUMMER_ONLY)
+    assert load_profile() == SUMMER_ONLY
+
+
+def test_the_profile_command_sets_seasons_and_a_length(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from core.cli import main
+
+    monkeypatch.setenv("CALLBACK_HOME", str(tmp_path / "cb"))
+    assert main(["profile", "--seasons", "summer, fall", "--max-weeks", "14"]) == 0
+    out = capsys.readouterr().out
+    assert "seasons              summer, fall" in out and "max_weeks            14" in out
+    assert main(["profile", "--seasons", "monsoon"]) == 3
+    capsys.readouterr()
+    assert main(["profile", "--seasons", ""]) == 0
+    assert "seasons              (not set)" in capsys.readouterr().out
+
+
+# --- priority tiers -------------------------------------------------------------------
+
+TIER_FACTS = {
+    "py": Fact(
+        id="py",
+        kind=FactKind.SKILL,
+        text="Wrote Python and SQL",
+        entities=["Python", "SQL"],
+        provenance=Provenance(source="x", trust=Trust.USER_CONFIRMED),
+    )
+}
+# id, company, title, location, text, days old
+TIER_CORPUS = [
+    ("a", "Acme", "Data Science Intern", "London", "Python and SQL.", 1),
+    ("b", "Borealis Capital", "Quant Research Intern", "Chicago", "Python.", 3),
+    ("c", "Cobalt", "ML Intern", "Zurich", "PyTorch and Kubernetes.", 0),
+    ("d", "Dune", "Analyst Intern", "New York", "Python. Class of 2027 only.", 0),
+    ("e", "Ember", "AI Engineer Intern", "Boston", "Python, SQL and PyTorch.", 10),
+    ("f", "Fjord Trading", "Data Scientist Intern", "Amsterdam", "SQL.", 25),
+    ("g", "Gale", "Software Intern", "Austin", "Java.", 2),
+    ("h", "Harbor", "ML Intern", "Paris", "Python. Must be a US citizen.", 5),
+]
+F1 = Profile(
+    work_authorization="F-1, will need sponsorship", graduation="May 2028", degree="bachelor"
+)
+
+
+def _tier_corpus() -> list[Found]:
+    return [
+        Found(
+            id=pid,
+            ats="greenhouse",
+            board=company.casefold(),
+            company=company,
+            title=title,
+            location=location,
+            url=f"https://job-boards.greenhouse.io/x/jobs/{pid}",
+            text=text,
+            first_seen=NOW - timedelta(days=days),
+        )
+        for pid, company, title, location, text, days in TIER_CORPUS
+    ]
+
+
+def _tiers(*tiers: tuple[str, list[str], tuple[str, ...]]) -> Profile:
+    from core.discovery.store import Criteria
+    from core.triage import Tier
+
+    built = tuple(Tier(name=n, criteria=Criteria(include=inc), prefer=p) for n, inc, p in tiers)
+    return F1.model_copy(update={"tiers": built})
+
+
+EUROPE = ("europe", ["london", "zurich", "amsterdam", "paris"], ())
+AI_ML = ("ai-ml", ["ai", "ml"], ())
+FINANCE = ("finance-ds", ["quant*", "data scien*", "analyst"], ())
+
+
+def test_with_no_tiers_the_order_is_the_order_before_tiers_existed() -> None:
+    """Recorded from `rank` before tiers were added, over this corpus and profile."""
+    ranked = rank(_tier_corpus(), F1, TIER_FACTS, now=NOW)
+    assert [r.posting.id for r in ranked] == ["a", "b", "e", "c", "g", "f", "d", "h"]
+    assert {r.tier for r in ranked} == {"other"}
+
+
+def test_tiers_order_strictly_before_the_score() -> None:
+    """A weak posting in an earlier tier outranks a strong one in a later tier:
+    "f" scores 0.267 and "e" 0.507. Knockouts stay last whatever their tier, and
+    are themselves in tier order. Mutation: put the score before the tier in the sort key --
+    "e" and "b" rise above "c" and "f"."""
+    ranked = rank(_tier_corpus(), _tiers(EUROPE, AI_ML, FINANCE), TIER_FACTS, now=NOW)
+    assert [(r.posting.id, r.tier) for r in ranked] == [
+        ("a", "europe"),
+        ("c", "europe"),
+        ("f", "europe"),
+        ("e", "ai-ml"),
+        ("b", "finance-ds"),
+        ("g", "other"),
+        ("h", "europe"),
+        ("d", "finance-ds"),
+    ]
+    assert ranked[2].score < ranked[3].score  # premise: the earlier tier holds the weaker posting
+
+
+def test_a_posting_belongs_to_the_first_tier_it_matches() -> None:
+    """ "c" is an ML role in Zurich: Europe first, it is Europe; AI first, it is AI."""
+    europe_first = rank(_tier_corpus(), _tiers(EUROPE, AI_ML), TIER_FACTS, now=NOW)
+    ai_first = rank(_tier_corpus(), _tiers(AI_ML, EUROPE), TIER_FACTS, now=NOW)
+    assert {r.posting.id: r.tier for r in europe_first}["c"] == "europe"
+    assert {r.posting.id: r.tier for r in ai_first}["c"] == "ai-ml"
+
+
+def test_a_preferred_posting_leads_its_tier() -> None:
+    """ "f" is the weakest posting in Europe and the only one at a trading firm.
+    Mutation: drop `prefer` from the sort key -- "f" falls back to third."""
+    europe = ("europe", ["london", "zurich", "amsterdam", "paris"], ("trading",))
+    ranked = rank(_tier_corpus(), _tiers(europe), TIER_FACTS, now=NOW)
+    assert [r.posting.id for r in ranked][:3] == ["f", "a", "c"]
+
+
+def test_triage_prints_the_tier_first_once_tiers_are_set(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """With none set the output is as it was: no column of "other"."""
+    from core.cli import main
+    from core.discovery.store import add_manual
+    from core.paths import ensure_home
+
+    monkeypatch.setenv("CALLBACK_HOME", str(tmp_path / "cb"))
+    home = ensure_home()
+    add_manual(
+        "Example Exchange",
+        "Summer Research",
+        "https://www.example.org/r",
+        "Ten weeks.",
+        None,
+        now=NOW,
+    )
+    assert main(["triage"]) == 0
+    assert not capsys.readouterr().out.startswith("other")
+    (home / "profile.yaml").write_text(
+        "tiers:\n- name: research\n  criteria: {include: [research]}\n", encoding="utf-8"
+    )
+    assert main(["triage"]) == 0
+    assert capsys.readouterr().out.startswith("research  ")
+
+
+def test_a_company_named_after_a_city_is_excluded_from_a_city_tier() -> None:
+    """A tier is matched against the company too, so "Geneva Trading" in Chicago
+    names a European city; an exclude term is how a profile says it does not."""
+    from core.discovery.store import Criteria
+    from core.triage import Tier
+
+    posting = _tier_corpus()[6].model_copy(update={"company": "Geneva Trading"})
+    cities = ["geneva", "london"]
+    plain = F1.model_copy(
+        update={"tiers": (Tier(name="europe", criteria=Criteria(include=cities)),)}
+    )
+    excluded = F1.model_copy(
+        update={
+            "tiers": (
+                Tier(
+                    name="europe",
+                    criteria=Criteria(include=cities, exclude=["geneva trading"]),
+                ),
+            )
+        }
+    )
+    assert rank([posting], plain, TIER_FACTS, now=NOW)[0].tier == "europe"  # premise: it collides
+    assert rank([posting], excluded, TIER_FACTS, now=NOW)[0].tier == "other"
+
+
+def test_tiers_survive_the_profile_command_rewriting_the_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Tiers are edited by hand in `profile.yaml`; `callback profile --pages 2`
+    rewrites that file and must keep them."""
+    from core.cli import main
+    from core.paths import ensure_home
+    from core.triage import load_profile
+
+    monkeypatch.setenv("CALLBACK_HOME", str(tmp_path / "cb"))
+    home = ensure_home()
+    (home / "profile.yaml").write_text(
+        "tiers:\n- name: eu\n  criteria: {include: [london], exclude: [audit]}\n"
+        "  prefer: [quant*]\n",
+        encoding="utf-8",
+    )
+    before = load_profile().tiers
+    assert main(["profile", "--pages", "2"]) == 0
+    assert load_profile().tiers == before and before[0].prefer == ("quant*",)
+
+
+@pytest.mark.parametrize("term", ["", "  ", "*", "* *"])
+def test_a_tier_term_that_can_never_match_is_refused_and_names_the_tier(term: str) -> None:
+    """`Criteria` skips a blank or `*` term, so a tier whose include or require is
+    only such a term matches nothing. Premise: the term really does match nothing.
+    Mutation: drop `_terms_can_match`, or `require` from its loop."""
+    from pydantic import ValidationError
+
+    from core.discovery.store import Criteria
+    from core.triage import Tier
+
+    assert not Criteria(include=[term, "x"]).matches("only a title")
+    assert not Criteria(include=[term]).matches(term or "anything")
+    with pytest.raises(ValidationError, match="'dead'"):
+        Tier(name="dead", criteria=Criteria(include=[term]))
+    with pytest.raises(ValidationError, match=r"'dead'.*prefer"):
+        Tier(name="dead", criteria=Criteria(include=["ok"]), prefer=(term,))
+    assert not Criteria(include=["only"], require=[term]).matches("only a title")
+    with pytest.raises(ValidationError, match=r"'dead'.*require"):
+        Tier(name="dead", criteria=Criteria(include=["only"], require=[term]))
+
+
+def test_tier_names_are_unique_and_never_other() -> None:
+    """Mutation: drop `_tier_names_unique`, or the reserved-name check in `Tier`."""
+    from pydantic import ValidationError
+
+    from core.discovery.store import Criteria
+    from core.triage import Tier
+
+    def tier(name: str) -> Tier:
+        return Tier(name=name, criteria=Criteria(include=["x"]))
+
+    assert Profile(tiers=(tier("a"), tier("b"))).tiers  # premise: distinct names are fine
+    with pytest.raises(ValidationError, match="unique"):
+        Profile(tiers=(tier("a"), tier("A")))
+    with pytest.raises(ValidationError, match="reserved"):
+        tier("other")
+    with pytest.raises(ValidationError, match="reserved"):
+        tier("Other")
+
+
+def test_triage_refuses_a_profile_with_a_blank_tier_term(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from core.cli import main
+    from core.paths import ensure_home
+
+    monkeypatch.setenv("CALLBACK_HOME", str(tmp_path / "cb"))
+    home = ensure_home()
+    (home / "profile.yaml").write_text(
+        "tiers:\n- name: typo\n  criteria: {include: ['']}\n", encoding="utf-8"
+    )
+    assert main(["triage"]) == 3
+    assert "typo" in capsys.readouterr().err
+
+
+def test_the_other_row_lines_up_under_a_short_tier_name(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from core.cli import main
+    from core.discovery.store import add_manual
+    from core.paths import ensure_home
+
+    monkeypatch.setenv("CALLBACK_HOME", str(tmp_path / "cb"))
+    home = ensure_home()
+    for title, url in (("Research Intern", "https://e.org/a"), ("Sales Intern", "https://e.org/b")):
+        add_manual("Example Exchange", title, url, "Ten weeks.", None, now=NOW)
+    (home / "profile.yaml").write_text(
+        "tiers:\n- name: ai\n  criteria: {include: [research]}\n", encoding="utf-8"
+    )
+    assert main(["triage"]) == 0
+    rows = [ln for ln in capsys.readouterr().out.splitlines() if ln[:2] in ("ai", "ot")]
+    assert [ln.startswith("ai     ") for ln in rows] == [True, False]  # premise: two rows
+    assert rows[1].startswith("other  ")
+
+
+def test_a_punctuation_tier_term_matches_every_posting_and_is_refused() -> None:
+    """A term with no word character is not always dead: `|` matches the " | "
+    separators of every tier line, so as an include it takes every posting and
+    as an exclude it empties the tier. Mutation: drop `_terms_can_match`."""
+    from pydantic import ValidationError
+
+    from core.discovery.store import Criteria
+    from core.triage import Tier
+
+    line = "Acme | Accountant | Chicago"
+    assert Criteria(include=["|"]).matches(line)  # premise: it matches every tier line
+    assert not Criteria(include=["acme"], exclude=["|"]).matches(line)  # ... and excludes them
+    with pytest.raises(ValidationError, match=r"'p'.*include"):
+        Tier(name="p", criteria=Criteria(include=["|"]))
+    with pytest.raises(ValidationError, match=r"'p'.*exclude"):
+        Tier(name="p", criteria=Criteria(include=["acme"], exclude=["|"]))
+
+
+def _tier(name: str) -> Tier:
+    from core.discovery.store import Criteria
+
+    return Tier(name=name, criteria=Criteria(include=["x"]))
+
+
+@pytest.mark.parametrize(
+    ("names", "match"),
+    [((" other ",), "reserved"), (("   ",), "at least 1"), (("ai", "ai "), "unique")],
+)
+def test_tier_names_are_checked_stripped(names: tuple[str, ...], match: str) -> None:
+    """Mutation: drop `strip_whitespace=True` from `Tier.name` -- each loads."""
+    from pydantic import ValidationError
+
+    assert _tier(" ai ").name == "ai"
+    with pytest.raises(ValidationError, match=match):
+        Profile(tiers=tuple(_tier(n) for n in names))
+
+
+def test_max_weeks_refuses_a_boolean(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """YAML reads `true` as a bool, which a lax int field takes as 1 week.
+    Mutation: drop `strict=True` from `max_weeks` -- it loads as 1."""
+    import yaml
+
+    from core.paths import ensure_home
+    from core.triage import ProfileError, load_profile
+
+    monkeypatch.setenv("CALLBACK_HOME", str(tmp_path / "cb"))
+    home = ensure_home()
+    assert yaml.safe_load("max_weeks: true") == {"max_weeks": True}  # premise
+    (home / "profile.yaml").write_text("max_weeks: true\n", encoding="utf-8")
+    with pytest.raises(ProfileError, match="max_weeks"):
+        load_profile()
+    (home / "profile.yaml").write_text("max_weeks: 14\n", encoding="utf-8")
+    assert load_profile().max_weeks == 14
+
+
+_LABELLED = [
+    "- Duration: {}",
+    "**Duration:** {}",
+    "\u2022 Duration: {}",
+    "Location: London | Duration: {}",
+]
+
+
+_TEN_WEEKS_FAR = (
+    "The internship is typically offered for a period of about 10 weeks. "
+    "Returning students may do a 24-week internship."
+)
+
+
+def test_a_fitting_length_far_from_its_role_word_still_softens_a_knockout() -> None:
+    """The role word sits further before "10 weeks" than the loose reader's
+    clause window reaches, but the knockout reader attributes the length to it.
+    Mutation: drop the strict-read fallback ending `_fitting_length` -- both are
+    knockouts."""
+    first, second = _TEN_WEEKS_FAR.split(". ")
+    assert first.index("10 weeks") - first.index("internship") > 50  # premise: outside the window
+    assert season(second, "") == [("duration", "knockout")]  # premise: the long role alone
+    [finding] = check_eligibility(_TEN_WEEKS_FAR, SUMMER_ONLY, title="").findings
+    assert finding.level == "stretch"
+    assert finding.reason.endswith(
+        '"internship is typically offered for a period of about 10 weeks"'
+    )
+    off_cycle = "For our off-cycle roles, the minimum internship period is 6 months."
+    two_roles = f"Summer 2027 Analyst.\n{_TEN_WEEKS_FAR}\n{off_cycle}"
+    assert season(two_roles, "Summer Analyst Intern") == [("duration", "stretch")]
+
+
+def test_every_fitting_length_the_strict_reader_finds_the_loose_reader_finds() -> None:
+    """A false fitting length only softens a knockout, so the loose reader must
+    see at least what the knockout reader sees. Mutation: drop the strict-read
+    fallback ending `_fitting_length` -- the far role word is missed."""
+    from core.triage import _fitting_length, _role_lengths  # pyright: ignore[reportPrivateUsage]
+
+    texts = [text for text, _ in _STATED_LENGTHS]
+    texts += [t.format(x) for t, long, short, _ in _PHRASINGS for x in (long, short)]
+    texts += [t.format("10 weeks") for t in _LABELLED] + _TEN_WEEKS_FAR.split(". ")
+    fitting = [t for t in texts if any(high <= 14 for _, high, _, _ in _role_lengths(t))]
+    assert len(fitting) >= 30  # premise: the fixtures exercise the strict reader
+    assert [t for t in fitting if _fitting_length(t, 14) is None] == []
+
+
+@pytest.mark.parametrize("template", _LABELLED)
+def test_a_marked_or_piped_duration_label_is_read_by_both_readers(template: str) -> None:
+    """A list marker, bold, or a preceding " | " field must not hide the label.
+    Mutation: make `_LABEL_START` a bare line start -- none is read."""
+    knockout = "Data Science Intern. This internship runs 6 months."
+    assert season("Duration: 6 months", "") == [("duration", "knockout")]  # premise
+    assert season(template.format("6 months"), "") == [("duration", "knockout")]
+    assert season(f"{knockout}\n{template.format('10 weeks')}", "") == [("duration", "stretch")]
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "We hire graduate and undergraduate students for our Fall 2027 cohort.",
+        "<ul><li>Recent graduates and current students welcome</li></ul>"
+        "<p>Interns start in Fall 2027 for one semester.</p>",
+    ],
+)
+def test_a_season_after_graduates_who_are_people_is_still_a_term(text: str) -> None:
+    """ "Graduate students" and "recent graduates" are not a date. Mutation: skip
+    every season after a graduation word -- each loses its stretch."""
+    assert "graduat" in text and "Fall 2027" in text  # premise
+    assert text.index("graduat") < text.index("Fall 2027")
+    assert season(text, "Data Intern") == [("season", "stretch")]
