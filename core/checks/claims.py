@@ -215,10 +215,8 @@ def _check_entry(label: str, entry: Entry, facts: Mapping[str, Fact]) -> list[st
             f"{label}: employer {entry.heading!r} is not the organization of any cited "
             "experience, education or project fact"
         )
-    elif all(_mismatches(entry, f) for f in anchors):
-        findings.append(
-            f"{label}: header does not match its fact: " + "; ".join(_mismatches(entry, anchors[0]))
-        )
+    elif all(mismatches := [_mismatches(entry, f) for f in anchors]):
+        findings.append(f"{label}: header does not match its fact: " + "; ".join(mismatches[0]))
 
     own = set(entry.sources)
     for n, bullet in enumerate(entry.bullets):
