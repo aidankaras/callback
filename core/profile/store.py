@@ -178,7 +178,7 @@ def load_facts() -> dict[str, Fact]:
             facts[fid] = Fact.model_validate(body | {"id": fid})
         except ValidationError as exc:
             raise StoreError(
-                f"{path}: fact {fid!r} no longer validates: {_validation_problems(exc)}"
+                f"{path}: fact {fid!r} no longer validates: {fact_validation_problems(exc)}"
             ) from exc
         except TypeError as exc:
             raise StoreError(f"{path}: fact {fid!r} has a body that is not a mapping") from exc
@@ -194,7 +194,7 @@ _SCHEMA_FIELDS = frozenset(
 )
 
 
-def _validation_problems(exc: ValidationError) -> str:
+def fact_validation_problems(exc: ValidationError) -> str:
     def part(p: int | str) -> str:
         return str(p) if isinstance(p, int) or p in _SCHEMA_FIELDS else "<key>"
 
@@ -225,6 +225,18 @@ def facts_sha256() -> str | None:
     """
     path = resolve_inside(FACTS_FILE)
     return hashlib.sha256(path.read_bytes()).hexdigest() if path.exists() else None
+
+
+def load_facts_judged() -> tuple[dict[str, Fact], str | None]:
+    """The facts, and the hash a report records for them, taken first.
+
+    Hashed before loading, an edit landing between the two makes the recorded
+    hash older than the facts graded, so the report reads as stale and is
+    rebuilt. Hashed after, as a report used to be, an edit made while the
+    gates ran was recorded as graded.
+    """
+    judged = facts_sha256()
+    return load_facts(), judged
 
 
 def save_facts(facts: dict[str, Fact]) -> None:
