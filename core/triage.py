@@ -520,7 +520,13 @@ def _role_lengths(sentence: str) -> list[tuple[float, float, bool, str]]:
             continue
         low = _weeks(m.group("lo"), m.group("unit"))
         high = _weeks(m.group("hi"), m.group("unit")) if m.group("hi") else low
-        hedged = link is not None and _LENGTH_HEDGE.search(link.group("tail")) is not None
+        if link is not None:
+            hedged = _LENGTH_HEDGE.search(link.group("tail")) is not None
+        else:
+            # Attributed by the noun after it ("up to 24-week internships"),
+            # a length is hedged by a hedge before it in its own clause.
+            left, _ = _clause_around(sentence, m.start(), m.end())
+            hedged = _LENGTH_HEDGE.search(sentence, left, m.start()) is not None
         if link is not None:
             quote = sentence[
                 link.start("role") if link.group("role") else link.start("label") : m.end()

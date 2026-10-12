@@ -884,6 +884,29 @@ def test_each_hedge_makes_a_length_a_stretch(text: str, hedge: str) -> None:
 
 
 @pytest.mark.parametrize(
+    ("text", "hedge"),
+    [
+        ("We offer up to 24-week internships.", "up to "),
+        ("Typically 24-week internships are offered.", "Typically "),
+        ("Internships are typically 24-week placements.", "typically "),
+    ],
+)
+def test_a_hedge_before_a_length_named_by_the_noun_after_it_is_a_stretch(
+    text: str, hedge: str
+) -> None:
+    """The first two have no role subject before the length, only the noun
+    after it, so no linking words to carry the hedge. Mutation: never hedge a
+    length attributed by the noun after it -- the first two become knockouts."""
+    assert season(text.replace(hedge, ""), "Data Intern") == [("duration", "knockout")]  # premise
+    assert season(text, "Data Intern") == [("duration", "stretch")]
+
+
+def test_an_unhedged_length_named_by_the_noun_after_it_stays_a_knockout() -> None:
+    for text in ("This is a 24-week internship.", "We offer 24-week internships."):
+        assert season(text, "Data Intern") == [("duration", "knockout")], text
+
+
+@pytest.mark.parametrize(
     ("title", "text"),
     [
         ("Backend Engineering Intern (Spring Boot)", "This is a 12-week Summer 2027 internship."),
