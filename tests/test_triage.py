@@ -1350,3 +1350,87 @@ def test_a_season_after_graduates_who_are_people_is_still_a_term(text: str) -> N
     assert "graduat" in text and "Fall 2027" in text  # premise
     assert text.index("graduat") < text.index("Fall 2027")
     assert season(text, "Data Intern") == [("season", "stretch")]
+
+
+# --- boundaries a review found unpinned ----------------------------------------------
+
+
+def _graduating(when: str) -> Profile:
+    return US_JUNIOR.model_copy(update={"graduation": when})
+
+
+def test_graduating_in_the_edge_month_of_a_window_is_inside_it() -> None:
+    """Both edges are inclusive; a knockout hides the posting, so an off-by-one
+    here hides roles the candidate qualifies for. The month past each edge is
+    outside, which shows the rule is being read at all."""
+    by, after = (
+        "Open to students graduating by June 2027.",
+        "For students graduating after June 2027.",
+    )
+    assert kinds(by, _graduating("June 2027")) == []
+    assert kinds(by, _graduating("July 2027")) == [("graduation", "knockout")]
+    assert kinds(after, _graduating("June 2027")) == []
+    assert kinds(after, _graduating("May 2027")) == [("graduation", "knockout")]
+
+
+def test_a_graduation_year_alone_is_read_as_june() -> None:
+    assert kinds("Open to students graduating by March 2027.", _graduating("2027")) == [
+        ("graduation", "knockout")
+    ]
+    assert kinds("Open to students graduating by June 2027.", _graduating("2027")) == []
+
+
+def test_a_role_exactly_as_long_as_the_limit_fits() -> None:
+    twelve = US_JUNIOR.model_copy(update={"max_weeks": 12})
+    assert kinds("This is a 12-week internship.", twelve) == []
+    assert kinds("This is a 13-week internship.", twelve) == [("duration", "knockout")]
+    # A range starting at the limit can be done; one starting past it cannot.
+    assert kinds("This is a 12-16 week internship.", twelve) == [("duration", "stretch")]
+    assert kinds("This is a 13-16 week internship.", twelve) == [("duration", "knockout")]
+
+
+def test_an_unconfirmed_fact_is_not_evidence_in_ranking_or_gaps() -> None:
+    from core.triage import gaps
+
+    imported = {
+        "u": Fact(
+            id="u",
+            kind=FactKind.SKILL,
+            text="PyTorch",
+            entities=["PyTorch"],
+            provenance=Provenance(source="import:resume", trust=Trust.IMPORT_UNCONFIRMED),
+        )
+    }
+    posting = _posting("x", "ML Intern", "PyTorch and Kubernetes.", days_old=1)
+    profile = Profile(work_authorization="US citizen")
+    assert rank([posting], profile, imported, now=NOW)[0].coverage == (
+        [],
+        ["Kubernetes", "PyTorch"],
+    )
+    assert gaps([posting], profile, imported) == [("Kubernetes", 1), ("PyTorch", 1)]
+    confirmed = {"u": imported["u"].model_copy(update={"provenance": FACTS["s"].provenance})}
+    # premise: the same fact, confirmed, is evidence
+    assert rank([posting], profile, confirmed, now=NOW)[0].coverage == (["PyTorch"], ["Kubernetes"])
+
+
+def test_an_open_eligibility_question_ranks_below_an_answered_one() -> None:
+    postings = [
+        _posting("q", "DS Intern", "Python and SQL. Must be a US citizen.", days_old=1),
+        _posting("p", "DS Intern", "Python and SQL.", days_old=1),
+    ]
+    ranked = rank(postings, Profile(), FACTS, now=NOW)
+    assert [(r.posting.id, r.eligibility.verdict) for r in ranked] == [
+        ("p", "eligible"),
+        ("q", "unknown"),
+    ]
+    assert ranked[0].score > ranked[1].score
+
+
+def test_a_posting_first_seen_in_the_future_is_no_fresher_than_today() -> None:
+    postings = [
+        _posting("future", "DS Intern", "Python and SQL.", days_old=-5),
+        _posting("today", "DS Intern", "Python and SQL.", days_old=0),
+    ]
+    ranked = {r.posting.id: r for r in rank(postings, US_JUNIOR, FACTS, now=NOW)}
+    assert ranked["future"].age_days == 0
+    assert ranked["future"].score == ranked["today"].score
