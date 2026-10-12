@@ -28,7 +28,6 @@ from typing import Literal, cast
 import yaml
 from pydantic import BaseModel, Field, ValidationError, field_validator, model_validator
 
-from core.discovery.models import normal_url
 from core.draft import ORIGIN
 from core.export.text import to_text
 from core.finalize import record_event
@@ -78,10 +77,20 @@ def _norm_name(value: str) -> str:
     return " ".join(words)
 
 
+def _url_key(url: str) -> str:
+    """`url` as two spellings of one page compare: no fragment, case-folded
+    throughout, every trailing slash and an http(s) scheme dropped, the query
+    kept, since a Greenhouse job is told apart only by its `?gh_jid=`.
+
+    Looser than the form a hand-added posting is stored under: a variant
+    spelling of a page already applied to must not read as another posting."""
+    page = url.strip().split("#", 1)[0].casefold().rstrip("/")
+    return page.removeprefix("https://").removeprefix("http://")
+
+
 def same_url(a: str, b: str) -> bool:
-    """Whether two URLs name one page, as a hand-added posting's identity
-    compares them: see `normal_url`."""
-    return normal_url(a) == normal_url(b)
+    """Whether two URLs name one page: see `_url_key`."""
+    return _url_key(a) == _url_key(b)
 
 
 class Target(BaseModel):

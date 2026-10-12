@@ -335,13 +335,22 @@ def test_the_same_url_hides_the_deadline_despite_different_terms(home: Path) -> 
     assert _deadline_lines(postings, applied) == []
 
 
-def test_a_fragment_or_a_trailing_slash_is_the_same_url_and_a_query_is_not(
+def test_a_variant_spelling_of_a_url_is_the_same_page_and_another_query_is_not(
     home: Path,
 ) -> None:
     """Mutations: keep the fragment -- "#apply" reopens the posting; drop the
-    query -- one Greenhouse job hides another."""
+    query -- one Greenhouse job hides another; compare by the stored normal
+    form -- http, path case and a doubled slash reopen it."""
     page = "https://x.org/fellowship"
-    for applied_url in (f"{page}#apply", f"{page}/", "HTTPS://X.org/fellowship"):
+    variants = (
+        f"{page}#apply",
+        f"{page}/",
+        f"{page}//",
+        "HTTPS://X.org/fellowship",
+        "http://x.org/fellowship",
+        "https://x.org/Fellowship",
+    )
+    for applied_url in variants:
         postings, applied = _season_pair("Fellowship", "Fellowship", applied_url, page)
         assert _deadline_lines(postings) != []  # premise: listed before the application
         assert _deadline_lines(postings, applied) == [], applied_url

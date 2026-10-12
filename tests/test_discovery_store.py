@@ -240,6 +240,20 @@ def test_adding_the_same_url_again_updates_it_in_place() -> None:
     assert (stored.text, stored.deadline, stored.first_seen) == ("New.", deadline, NOW)
 
 
+def test_a_fragment_is_one_page_and_another_query_is_another() -> None:
+    """Mutations: keep the fragment -- two postings; drop the query -- one."""
+    from core.discovery.store import add_manual
+
+    first = add_manual("Example", "Research", DAAD_URL, "Old.", None, now=NOW)
+    again = add_manual("Example", "Research", f"{DAAD_URL}#apply", "New.", None, now=NOW)
+    assert again.id == first.id
+    job = "https://boards.greenhouse.io/embed/job_app?gh_jid="
+    one = add_manual("Acme", "Intern", f"{job}1", "One.", None, now=NOW)
+    two = add_manual("Acme", "Intern", f"{job}2", "Two.", None, now=NOW)
+    assert one.id != two.id
+    assert len(load_postings()) == 3
+
+
 def test_the_url_identifies_a_manual_posting_whatever_the_company_is_called() -> None:
     """Mutation: key the id on the company slug alone -- two postings."""
     from core.discovery.store import add_manual

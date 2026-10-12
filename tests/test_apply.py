@@ -310,6 +310,30 @@ def test_a_near_duplicate_posting_is_refused_within_90_days(
         apply(_target("acme-ml-2", **variant), now=NOW + timedelta(days=1))
 
 
+@pytest.mark.parametrize(
+    "url",
+    [
+        "http://boards.greenhouse.io/acme/jobs/1",
+        "https://boards.greenhouse.io/acme/Jobs/1",
+        "https://boards.greenhouse.io/acme/jobs/1//",
+        "https://boards.greenhouse.io/acme/jobs/1#apply",
+    ],
+)
+def test_a_variant_spelling_of_the_url_is_the_same_posting(url: str) -> None:
+    """Under another company name, so only the URL can match. Mutation:
+    compare by the stored normal form -- http and https are two postings."""
+    stored = _target()
+    variant = _target("acme-ml-2", company="Different Name", url=url)
+    assert not stored.same_posting(variant.model_copy(update={"url": ""}))  # premise
+    assert stored.same_posting(variant)
+
+
+def test_another_greenhouse_job_on_the_same_page_is_another_posting() -> None:
+    page = "https://boards.greenhouse.io/embed/job_app?gh_jid="
+    first = _target(company="Different Name", url=f"{page}1")
+    assert not _target(url=f"{page}2").same_posting(first)
+
+
 def test_a_failed_record_save_leaves_no_packet_behind(
     home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
