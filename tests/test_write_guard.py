@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import subprocess
 import sys
+import time
 from collections.abc import Mapping
 from pathlib import Path
 
@@ -213,6 +214,7 @@ def test_the_default_home_and_its_ordinary_spellings_are_guarded(
         'git commit -m "docs: explain callback facts confirm"',
         'grep -rn "callback facts confirm" docs/',
         'git commit -m "validate facts.yaml schema"',
+        'git commit -m "explain why {home}/facts.yaml is guarded"',
         "ls {home}/outputs/job/final",
     ],
 )
@@ -509,6 +511,41 @@ def test_a_command_that_looks_but_carries_a_write_is_refused(home: Path, command
 def test_changing_directory_through_a_substitution_is_refused(home: Path, command: str) -> None:
     """`cd` is exempt only when it can neither run nor write, like `ls`."""
     assert denied(run_guard(_bash(command.format(home=home)), home, cwd=home.parent)), command
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        'git commit -m "$(rm {home}/facts.yaml)"',
+        'git commit --message "$(rm {home}/facts.yaml)"',
+        'git commit -m "`rm {home}/facts.yaml`"',
+        'git tag -m "$(cp /dev/null {home}/facts.yaml)" v1',
+    ],
+)
+def test_a_commit_message_runs_what_it_substitutes(home: Path, command: str) -> None:
+    """A message is exempt as text, not as a place to run a command: the shell
+    runs `$(...)` before git sees the message. The plain-text message naming
+    the same path is allowed (test_mentioning_a_protected_name_is_not_writing_it)."""
+    assert denied(run_guard(_bash(command.format(home=home)), home, cwd=home.parent)), command
+
+
+def test_a_long_chain_of_directory_changes_is_refused_within_the_hook_timeout(
+    home: Path,
+) -> None:
+    """Each `cd` doubles the directories a later path could be relative to, so
+    twenty took longer than the hook's 10 s timeout, and a hook that times out
+    does not block. A chain too long to check is refused, quickly."""
+    chain = " && ".join(["cd a"] * 20) + f" && rm {home}/facts.yaml"
+    start = time.monotonic()
+    result = run_guard(_bash(chain), home, cwd=home.parent)
+    assert denied(result), result.stderr
+    assert time.monotonic() - start < 5
+
+
+def test_a_few_directory_changes_are_still_checked_not_refused(home: Path) -> None:
+    short = " && ".join(["cd a"] * 3) + " && ls"
+    assert run_guard(_bash(short), home, cwd=home.parent).returncode == 0
+    assert denied(run_guard(_bash(f"cd a && cd b && rm {home}/facts.yaml"), home, cwd=home.parent))
 
 
 @pytest.mark.parametrize(

@@ -89,6 +89,7 @@ _LOOK_ONLY = {"ls", "stat", "du"}
 # backtick, and process substitution `<(...)` and `>(...)`.
 _SUBSTITUTION = re.compile(r"`|[$<>]\(")
 _MESSAGE_FLAGS = {"-m", "--message"}
+_MAX_BASES = 64
 
 
 def deny(reason: str) -> None:
@@ -278,7 +279,10 @@ def _check_paths(words: list[str], bases: list[Path]) -> None:
         if skip_next:
             skip_next = False
             continue
-        if word in _MESSAGE_FLAGS:
+        # A message is text, unless the shell runs part of it first.
+        if word in _MESSAGE_FLAGS and not (
+            n + 1 < len(words) and _SUBSTITUTION.search(words[n + 1])
+        ):
             skip_next = True
             continue
         if word in {"-C", "--directory"} and n + 1 < len(words):
@@ -352,7 +356,13 @@ def check_bash(command: str, cwd: Path) -> None:
         # an `rm`, whatever runs first.
         substitutes = any(_SUBSTITUTION.search(w) for w in segment)
         if words[0] in {"cd", "pushd"} and len(words) > 1:
+            # Each `cd` may or may not have run, so it doubles the directories a
+            # later path could be relative to. Past a few, checking them all
+            # outlasts the hook's timeout, and a hook that times out does not
+            # block: refuse instead.
             bases += [base / _expand(words[1]) for base in bases]
+            if len(bases) > _MAX_BASES:
+                deny("too many directory changes in one command to check; run them separately")
             if not redirects and not substitutes:
                 continue
         if words[0] in _LOOK_ONLY and not redirects and not substitutes:
