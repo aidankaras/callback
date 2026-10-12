@@ -148,7 +148,10 @@ def agenda(
             )
 
     # A deadline is a date, like an interview: soonest first.
-    items.extend(_deadlines(postings, applications, now=now))
+    # A posting listed here is not offered again in the shortlist below.
+    dated = _deadlines(postings, applications, now=now)
+    items.extend(item for _, item in dated)
+    listed = {posting_id for posting_id, _ in dated}
 
     # A draft that passed but was never sent is work already done.
     ready, unreadable = _drafted_jobs()
@@ -181,7 +184,9 @@ def agenda(
             break
         if row.posting.id in applied_to or row.posting.company.casefold() in taken:
             continue
-        if any(_is_applied(a, _target(row.posting)) for a in applications):
+        if row.posting.id in listed:
+            continue
+        if any(_is_applied(a, row.posting) for a in applications):
             continue
         if row.eligibility.verdict == "knockout":
             continue
@@ -224,19 +229,7 @@ def _term(title: str) -> str | None:
     return " ".join(match.group(1).casefold().split()) if match else None
 
 
-def _target(posting: Found) -> Target:
-    """A stored posting as `apply` describes one: applications record no posting id."""
-    return Target(
-        job_id="posting",
-        company=posting.company,
-        title=posting.title,
-        location=posting.location,
-        url=posting.url,
-        source="other",
-    )
-
-
-def _is_applied(application: Application, posting: Target) -> bool:
+def _is_applied(application: Application, posting: Found) -> bool:
     """Whether `application` was made to `posting`, leaning the other way from
     `same_posting`, which leans towards matching so that `apply` never reopens
     a posting; here that bias would hide a deadline or a suggestion.
@@ -245,10 +238,22 @@ def _is_applied(application: Application, posting: Target) -> bool:
     "/2026" application is not this cycle's "/2027" posting, whatever the
     title. With a URL missing on either side, `same_posting`'s company and
     title rule applies, except that titles differing only in a bracketed term
-    ("(Summer 2027)" against "(Winter 2027)") are different postings."""
+    ("(Summer 2027)" against "(Winter 2027)") are different postings. A
+    posting stored without a company or a title can match only by URL: there
+    is no name to compare, and `Target` refuses an empty one."""
     if application.url and posting.url:
         return same_url(application.url, posting.url)
-    if not application.same_posting(posting):
+    if not posting.company or not posting.title:
+        return False
+    target = Target(
+        job_id="posting",
+        company=posting.company,
+        title=posting.title,
+        location=posting.location,
+        url=posting.url,
+        source="other",
+    )
+    if not application.same_posting(target):
         return False
     a, b = _term(application.title), _term(posting.title)
     return a is None or b is None or a == b
@@ -256,11 +261,16 @@ def _is_applied(application: Application, posting: Target) -> bool:
 
 def _deadlines(
     postings: Sequence[Found], applications: Sequence[Application], *, now: datetime
-) -> list[Item]:
+) -> list[tuple[str, Item]]:
     """Postings closing in the next `DEADLINE_DAYS` days, or closed in the last
-    `CLOSED_DAYS`, that have not been applied to. Days are counted at the
-    deadline's own UTC offset: the one typed with it, or for a bare date this
-    machine's offset on that date."""
+    `CLOSED_DAYS`, that have not been applied to, as `(posting id, item)`.
+
+    Days are calendar days in this machine's timezone, each instant read at
+    the offset in force at that instant, and the date shown is the deadline's
+    date there. A stored deadline carries a fixed offset, and reading today
+    at that offset instead is a day out for one hour each night whenever the
+    clocks change between now and the deadline. A bare-date deadline is
+    23:59 local on the day typed, so it shows as that day."""
     dated: list[tuple[datetime, Found]] = []
     for posting in postings:
         deadline = posting.deadline
@@ -268,24 +278,22 @@ def _deadlines(
             continue
         if deadline > now + timedelta(days=DEADLINE_DAYS):
             continue
-        this = _target(posting)
-        if not any(_is_applied(a, this) for a in applications):
+        if not any(_is_applied(a, posting) for a in applications):
             dated.append((deadline, posting))
-    items: list[Item] = []
+    items: list[tuple[str, Item]] = []
     for deadline, posting in sorted(dated, key=lambda pair: pair[0]):
-        day = deadline.date().isoformat()
+        local = deadline.astimezone().date()
         if deadline < now:
-            when = f"closed ({day})"
+            when = f"closed ({local.isoformat()})"
         else:
-            days = (deadline.date() - now.astimezone(deadline.tzinfo).date()).days
-            when = f"closes in {days} days ({day})"
-        items.append(
-            Item(
-                "deadline",
-                f"{posting.company} {posting.title}: {when}",
-                f"callback postings take {posting.id} --job <job-id>",
-            )
+            days = (local - now.astimezone().date()).days
+            when = f"closes in {days} days ({local.isoformat()})"
+        item = Item(
+            "deadline",
+            f"{posting.company} {posting.title}: {when}",
+            f"callback postings take {posting.id} --job <job-id>",
         )
+        items.append((posting.id, item))
     return items
 
 

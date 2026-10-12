@@ -28,6 +28,7 @@ from typing import Literal, cast
 import yaml
 from pydantic import BaseModel, Field, ValidationError, field_validator, model_validator
 
+from core.discovery.models import normal_url
 from core.draft import ORIGIN
 from core.export.text import to_text
 from core.finalize import record_event
@@ -77,13 +78,10 @@ def _norm_name(value: str) -> str:
     return " ".join(words)
 
 
-def _norm_url(url: str) -> str:
-    return url.strip().casefold().rstrip("/").removeprefix("https://").removeprefix("http://")
-
-
 def same_url(a: str, b: str) -> bool:
-    """Whether two URLs name one page, as `Target.same_posting` compares them."""
-    return _norm_url(a) == _norm_url(b)
+    """Whether two URLs name one page, as a hand-added posting's identity
+    compares them: see `normal_url`."""
+    return normal_url(a) == normal_url(b)
 
 
 class Target(BaseModel):

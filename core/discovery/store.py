@@ -31,7 +31,7 @@ from dataclasses import dataclass, field
 from datetime import date, datetime, time
 from pathlib import Path
 from typing import Protocol, cast
-from urllib.parse import urlsplit, urlunsplit
+from urllib.parse import urlsplit
 
 import yaml
 from pydantic import BaseModel, Field, ValidationError
@@ -44,7 +44,7 @@ from core.discovery.ats import (
     resolve_url,
 )
 from core.discovery.fetch import DiscoveryError, Fetcher, denied_domain
-from core.discovery.models import Ats, Posting
+from core.discovery.models import Ats, Posting, normal_url
 from core.paths import resolve_inside, write_private
 
 TARGETS_FILE = "targets.yaml"
@@ -316,8 +316,7 @@ def parse_deadline(value: str) -> datetime:
 
 
 def _normal_url(url: str) -> str:
-    """The URL as one page has one spelling: scheme and host lower-cased, no
-    fragment, one trailing slash dropped from a non-root path, query kept."""
+    """`normal_url` of an http(s) URL, refusing anything else."""
     try:
         parts = urlsplit(url.strip())
         parts.port  # noqa: B018 -- reading it is what rejects a malformed port
@@ -325,8 +324,7 @@ def _normal_url(url: str) -> str:
         raise DiscoveryError(f"{url!r} is not a URL: {exc}") from exc
     if parts.scheme.lower() not in {"http", "https"} or not parts.netloc:
         raise DiscoveryError(f"{url!r} is not an http(s) URL")
-    path = parts.path[:-1] if len(parts.path) > 1 and parts.path.endswith("/") else parts.path
-    return urlunsplit((parts.scheme.lower(), parts.netloc.lower(), path, parts.query, ""))
+    return normal_url(url)
 
 
 def _same_page(stored: str, url: str) -> bool:
