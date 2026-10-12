@@ -145,11 +145,11 @@ def test_the_answers_name_must_be_the_confirmed_one() -> None:
 
 def test_a_stock_phrase_in_an_answer_fails() -> None:
     filler = Sentence(
-        kind="employer", text="The team is a dynamic team building robots.", sources=["posting"]
+        kind="employer", text="The team is passionate about building robots.", sources=["posting"]
     )
     doc = answers({"question": "Why Acme?", "sentences": [filler, CLAIM]})
     found = check_answers(doc, FACTS, POSTING).findings
-    assert any("stock phrase 'dynamic team'" in f for f in found), found
+    assert any("stock phrase 'passionate about'" in f for f in found), found
 
 
 @pytest.mark.parametrize("loaded", [None, "quant-research"])

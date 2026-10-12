@@ -53,8 +53,6 @@ PLANTED = (
     ("I am writing to express my interest in the role", "I am writing to express"),
     ("Leveraged the cluster to train 3 models", "Leveraged the"),
     ("Leveraging state-of-the-art tools for 2 projects", "Leveraging state-of-the-art"),
-    ("Delivered a robust solution for 5 clients", "robust solution"),
-    ("Joined a dynamic team of 8", "dynamic team"),
     ("Produced data-driven insights for 3 desks", "data-driven insights"),
 )
 
@@ -74,6 +72,8 @@ COLLISIONS = (
     ("Computed the leverage ratio across 40 funds", "leverage"),
     ("Estimated robust standard errors for 12 panel regressions", "robust"),
     ("Solved routing with dynamic programming in C++", "dynamic"),
+    ("Found a robust solution to a min-max portfolio problem", "robust solution"),
+    ("Trained dynamic teams of agents in a 4-player MARL benchmark", "dynamic teams"),
     ("Drove a 3\u00d7 speed-up in the nightly ETL job", "drove"),
     ("Screened synergistic drug combinations across 200 cell lines", "synergistic"),
     ("Modelled retention for 2M Steam players", "team player"),

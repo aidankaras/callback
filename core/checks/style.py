@@ -56,8 +56,6 @@ PHRASE_ONLY = (
     # Not the bare verb: "the leverage the bank took on" is the finance noun.
     r"leverag(?:ed|ing) (?:my|our|the)",
     r"leveraging state(?:-| )of(?:-| )the(?:-| )art",
-    r"robust solutions?",
-    r"dynamic teams?",
     r"data(?:-| )driven insights?",
 )
 
