@@ -70,8 +70,7 @@ and the report it names opens with what to fix:
 
 The PDF still exists, watermarked, in `draft/`: a document is always delivered, and
 provenance decides where it lands. With the invented bullet and skill removed, the
-same facts build to this, with one warning (two bullets under a role, where three
-are expected):
+same facts build to this, with every gate passing:
 
 ![A one-page resume for the synthetic candidate Dana Vex](docs/images/example-resume.png)
 
