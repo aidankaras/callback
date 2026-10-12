@@ -15,7 +15,7 @@ What is protected, under `$CALLBACK_HOME` (default `~/.callback`):
 - `notes.yaml`, the candidate's standing preferences. An assistant may
   propose or retire a note through `callback`; only the candidate activates
   one, with `callback notes activate` at their own terminal.
-- anything under an `outputs/<job>/final/` or `released/` directory.
+- anything under an `outputs/<job>/final/` or `packet/` directory.
 - `applications.yaml`, the application record the volume limits read.
 - key, ledger and database files.
 - and, wherever the plugin lives, this guard and its `hooks.json`.
@@ -77,7 +77,7 @@ PROTECTED_NAMES = {
     "callback.db",
     "callback.db-wal",
 }
-SEALED_DIRS = {"final", "released"}
+SEALED_DIRS = {"final", "packet"}
 GUARD_FILES = {Path(__file__).resolve(), Path(__file__).resolve().with_name("hooks.json")}
 
 _OPERATORS = {";", "&&", "||", "|", "&", "(", ")"}
@@ -89,6 +89,7 @@ _LOOK_ONLY = {"ls", "stat", "du"}
 # backtick, and process substitution `<(...)` and `>(...)`.
 _SUBSTITUTION = re.compile(r"`|[$<>]\(")
 _MESSAGE_FLAGS = {"-m", "--message"}
+_MAX_BASES = 64
 
 
 def deny(reason: str) -> None:
@@ -101,17 +102,37 @@ def data_home() -> Path:
     return (Path(raw) if raw else Path.home() / ".callback").expanduser().resolve()
 
 
+# `${NAME:-default}` and its kin: the variable's value if it is set (and, with
+# the colon, not empty), the default otherwise. The docs' "default
+# `~/.callback`" is written `${CALLBACK_HOME:-$HOME/.callback}` in a shell.
+_DEFAULTED = re.compile(r"\$\{(\w+)(:?)[-=]([^{}]*)\}")
+
+
 def _expand(raw: str) -> str:
     """`raw` with `~`, `$HOME` and `$CALLBACK_HOME` spelled out, as a shell would."""
     home = str(data_home())
     user_home = str(Path.home())
-    for var, value in (
-        ("${CALLBACK_HOME}", home),
-        ("$CALLBACK_HOME", home),
-        ("${HOME}", user_home),
-        ("$HOME", user_home),
-    ):
-        raw = raw.replace(var, value)
+
+    def defaulted(m: re.Match[str]) -> str:
+        value = os.environ.get(m[1])
+        unset = value is None or (m[2] == ":" and value == "")
+        return m[3] if unset else f"${{{m[1]}}}"
+
+    # Innermost first, until nothing changes: a default may itself hold a
+    # braced variable, `${CALLBACK_HOME:-${HOME}/.callback}`. Bounded, since a
+    # value could in principle spell a variable again.
+    for _ in range(8):
+        before = raw
+        for var, value in (
+            ("${CALLBACK_HOME}", home),
+            ("$CALLBACK_HOME", home),
+            ("${HOME}", user_home),
+            ("$HOME", user_home),
+        ):
+            raw = raw.replace(var, value)
+        raw = _DEFAULTED.sub(defaulted, raw)
+        if raw == before:
+            break
     if raw == "~" or raw.startswith("~/"):
         raw = user_home + raw[1:]
     return raw
@@ -199,6 +220,29 @@ def _command_words(segment: list[str]) -> list[str]:
     return words[2:] if words[:2] == ["uv", "run"] else words
 
 
+# Words that may precede a command in the same simple command.
+_KEYWORDS = {"if", "then", "elif", "else", "while", "until", "do", "!", "time", "{"}
+
+
+def _cd_target(words: list[str]) -> str | None:
+    """The directory a `cd` or `pushd` in `words` moves to, or None if there is none.
+
+    A keyword before it does not hide it (`if cd x; then ...`), its flags,
+    clustered or not, are not its directory (`cd -P x`, `cd -LP x`, `cd -- x`),
+    and a bare `cd` goes home.
+    """
+    while words and words[0] in _KEYWORDS:
+        words = words[1:]
+    if not words or words[0] not in {"cd", "pushd"}:
+        return None
+    rest = words[1:]
+    while rest and re.fullmatch(r"-[A-Za-z@]+", rest[0]):
+        rest = rest[1:]
+    if rest and rest[0] == "--":
+        rest = rest[1:]
+    return rest[0] if rest else "~"
+
+
 def _runs(words: list[str], wanted: list[str]) -> bool:
     """Whether `wanted` appears in `words` as consecutive words, anywhere: a
     wrapper's flags may precede the command, and `uv run --locked callback ...`
@@ -278,7 +322,10 @@ def _check_paths(words: list[str], bases: list[Path]) -> None:
         if skip_next:
             skip_next = False
             continue
-        if word in _MESSAGE_FLAGS:
+        # A message is text, unless the shell runs part of it first.
+        if word in _MESSAGE_FLAGS and not (
+            n + 1 < len(words) and _SUBSTITUTION.search(words[n + 1])
+        ):
             skip_next = True
             continue
         if word in {"-C", "--directory"} and n + 1 < len(words):
@@ -290,8 +337,16 @@ def _check_paths(words: list[str], bases: list[Path]) -> None:
         # A word may carry a path inside quotes or code, e.g. open('<path>','w').
         candidates = {word, *re.findall(r"[\w~$./@+{}*?-]+", word)}
         for candidate in candidates:
+            expanded = _expand(candidate)
+            # A variable left unexpanded names a directory this guard cannot
+            # know; before a protected file name, refuse rather than guess.
+            if "$" in expanded and Path(expanded).name in PROTECTED_NAMES:
+                deny(
+                    f"command names {Path(expanded).name} behind a variable the guard "
+                    f"cannot expand ({candidate})"
+                )
             for base in local:
-                reason = protected(base / _expand(candidate))
+                reason = protected(base / expanded)
                 if reason:
                     deny(
                         f"command names a protected path ({candidate}): {reason}; "
@@ -300,8 +355,20 @@ def _check_paths(words: list[str], bases: list[Path]) -> None:
 
 
 def check_bash(command: str, cwd: Path) -> None:
+    # Every directory any part of the command may run in, gathered before any
+    # path is checked: `echo facts.yaml | (cd ~/.callback && xargs rm)` names
+    # the file before the `cd` that it is relative to. Each `cd` may or may not
+    # have run, so it doubles the candidates; past a few, checking them all
+    # outlasts the hook's timeout, and a hook that times out does not block.
+    segments = _segments(command)
     bases = [cwd]
-    for segment in _segments(command):
+    for segment in segments:
+        target = _cd_target(_command_words(segment))
+        if target is not None:
+            bases += [base / _expand(target) for base in bases]
+            if len(bases) > _MAX_BASES:
+                deny("too many directory changes in one command to check; run them separately")
+    for segment in segments:
         words = _command_words(segment)
         # The raw segment, assignments included: `C='callback facts confirm';
         # script -qc "$C"` carries the command in a variable, and a leading
@@ -351,10 +418,8 @@ def check_bash(command: str, cwd: Path) -> None:
         # A substitution runs a command inside the argument: `ls "$(rm x)"` is
         # an `rm`, whatever runs first.
         substitutes = any(_SUBSTITUTION.search(w) for w in segment)
-        if words[0] in {"cd", "pushd"} and len(words) > 1:
-            bases += [base / _expand(words[1]) for base in bases]
-            if not redirects and not substitutes:
-                continue
+        if _cd_target(words) is not None and not redirects and not substitutes:
+            continue
         if words[0] in _LOOK_ONLY and not redirects and not substitutes:
             continue
         _check_paths(words, bases)

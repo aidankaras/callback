@@ -2,7 +2,10 @@
 
 **Decision.** `core/discovery/` is the only package that opens a socket. It
 reads four documented public posting APIs by allowlist, and one careers page at
-a time from the structured data that page publishes for search engines.
+a time from the structured data that page publishes for search engines. One
+command outside discovery uses its fetcher: `callback facts github` reads the
+candidate's own public repositories from `api.github.com`, on an allowlist of
+that one host.
 Everything else — the job sites a candidate actually browses, aggregators, and
 several other applicant-tracking systems — is refused in code, by name where a
 name exists.

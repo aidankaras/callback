@@ -742,7 +742,7 @@ class Ranked:
     posting: Found
     score: float
     eligibility: Eligibility
-    coverage: tuple[list[str], list[str]] = field(default=([], []))
+    coverage: tuple[list[str], list[str]] = field(default_factory=lambda: ([], []))
     age_days: int = 0
     tier: str = OTHER_TIER
 

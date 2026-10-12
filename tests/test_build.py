@@ -135,6 +135,29 @@ def test_the_report_names_the_exact_pdf_and_document_it_judged(tmp_path: Path) -
 
 
 @pytest.mark.slow
+def test_the_report_records_the_facts_it_graded_not_an_edit_made_during_the_build(
+    tmp_path: Path, home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A fact edited while the build runs was not graded, so the report must not
+    record the edited store: apply compares this hash to refuse a stale draft."""
+    import core.buildcmd
+
+    store = home / "facts.yaml"
+    graded = store.read_bytes()
+    real = core.buildcmd.run_gates
+
+    def edit_then_grade(*args: object, **kwargs: object) -> object:
+        store.write_bytes(graded + b"# edited mid-build\n")
+        return real(*args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr("core.buildcmd.run_gates", edit_then_grade)
+    result = build(_write(tmp_path, sample_doc()), "northwind-de")
+    record = json.loads((result.out_dir / "report.json").read_text())
+    assert store.read_bytes() != graded  # premise: the store changed during the build
+    assert record["facts_sha256"] == hashlib.sha256(graded).hexdigest()
+
+
+@pytest.mark.slow
 def test_a_failing_build_exits_2_and_leads_with_what_to_fix(tmp_path: Path) -> None:
     doc = _write(tmp_path, sample_doc("Cut the review queue to 999 items"))
     result = build(doc, "northwind-de")

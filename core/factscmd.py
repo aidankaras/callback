@@ -31,9 +31,15 @@ import yaml
 from pydantic import ValidationError
 
 from core.checks.grounding import Verdict, check_bullet
-from core.errors import validation_problems, yaml_problem
+from core.errors import yaml_problem
 from core.profile.models import Fact, FactKind, Provenance, Trust
-from core.profile.store import StoreError, add_fact, load_facts, save_facts
+from core.profile.store import (
+    StoreError,
+    add_fact,
+    fact_validation_problems,
+    load_facts,
+    save_facts,
+)
 from core.terminal import NoTerminalError, Terminal, ask, connect
 
 _ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}")
@@ -100,7 +106,7 @@ def add_from_file(path: Path, *, replace: bool = False) -> tuple[list[str], list
             add_fact(fact, replace=replace)
         except ValidationError as exc:
             # The reason, not the entry: the file may be any file on the machine.
-            rejected.append((label, validation_problems(exc)))
+            rejected.append((label, fact_validation_problems(exc)))
             continue
         except StoreError as exc:
             rejected.append((label, str(exc)))

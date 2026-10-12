@@ -24,7 +24,7 @@ from core.briefs import BriefError, load_checked_brief
 from core.draft import RESUME_ARTIFACTS
 from core.gates import GateOutcome, GateReport, run_gates
 from core.paths import private_dir, write_private, write_private_bytes
-from core.profile.store import facts_sha256, load_facts
+from core.profile.store import load_facts_judged
 from core.render.typst import RenderError, render
 from core.resume.io import parse_doc
 from core.triage import ProfileError, load_profile
@@ -80,7 +80,7 @@ def build(doc_path: Path, job_id: str) -> BuildResult:
         )
     doc_bytes = doc_path.read_bytes()
     doc = parse_doc(doc_bytes, origin=doc_path)
-    facts = load_facts()
+    facts, judged = load_facts_judged()
     # The page limit is the candidate's, not the document's: a draft cannot
     # grant itself a second page.
     try:
@@ -129,7 +129,7 @@ def build(doc_path: Path, job_id: str) -> BuildResult:
         "pdf_sha256": hashlib.sha256(pdf_bytes).hexdigest(),
         # The facts the gates judged against, so a later seal can refuse if
         # they have changed since.
-        "facts_sha256": facts_sha256(),
+        "facts_sha256": judged,
         "outcomes": [
             {"gate": o.gate, "verdict": o.verdict, "findings": list(o.findings)}
             for o in report.outcomes

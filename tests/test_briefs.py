@@ -189,7 +189,7 @@ def test_the_brief_commands_report_the_check(
 ) -> None:
     from core.cli import main
 
-    _store(home, "quant-research", _body())
+    store_brief(home, "quant-research")
     assert main(["brief", "check", "quant-research"]) == 0
     assert main(["brief", "show", "quant-research"]) == 0
     shown = capsys.readouterr().out
@@ -216,7 +216,7 @@ def test_the_brief_tool_returns_the_brief_and_its_check(home: Path) -> None:
 
     from core.mcp_server import server
 
-    _store(home, "quant-research", _body())
+    store_brief(home, "quant-research")
     result = asyncio.run(server.call_tool("brief", {"field": "quant-research"}))
     content = result.structured_content  # type: ignore[attr-defined]
     assert content["check"] == {"verdict": "pass", "fails": [], "warns": []}

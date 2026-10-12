@@ -412,3 +412,17 @@ def test_the_candidate_is_shown_what_a_fact_is_filed_under(tmp_path: Path) -> No
     shown = asked.shown.getvalue()
     assert shown.count("filed under:") == 1
     assert "filed under: school (B.S. at Example University)" in shown
+
+
+def test_a_rejected_fact_names_its_schema_fields_but_not_the_files_own_keys(
+    tmp_path: Path,
+) -> None:
+    """A metric's label under `numbers` is the candidate's text, as private as
+    a value; the reason for a rejection keeps only the schema's own names."""
+    private = "salary at Acme 185k"
+    bad = _draft("a", "one", numbers={private: "not a quantity"})
+    added, rejected = add_from_file(_file(tmp_path, [bad]))
+    assert added == [] and len(rejected) == 1
+    reason = rejected[0][1]
+    assert "numbers.<key>" in reason, reason  # premise: it is the numbers label that failed
+    assert private not in reason and "Acme" not in reason, reason

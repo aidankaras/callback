@@ -748,10 +748,10 @@ def _cmd_template_use(args: argparse.Namespace) -> int:
 
 def _cmd_answers(args: argparse.Namespace) -> int:
     from core.answers import AnswersError, build_answers
-    from core.profile.store import StoreError, load_facts
+    from core.profile.store import StoreError, load_facts_judged
 
     try:
-        result, out_dir = build_answers(args.doc, load_facts())
+        result, out_dir = build_answers(args.doc, *load_facts_judged())
     except (AnswersError, StoreError, OSError) as exc:
         print(f"callback answers: {exc}", file=sys.stderr)
         return 3
