@@ -16,7 +16,7 @@ something you can re-run, not something the model reports about itself. There is
 | Property | Mechanism |
 |---|---|
 | Only facts the candidate confirmed can back a document | `callback facts confirm` reads its answers from the controlling terminal, not from input a program can pipe in; a write-guard hook refuses an assistant's edits to the fact store and its attempts to run confirm through a wrapper that fakes a terminal. This stops accidents and a model steered by a posting; it is not a boundary against a program built to get round it (`docs/limitations.md`) |
-| Bullets make no claim their facts do not state | every number (including spelled-out ones), date, technology, mid-sentence name and claim word (award, promoted, doubled, …) must appear in the cited facts; a count cannot rest on a percentage |
+| Bullets make no claim their facts do not state | every number (including spelled-out ones), date, recognised technology, mid-sentence name and claim word (award, promoted, doubled, …) must appear in the cited facts; a count cannot rest on a percentage |
 | Entry headers are not inflated | every header field an entry prints (employer, title, location, dates) must equal the same cited fact's; a bullet may cite only its own entry's facts |
 | Nothing is added around the content | the identity block must match a confirmed contact fact; section titles come from a fixed list; every listed skill needs confirmed backing |
 | The PDF is machine-readable | the rendered PDF is re-extracted with a deliberately naive parser, and every critical field must be recovered in order |
