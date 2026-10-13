@@ -10,7 +10,9 @@ by design rather than merely unimplemented.
   false passes everything.
 - **Ordinary wording.** Bullets and cover-letter sentences are checked for numbers, dates,
   technologies, mid-sentence capitalised names, a fixed list of claim words, and spelled-out
-  numbers. Ordinary verbs and nouns are not compared: "led the migration" and "helped with the
+  numbers. A technology is recognised by the alias table or by its spelling; one written in
+  lowercase letters only and absent from the table (`xgboost`, `dbt`, `pytest`) reads as an
+  ordinary word and is not checked, while `XGBoost` is. Ordinary verbs and nouns are not compared: "led the migration" and "helped with the
   migration" ground identically. The `style` gate adds only a fixed list of stock phrases, copying
   from a brief's exemplars, and a warning on a resume bullet with no digit and none of its cited
   facts' entities; it does not judge whether a sentence is good.
@@ -67,6 +69,11 @@ by design rather than merely unimplemented.
   Aggregator APIs are not read.
 - **Research about an employer.** A cover letter may say about the company only what the posting
   says.
+- **A browser interface.** Everything runs from the terminal or a Claude Code session. A local
+  dashboard that captures the posting being viewed and lists the files ready to submit is not built.
+- **Discovery from job-alert emails.** Alert emails that LinkedIn or Handshake send to the
+  candidate's own mailbox, resolved to the employer's own posting where possible, are not read.
+  Reading those sites' pages stays a non-goal (below).
 
 ## Explicit non-goals
 

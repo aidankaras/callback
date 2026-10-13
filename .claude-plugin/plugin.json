@@ -1,6 +1,6 @@
 {
   "name": "callback",
-  "description": "Tailor a resume to a job posting with deterministic checks: every claim traced to a fact the candidate confirmed, ATS parseability verified on the rendered PDF, and no hidden text.",
+  "description": "Tailor a resume to a job posting with deterministic checks: every claim traced to a fact the candidate confirmed, the rendered PDF re-extracted and checked for every critical field, and no hidden text.",
   "version": "0.1.0",
   "author": {
     "name": "Aidan Karas"

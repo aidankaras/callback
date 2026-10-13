@@ -18,5 +18,5 @@ uselessness.
 |---|---|
 | [01 — Adversarial extraction](01-adversarial-extraction.md) | `checks/naive_extract`, `checks/roundtrip` |
 | [02 — Gate result shapes](02-gate-result-shapes.md) | `gates` (superseded `checks/result`, now removed), `checks/grounding`, `checks/roundtrip`, `checks/hidden` |
-| [03 — Open findings](03-open-findings.md) | `checks/roundtrip` |
+| [03 — Open findings](03-open-findings.md) | `checks/roundtrip`, `paths`, `apply`, `triage` |
 | [04 — Network policy](04-network-policy.md) | `discovery/fetch`, `discovery/page`, `discovery/store` |
