@@ -38,7 +38,7 @@ jobs:
   audit:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           # Full history: the audit checks whether files keep being amended for
           # the same defect class, which a shallow clone cannot show.
@@ -51,12 +51,12 @@ jobs:
 
       # Property 4 asks whether each check can fail, which is answered by
       # running the suite, not by reading it: the audit may call `uv run`.
-      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4  # v10.1.0
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2  # v10.3.3
       - name: Install the project
         run: uv sync --locked
 
       - name: Run the audit
-        uses: anthropics/claude-code-action@cfc3eb22bfed5c26ef66e3223c982af27e4524de  # v1
+        uses: anthropics/claude-code-action@d535f5172dec02b204866b393d6b20b9b2aaf98d  # v1
         env:
           # Keep subagents in the foreground. The review and audit both start
           # agents in the background and end their turn to wait for them, and
@@ -192,7 +192,7 @@ jobs:
       # a pull request per run, which also could not work from a feature branch,
       # whose workflow-file changes the default token may not push.
       - name: Keep the report with the run
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
         with:
           name: standards-audit
           path: reports/standards-audit.md
