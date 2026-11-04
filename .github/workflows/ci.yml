@@ -1,5 +1,10 @@
 name: CI
-on: [push, pull_request]
+on:
+  push:
+  pull_request:
+  schedule:
+    - cron: "0 13 * * 1"   # weekly: catch dependency drift
+  workflow_dispatch:
 permissions:
   contents: read
 jobs:
