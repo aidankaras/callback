@@ -75,9 +75,11 @@ jobs:
           # artifact, and the runner is discarded. Subagents are disallowed:
           # one run delegated its reading to background agents and ended its turn
           # waiting for them, which in an unattended run ends the audit unwritten.
-          # Printed so a failed run says why; the repository is private and
-          # the audit reads nothing a contributor cannot already see.
-          show_full_output: true
+          # Off: the repository is public, so Actions logs are readable by
+          # anyone, and a full transcript is not something to publish on a
+          # schedule. A failed run is diagnosed from the uploaded report and
+          # the action's summary line; enable this on a manual run if needed.
+          show_full_output: false
           claude_args: |
             --max-turns 160
             --allowedTools "Read,Grep,Glob,Bash(git log:*),Bash(git show:*),Bash(git diff:*),Bash(find:*),Bash(cat:*),Bash(ls:*),Bash(wc:*),Bash(head:*),Bash(tail:*),Bash(sed -n:*),Bash(grep:*),Bash(uv run pytest:*),Bash(uv run python:*),Bash(uv run pyright:*),Bash(uv run ruff:*),Write"
