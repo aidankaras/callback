@@ -2,7 +2,7 @@
 name = "callback"
 version = "0.1.0"
 description = "Tailor, check and package a job application: grounded claims, round-trip parseability, no hidden text"
-requires-python = ">=3.12,<3.13"
+requires-python = ">=3.12,<3.14"
 dependencies = [
     "pydantic>=2.9",
     "pyyaml>=6.0.2",

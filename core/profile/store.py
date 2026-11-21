@@ -20,6 +20,7 @@ import yaml
 from pydantic import ValidationError
 
 from core.aliases import canonicalize
+from core.errors import yaml_problem
 from core.paths import OutsideHomeError, resolve_inside, write_private
 from core.profile.models import Dates, Derivation, Fact, Provenance, Quantity, Trust
 
@@ -156,7 +157,7 @@ def load_facts() -> dict[str, Fact]:
     try:
         parsed = yaml.safe_load(text)
     except yaml.YAMLError as exc:
-        raise StoreError(f"{path} is not valid YAML{_yaml_problem(exc)}") from exc
+        raise StoreError(f"{path} is {yaml_problem(exc)}") from exc
     if parsed is None:
         parsed = {}
     elif not isinstance(parsed, dict):
@@ -202,18 +203,6 @@ def fact_validation_problems(exc: ValidationError) -> str:
         f"{'.'.join(part(p) for p in error['loc'])}: {error['msg']}"
         for error in exc.errors(include_input=False, include_url=False)
     )
-
-
-def _yaml_problem(exc: yaml.YAMLError) -> str:
-    # PyYAML's text reprints the offending line, and its `problem` can quote
-    # a name from the file ("found undefined alias 'x'"), so quoted parts go.
-    if not isinstance(exc, yaml.MarkedYAMLError):
-        return ""
-    where = ""
-    if exc.problem_mark is not None:
-        where = f" at line {exc.problem_mark.line + 1}, column {exc.problem_mark.column + 1}"
-    problem = re.sub(r"'[^']*'", "'...'", exc.problem or "")
-    return f"{where}: {problem}" if problem else where
 
 
 def facts_sha256() -> str | None:

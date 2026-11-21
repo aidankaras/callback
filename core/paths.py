@@ -82,8 +82,12 @@ def private_dir(relative: str) -> Path:
     way to it, at mode 0700; return its resolved path.
 
     Resolved through `resolve_inside` first, so a traversal or a symlink out
-    of the home is refused before anything is created.
+    of the home is refused before anything is created. A home that does not
+    exist yet is created first, with `ensure_home`, so the first command run
+    on a new machine does not depend on another having run before it.
     """
+    if not callback_home().exists():
+        ensure_home()
     target = resolve_inside(relative)
     home = callback_home().resolve()
     missing: list[Path] = []

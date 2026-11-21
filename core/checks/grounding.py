@@ -378,19 +378,25 @@ _CLAIM_PHRASES = (
     r"thousands",
     r"millions",
     r"billions",
-    r"first",
-    r"sole",
-    r"best",
+    # Rank words only in the phrases that make them a rank: "first-pass" and
+    # "best practices" are ordinary wording.
+    r"first to",
+    r"first[- ]ever",
+    r"first[- ](?:place|prize|author)",
+    r"sole (?:owner|author|developer|engineer|maintainer|contributor)",
+    r"best[- ](?:paper|in[- ]class|performing|ranked)",
     r"head of",
     r"led a team",
     r"managed a team",
     # A relationship with the reader -- "we met", "Alex referred me" -- is a
     # claim about the candidate's history like any other.
-    r"met",
+    # "met every deadline" and "introduced caching" describe work, not people.
+    r"(?:we|i|you) met",
+    r"met (?:with|at|through)",
     r"suggested",
     r"referred",
     r"referral",
-    r"introduced",
+    r"introduced (?:me|us|by)",
     r"recommended",
     r"mutual",
     r"reach(?:ed)? out",
@@ -481,9 +487,13 @@ _MONTH_AND_DAY_NAMES = frozenset(
     ]
 )
 # Characters after which a capitalised word may be the first of a sentence, so
-# its capital says nothing about it being a name. An opening bracket or quote
-# is not one of them: "the (Google) partnership" names Google mid-sentence.
-_SENTENCE_BREAK = ".;:!?\u2013\u2014-\u2022"
+# its capital says nothing about it being a name. Only sentence-ending
+# punctuation counts: a semicolon, colon or dash joins clauses inside one
+# bullet, so "in Python; Google adopted it" names Google mid-sentence. An
+# opening bracket or quote is not a break either.
+_SENTENCE_BREAK = ".!?"
+# A list marker left at the start of a bullet: the word after it is the first.
+_LEADING_MARKERS = frozenset("-*\u2013\u2014\u2022")
 
 
 def _support_corpus(sources: Sequence[Fact]) -> str:
@@ -526,7 +536,7 @@ def _unsupported_names(text: str, corpus: str, cited_entities: set[str]) -> list
             # identifier, which the number and entity rules own.
             continue
         before = text[: match.start()].rstrip()
-        if not before or before[-1] in _SENTENCE_BREAK:
+        if not before or before[-1] in _SENTENCE_BREAK or set(before) <= _LEADING_MARKERS:
             continue
         for part in (p for p in word.split("-") if p and p[0].isupper()):
             if part.casefold() in _MONTH_AND_DAY_NAMES or part in {"I", "A"}:
@@ -539,38 +549,11 @@ def _unsupported_names(text: str, corpus: str, cited_entities: set[str]) -> list
     return unsupported
 
 
-def check_bullet(
-    text: str, sources: Sequence[Fact], *, index: int = 0
-) -> tuple[Verdict, list[Finding]]:
-    """Ground a single bullet's numbers, entities and dates against `sources`.
-
-    Returns `Verdict.FAIL` with at least one `Finding` for any unresolved
-    claim. Otherwise returns the strongest verdict that explains how the
-    bullet passed: `DERIVED_VERIFIED` if any number needed a recomputed
-    derivation, else `ALIAS_MATCH` if any entity needed alias resolution,
-    else plain `PASS`.
-    """
-    if not carries_content(text):
-        return Verdict.FAIL, [
-            Finding(index, FindingKind.EMPTY_BULLET, "bullet has no letter or digit to ground")
-        ]
-    if not sources:
-        return Verdict.FAIL, [Finding(index, FindingKind.MISSING_SOURCE, "bullet cites no fact")]
-
-    unselectable = [f.id for f in sources if not f.selectable()]
-    if unselectable:
-        return Verdict.FAIL, [
-            Finding(
-                index,
-                FindingKind.UNSELECTABLE_FACT,
-                f"facts not confirmed by the user: {unselectable}",
-            )
-        ]
-
+def _number_findings(text: str, sources: Sequence[Fact], index: int) -> tuple[list[Finding], bool]:
+    """Every number in `text` that no cited quantity, derivation or date backs,
+    and whether any number needed a recomputed derivation."""
     findings: list[Finding] = []
     used_derivation = False
-    used_alias = False
-
     quantities = [q for f in sources for q in f.numbers.values()]
     percent_values = {q.value for q in quantities if not _is_count(q.unit)}
     count_values = {q.value for q in quantities if not _is_percent(q.unit)}
@@ -604,9 +587,11 @@ def check_bullet(
         # A percentage's direction is carried by its verb ("cut churn by 15%"),
         # so it is compared by magnitude; a count's sign is part of its value.
         if number.is_percent:
-            if any(values_match(abs(number.value), abs(v)) for v in percent_values):
+            if any(
+                values_match(abs(number.value), abs(v), step=number.step) for v in percent_values
+            ):
                 continue
-        elif any(values_match(number.value, source) for source in count_values):
+        elif any(values_match(number.value, source, step=number.step) for source in count_values):
             continue
         # A percentage is compared against the *magnitude* of a derived
         # value: the sign of a `pct_change` derivation only reflects the
@@ -618,7 +603,7 @@ def check_bullet(
         derived_pool = (
             (abs(v) for v in derived_values) if number.is_percent else iter(derived_values)
         )
-        if any(values_match(claimed, source) for source in derived_pool):
+        if any(values_match(claimed, source, step=number.step) for source in derived_pool):
             used_derivation = True
             continue
         if (
@@ -634,7 +619,14 @@ def check_bullet(
                 f"{number.raw!r} is not derivable from the cited facts",
             )
         )
+    return findings, used_derivation
 
+
+def _entity_findings(text: str, sources: Sequence[Fact], index: int) -> tuple[list[Finding], bool]:
+    """Every technology or identifier-shaped token the cited facts' entities do
+    not list, and whether any needed alias resolution."""
+    findings: list[Finding] = []
+    used_alias = False
     cited_entities = {canonicalize(e) for f in sources for e in f.entities}
     # The facts' prose alone, not their structured fields: the fix a miss
     # message names is only right when the prose states the token.
@@ -693,7 +685,14 @@ def check_bullet(
                 _miss_detail(f"{token!r} (canonical form {canonical!r})", token, fact_text),
             )
         )
+    return findings, used_alias
 
+
+def _word_findings(text: str, sources: Sequence[Fact], index: int) -> list[Finding]:
+    """Names, claim words and spelled-out numbers the cited facts do not state."""
+    findings: list[Finding] = []
+    cited_entities = {canonicalize(e) for f in sources for e in f.entities}
+    all_values = {q.value for f in sources for q in f.numbers.values()}
     corpus = _support_corpus(sources)
     for word in _unsupported_names(text, corpus, cited_entities):
         findings.append(
@@ -708,7 +707,6 @@ def check_bullet(
                     f"claim {claim!r} is not stated in any cited fact",
                 )
             )
-    all_values = {q.value for q in quantities}
     # "1.2 million" is one number, not a number and the word one million:
     # `parse_numbers` folds the word into the value, and its span covers it.
     folded = [n.span for n in parse_numbers(text)]
@@ -725,7 +723,13 @@ def check_bullet(
                     f"{word!r} ({value:g}) is not derivable from the cited facts",
                 )
             )
+    return findings
 
+
+def _date_findings(text: str, sources: Sequence[Fact], index: int) -> list[Finding]:
+    """Every month-precision date in `text` outside the cited facts' span."""
+    findings: list[Finding] = []
+    start, end = date_hull(sources)
     # A year-precision bound covers the whole year: "2024" as an upper bound
     # is 2024-12, not 2024-01, and a plain string comparison makes every month
     # of that year fall outside it.
@@ -736,6 +740,42 @@ def check_bullet(
             findings.append(
                 Finding(index, FindingKind.UNRESOLVED_DATE, f"{iso} falls outside {low}..{high}")
             )
+    return findings
+
+
+def check_bullet(
+    text: str, sources: Sequence[Fact], *, index: int = 0
+) -> tuple[Verdict, list[Finding]]:
+    """Ground a single bullet's numbers, entities and dates against `sources`.
+
+    Returns `Verdict.FAIL` with at least one `Finding` for any unresolved
+    claim. Otherwise returns the strongest verdict that explains how the
+    bullet passed: `DERIVED_VERIFIED` if any number needed a recomputed
+    derivation, else `ALIAS_MATCH` if any entity needed alias resolution,
+    else plain `PASS`.
+    """
+    if not carries_content(text):
+        return Verdict.FAIL, [
+            Finding(index, FindingKind.EMPTY_BULLET, "bullet has no letter or digit to ground")
+        ]
+    if not sources:
+        return Verdict.FAIL, [Finding(index, FindingKind.MISSING_SOURCE, "bullet cites no fact")]
+
+    unselectable = [f.id for f in sources if not f.selectable()]
+    if unselectable:
+        return Verdict.FAIL, [
+            Finding(
+                index,
+                FindingKind.UNSELECTABLE_FACT,
+                f"facts not confirmed by the user: {unselectable}",
+            )
+        ]
+
+    findings, used_derivation = _number_findings(text, sources, index)
+    entity_findings, used_alias = _entity_findings(text, sources, index)
+    findings += entity_findings
+    findings += _word_findings(text, sources, index)
+    findings += _date_findings(text, sources, index)
 
     if findings:
         return Verdict.FAIL, findings

@@ -109,4 +109,4 @@ def test_a_stock_phrase_in_a_note_fails() -> None:
         sources=["nw", "nw-model"],
     )
     found = check_outreach(note("email", filler, ASK), FACTS, POSTING).findings
-    assert "sentence 0.0: stock phrase 'passionate about'" in found, found
+    assert "sentence 1: stock phrase 'passionate about'" in found, found

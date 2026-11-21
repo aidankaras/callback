@@ -170,13 +170,12 @@ def resume_findings(
     fail; a bullet with nothing specific warns."""
     fails: list[str] = []
     warns: list[str] = []
-    bullets = [b for s in doc.sections for e in s.entries for b in e.bullets]
-    for i, bullet in enumerate(bullets):
+    for label, bullet in doc.bullets():
         cited = [facts[s] for s in bullet.sources if s in facts]
-        fails += text_findings(f"bullet {i}", bullet.text, brief, own=[f.text for f in cited])
+        fails += text_findings(label, bullet.text, brief, own=[f.text for f in cited])
         if not is_specific(bullet.text, cited):
             warns.append(
-                f"bullet {i}: no number and none of its cited facts' entities; "
+                f"{label}: no number and none of its cited facts' entities; "
                 "name the system, the scale or the result"
             )
     return fails, warns

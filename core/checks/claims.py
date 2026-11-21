@@ -219,7 +219,7 @@ def _check_entry(label: str, entry: Entry, facts: Mapping[str, Fact]) -> list[st
         findings.append(f"{label}: header does not match its fact: " + "; ".join(mismatches[0]))
 
     own = set(entry.sources)
-    for n, bullet in enumerate(entry.bullets):
+    for n, bullet in enumerate(entry.bullets, start=1):
         foreign = [
             s
             for s in bullet.sources
@@ -393,7 +393,6 @@ def omitted_current_roles(doc: ResumeDoc, facts: Mapping[str, Fact]) -> list[str
 def check_claims(doc: ResumeDoc, facts: Mapping[str, Fact]) -> ClaimsResult:
     """Check identity, section titles, every entry header and every listed skill."""
     findings = identity_findings(doc.identity, facts)
-    index = 0
     for section in doc.sections:
         if _norm(section.title).replace(" & ", " and ") not in SECTION_TITLES:
             findings.append(f"section title {section.title!r} is not a recognised section name")
@@ -403,9 +402,8 @@ def check_claims(doc: ResumeDoc, facts: Mapping[str, Fact]) -> ClaimsResult:
             if not (group.label.isascii() and group.label.isprintable())
             or _norm(group.label).replace(" & ", " and ") not in SKILL_GROUP_LABELS
         )
-        for entry in section.entries:
-            findings.extend(_check_entry(f"entry {index} ({entry.heading})", entry, facts))
-            index += 1
+    for label, entry in doc.entries():
+        findings.extend(_check_entry(label, entry, facts))
     backed = _skill_backing(doc, facts)
     for section in doc.sections:
         for skill in section.all_skills:

@@ -25,7 +25,7 @@ something you can re-run, not something the model reports about itself. There is
 | Wording stays specific | a fixed list of stock phrases fails in every bullet and in every letter, answer and outreach sentence except a fixed set of courtesy lines; a document that names a field brief also fails that brief's phrases to avoid and any six consecutive words copied from its exemplars, and a brief whose sources and citations do not check is refused |
 | Postings come from the source | discovery reads employers' documented public posting APIs over HTTPS, politely, and refuses LinkedIn, Indeed, Handshake, Workday and Glassdoor by name; an employer's own careers page is read only from the `schema.org/JobPosting` data it publishes, honouring `robots.txt` |
 | Applications stay reasonable | at most 10 in 24 hours, no re-apply to the same posting within 90 days, and a packet is only built from a draft that passed, or whose warnings the candidate accepted |
-| What was sent stays provable | a sealed document is copied read-only with a signed manifest of its hashes, and every seal and application is appended to a hash-chained, keyed ledger, so a file changed afterwards, or a ledger rewritten, is detected |
+| What was sent stays provable | a sealed document is copied read-only with a signed manifest of its hashes, and every seal and application is appended to a hash-chained, keyed ledger with a signed head, so a file changed afterwards, or a ledger rewritten or cut short, is detected |
 
 Beyond a fixed list of stock phrases, it does **not** check ordinary wording: "led the migration"
 and "helped with the migration" are indistinguishable to it. And it cannot know whether a fact the candidate confirmed is true. See
@@ -63,13 +63,14 @@ and the report it names opens with what to fix:
 
 ```text
 ## Fix first
-- grounding: bullet 2: unresolved_number: '40%' is not derivable from the cited facts
-- grounding: bullet 2: unknown_entity: 'Kubernetes' (canonical form 'Kubernetes') appears in no cited fact
+- grounding: entry 1 (Northwind Analytics), bullet 3: unresolved_number: '40%' is not derivable from the cited facts
+- grounding: entry 1 (Northwind Analytics), bullet 3: unknown_entity: 'Kubernetes' (canonical form 'Kubernetes') appears in no cited fact
 - claims: skill 'Kubernetes' is backed by no confirmed fact
 ```
 
-The PDF still exists, watermarked, in `draft/`: a document is always delivered, and
-provenance decides where it lands. With the invented bullet and skill removed, the
+The PDF still exists in `draft/`, stamped across its top edge as a draft that did not pass
+its gates: a document is always delivered, and provenance decides where it lands. The gates
+judge the unstamped render; the stamp is added afterwards. With the invented bullet and skill removed, the
 same facts build to this, with every gate passing:
 
 ![A one-page resume for the synthetic candidate Dana Vex](docs/images/example-resume.png)
@@ -108,7 +109,7 @@ likewise not a tool. Everything else is conversational:
 | `callback profile`, `eligibility`, `triage` | flag knockout requirements (sponsorship, citizenship, graduation window) quoted from the posting, and rank postings by evidence and freshness |
 | `callback import resume.pdf` | extract an existing resume's text, screening it for hidden content |
 | `callback facts add / list / check / confirm / retire` | store facts (unconfirmed), list them, check each against its own text, and confirm or retire them yourself |
-| `callback build resume.yaml --job <id>` | render the PDF and run every gate; exit 0 pass, 1 warn, 2 fail |
+| `callback build resume.yaml --job <id>` | render the PDF and run every gate; exit 0 pass, 1 warn, 2 fail, 3 could not run |
 | `callback letter letter.yaml` | render and check a cover letter |
 | `callback export resume.yaml` | the resume as plain text, for forms that want it pasted |
 | `callback answers answers.yaml` | check free-text application-form answers against their limits, ready to paste |
@@ -119,12 +120,17 @@ likewise not a tool. Everything else is conversational:
 | `callback finalize <id>` / `callback verify` | seal what you sent and prove later that nothing changed |
 | `callback interview <id>` | an interview pack built from exactly the documents that were sent |
 
-`docs/using-callback.md` has the fact format, the document format and every rule.
+Every command exits 3 when it could not run (an unreadable file, a refused path); `watch` exits 4
+when a board could not be read. `docs/using-callback.md` lists each command's codes, the fact
+format, the document format and every rule.
 
 ## Evaluating the skill
 
 The tests check `core`. `evals/` checks the half that runs in Claude: seven
-cases run with and without the plugin through `claude plugin eval`. Without
+cases run with and without the plugin through `claude plugin eval`, three runs
+per case per arm, which is a smoke test rather than a benchmark. The run
+transcripts are not committed, so the figures below are reported, not
+checkable from this repository; `evals/run.sh` reproduces them. Without
 it, Claude fetched a LinkedIn job page in 3 of 3 runs and told the user an
 unconfirmed fact was confirmed in 3 of 3; with it, neither happened. On
 fabrication both arms were clean when handed an explicit facts file, which is

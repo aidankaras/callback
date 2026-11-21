@@ -150,7 +150,7 @@ def _posting_fact(posting: str) -> Fact:
 
 def _grounding(label: str, text: str, corpus: list[Fact]) -> list[str]:
     _, found = check_bullet(text, corpus)
-    return [f"sentence {label}: {f.kind}: {f.detail}" for f in found]
+    return [f"{label}: {f.kind}: {f.detail}" for f in found]
 
 
 @dataclass(frozen=True)
@@ -221,32 +221,32 @@ def check_sentence(label: str, sentence: Sentence, ctx: SentenceContext) -> list
     # letter is allowed to use, as when an exemplar happens to contain it.
     fixed = sentence.kind == "courtesy" and not findings
     if _COMMITMENT.search(sentence.text):
-        findings.append(f"sentence {label}: commitment or negotiation language: {sentence.text!r}")
+        findings.append(f"{label}: commitment or negotiation language: {sentence.text!r}")
     if any(_norm(b) in _norm(sentence.text) for b in ctx.resume_bullets):
-        findings.append(f"sentence {label}: reuses a resume bullet verbatim")
+        findings.append(f"{label}: reuses a resume bullet verbatim")
     if not fixed:
         own = [ctx.facts[s].text for s in sentence.sources if s != POSTING and s in ctx.facts]
-        findings += text_findings(f"sentence {label}", sentence.text, ctx.brief, own=own)
+        findings += text_findings(f"{label}", sentence.text, ctx.brief, own=own)
     return findings
 
 
 def _kind_findings(label: str, sentence: Sentence, ctx: SentenceContext) -> list[str]:
     text = sentence.text
     if _INTERNAL_BREAK.search(text.rstrip()):
-        return [f"sentence {label}: holds more than one sentence; split it"]
+        return [f"{label}: holds more than one sentence; split it"]
     if sentence.kind == "courtesy":
         allowed = {_norm(t.format(role=ctx.role, company=ctx.company)) for t in COURTESY}
         if sentence.sources or _norm(text) not in allowed:
-            return [f"sentence {label}: is not one of the courtesy sentences, so it must cite"]
+            return [f"{label}: is not one of the courtesy sentences, so it must cite"]
         return []
     if sentence.kind == "employer":
         if sentence.sources != [POSTING]:
-            return [f"sentence {label}: an employer sentence cites the posting and nothing else"]
+            return [f"{label}: an employer sentence cites the posting and nothing else"]
         subject = _norm(text)
         subjects = (_norm(ctx.company), *EMPLOYER_SUBJECTS)
         if not any(subject.startswith(s) for s in subjects):
             return [
-                f"sentence {label}: an employer sentence begins with the company's name or "
+                f"{label}: an employer sentence begins with the company's name or "
                 "the role, position, internship or team"
             ]
         name_parts = {w for w in _norm(ctx.candidate_name).split() if len(w) > 1}
@@ -255,16 +255,16 @@ def _kind_findings(label: str, sentence: Sentence, ctx: SentenceContext) -> list
             or name_parts & set(subject.split())
             or _ABOUT_CANDIDATE.search(text)
         ):
-            return [f"sentence {label}: an employer sentence may not speak about the candidate"]
+            return [f"{label}: an employer sentence may not speak about the candidate"]
         return _grounding(label, text, [ctx.posting])
     # candidate
     if not sentence.sources or POSTING in sentence.sources:
-        return [f"sentence {label}: a sentence about you cites your facts, never the posting"]
+        return [f"{label}: a sentence about you cites your facts, never the posting"]
     unknown = [s for s in sentence.sources if s not in ctx.facts]
     if unknown:
-        return [f"sentence {label}: cites unknown fact(s) {unknown}"]
+        return [f"{label}: cites unknown fact(s) {unknown}"]
     if _norm(ctx.company) in _norm(text):
-        return [f"sentence {label}: a sentence about you may not name {ctx.company}"]
+        return [f"{label}: a sentence about you may not name {ctx.company}"]
     return _grounding(label, text, [ctx.facts[s] for s in sentence.sources])
 
 

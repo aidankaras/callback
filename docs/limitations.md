@@ -12,12 +12,16 @@ by design rather than merely unimplemented.
   technologies, mid-sentence capitalised names, a fixed list of claim words, and spelled-out
   numbers. A technology is recognised by the alias table or by its spelling; one written in
   lowercase letters only and absent from the table (`xgboost`, `dbt`, `pytest`) reads as an
-  ordinary word and is not checked, while `XGBoost` is. Ordinary verbs and nouns are not compared: "led the migration" and "helped with the
+  ordinary word and is not checked, while `XGBoost` is. A capitalised word straight after `.`,
+  `!` or `?` is taken as the start of a sentence and not checked as a name, so a bullet written
+  as two sentences ("... in Python. Google adopted it") hides the second one's first word; a
+  semicolon, colon or dash does not exempt the word after it. Ordinary verbs and nouns are not compared: "led the migration" and "helped with the
   migration" ground identically. The `style` gate adds only a fixed list of stock phrases, copying
   from a brief's exemplars, and a warning on a resume bullet with no digit and none of its cited
   facts' entities; it does not judge whether a sentence is good.
 - **Which occurrence of a value a claim means.** Numbers match by value against the cited facts,
-  not by position. A quantity recorded with a percent unit cannot back a plain count, but a quantity
+  not by position, and a number matches any cited value that rounds to it at its last printed
+  digit: "1.2M" matches 1,234,000, and "1M" would match 1,400,000. A quantity recorded with a percent unit cannot back a plain count, but a quantity
   recorded with no unit can back either.
 - **Whether a saved posting is the real one.** A cover letter's claims about the employer are held
   to the posting saved in `inbox/<job>.md`. `callback postings take` writes the text a board's API
@@ -57,6 +61,11 @@ by design rather than merely unimplemented.
   `core/checks/hidden.py` lists the remaining channels (zero opacity, clipping, a colour-matched box,
   CMYK conversion bias). Anything it cannot judge, such as a pattern fill or an unreadable
   background, fails rather than passes.
+
+- **The ledger proves order and completeness against its own head, not against time.** A
+  changed, removed or reordered entry breaks the chain, and entries removed from the end no longer
+  match the signed `ledger.head`. Restoring an earlier copy of both files together reads as an
+  intact, shorter ledger, and anyone who can read `.key` can write valid entries.
 
 ## Not built yet
 

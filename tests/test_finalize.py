@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from core.finalize import FinalizeError, finalize, verify, verify_ledger
+from core.finalize import FinalizeError, finalize, record_event, verify, verify_ledger
 from core.paths import ensure_home
 
 NOW = datetime(2026, 10, 1, 15, 0, tzinfo=UTC)
@@ -126,6 +126,36 @@ def test_deleting_a_ledger_entry_breaks_the_chain(home: Path) -> None:
     ledger.chmod(0o644)
     ledger.write_text(lines[0] + "\n" + lines[2] + "\n")
     assert verify_ledger() != []
+
+
+@pytest.mark.parametrize("damage", ["cut", "no-head", "forged-head"])
+def test_entries_removed_from_the_end_of_the_ledger_are_reported(home: Path, damage: str) -> None:
+    """The removed entry is an application, which no sealed document needs, so
+    the chain and the seal cross-check both still hold. Mutation: skip the
+    head check -- every case reads as intact."""
+    _built(home, "a")
+    finalize("a", now=NOW)
+    record_event({"event": "apply", "job_id": "a", "at": NOW.isoformat()})
+    assert verify_ledger() == []  # premise
+    ledger = home / "ledger.log"
+    head = home / "ledger.head"
+    ledger.chmod(0o644)
+    ledger.write_text(ledger.read_text().splitlines()[0] + "\n")
+    if damage == "no-head":
+        head.chmod(0o644)
+        head.unlink()
+    elif damage == "forged-head":
+        head.chmod(0o644)
+        body = json.loads(head.read_text())
+        body["count"] = 1
+        head.write_text(json.dumps(body))
+    expected = {
+        "cut": "entries were removed from its end",
+        "no-head": "has no head record",
+        "forged-head": "not written with this data home's key",
+    }[damage]
+    problems = verify_ledger()
+    assert problems and expected in problems[-1], (damage, problems)
 
 
 # --- the ledger must be anchored, not merely self-consistent ----------------------------

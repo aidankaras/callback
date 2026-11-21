@@ -113,7 +113,7 @@ def test_a_claim_about_the_candidate_can_never_cite_the_posting() -> None:
 
 def test_a_claim_absent_from_its_facts_fails() -> None:
     found = findings(letter([c("At Northwind Analytics I led a team of twelve.", "nw")]))
-    assert any("sentence 0.0" in f for f in found), found
+    assert any("paragraph 1, sentence 1" in f for f in found), found
 
 
 # A posting that carries the claims an employer sentence might try to borrow.
@@ -272,6 +272,35 @@ def test_callback_letter_writes_a_private_pdf_and_report(
     pdf = (draft / "cover-letter.pdf").read_bytes()
     assert record["verdict"] == "pass"
     assert record["pdf_sha256"] == hashlib.sha256(pdf).hexdigest()
+
+
+@pytest.mark.slow
+def test_a_failed_letter_is_stamped_as_a_draft(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import pdfplumber
+
+    from core.cli import main
+    from core.letter.io import dump_letter
+    from core.paths import ensure_home
+    from core.profile.store import save_facts
+
+    monkeypatch.setenv("CALLBACK_HOME", str(tmp_path / "cb"))
+    home = ensure_home()
+    save_facts(FACTS)
+    (home / "inbox" / "acme-ml-intern.md").write_text(POSTING, encoding="utf-8")
+    source = tmp_path / "letter.yaml"
+    failing = letter([c("At Northwind Analytics I led a team of twelve.", "nw")])
+    source.write_text(dump_letter(failing), encoding="utf-8")
+
+    assert main(["letter", str(source)]) != 0  # premise: the letter fails
+    draft = home / "outputs" / "acme-ml-intern" / "draft"
+    with pdfplumber.open(draft / "cover-letter.pdf") as pdf:
+        text = pdf.pages[0].extract_text() or ""
+    assert text.startswith("DRAFT: did not pass its gates")
+    record = json.loads((draft / "letter-report.json").read_text())
+    pdf_bytes = (draft / "cover-letter.pdf").read_bytes()
+    assert record["pdf_sha256"] == hashlib.sha256(pdf_bytes).hexdigest()
 
 
 @pytest.mark.slow
@@ -492,7 +521,7 @@ def test_callback_letter_checks_against_the_brief_it_names(
     source.write_text(dump_letter(letter(brief="ml-research")), encoding="utf-8")
     found = build_letter(source).findings
     assert found == (
-        "sentence 0.2: copies an exemplar of the ml-research brief: "
+        "paragraph 1, sentence 3: copies an exemplar of the ml-research brief: "
         "'i trained a scikit learn classifier'",
     )
 

@@ -25,7 +25,7 @@ from core.draft import RESUME_ARTIFACTS
 from core.gates import GateOutcome, GateReport, run_gates
 from core.paths import private_dir, write_private, write_private_bytes
 from core.profile.store import load_facts_judged
-from core.render.typst import RenderError, render
+from core.render.typst import RenderError, render, stamp_draft
 from core.resume.io import parse_doc
 from core.triage import ProfileError, load_profile
 
@@ -113,7 +113,10 @@ def build(doc_path: Path, job_id: str) -> BuildResult:
         except RenderError as exc:
             raise BuildError(f"could not render {doc_path.name}: {exc}") from exc
         report = run_gates(doc, facts, staged, max_pages=max_pages, brief=brief)
-        pdf_bytes = staged.read_bytes()
+        # A failed draft is still delivered, stamped so it cannot pass for a
+        # finished one. The stamp goes on after the gates have judged the
+        # unstamped bytes.
+        pdf_bytes = stamp_draft(staged) if report.verdict == "fail" else staged.read_bytes()
     finally:
         shutil.rmtree(staging, ignore_errors=True)
     write_private_bytes(out_dir / "resume.pdf", pdf_bytes)

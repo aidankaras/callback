@@ -73,6 +73,7 @@ PROTECTED_NAMES = {
     "notes.yaml",
     "applications.yaml",
     "ledger.log",
+    "ledger.head",
     ".key",
     "callback.db",
     "callback.db-wal",

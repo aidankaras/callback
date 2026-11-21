@@ -40,6 +40,39 @@ def test_magnitude_form_of_a_literal_passes() -> None:
     assert findings == []
 
 
+@pytest.mark.parametrize(
+    ("bullet", "stored", "unit"),
+    [
+        ("Processed 1.2M records", 1_234_000, None),
+        ("Cut errors 33%", 33.33, "%"),
+        ("Cut errors 44%", 43.7, "%"),
+        ("Cut errors 98%", 97.6, "%"),
+    ],
+)
+def test_a_rounded_restatement_passes(bullet: str, stored: float, unit: str | None) -> None:
+    """Rounding at the claim's last printed digit is a true restatement.
+    Mutation: compare by relative tolerance alone -- the first three fail."""
+    f = fact("r", numbers={"n": Quantity(value=stored, unit=unit)})
+    assert check_bullet(bullet, [f]) == (Verdict.PASS, [])
+
+
+@pytest.mark.parametrize(
+    ("bullet", "stored", "unit"),
+    [
+        ("Processed 1.3M records", 1_234_000, None),
+        ("Cut errors 35%", 33.33, "%"),
+        ("Cut errors 45%", 43.7, "%"),
+    ],
+)
+def test_a_figure_the_source_does_not_round_to_fails(
+    bullet: str, stored: float, unit: str | None
+) -> None:
+    f = fact("r", numbers={"n": Quantity(value=stored, unit=unit)})
+    verdict, findings = check_bullet(bullet, [f])
+    assert verdict is Verdict.FAIL
+    assert [x.kind for x in findings] == [FindingKind.UNRESOLVED_NUMBER]
+
+
 def test_derived_percentage_is_verified_not_rejected() -> None:
     f = fact(
         "c",
@@ -736,6 +769,39 @@ def test_a_percent_backs_a_percent_but_not_a_count() -> None:
     assert check_bullet("Onboarded 42 accounts", [NORTHWIND])[0] is Verdict.FAIL
 
 
+@pytest.mark.parametrize(
+    "bullet",
+    [
+        "Met every deadline on the reporting pipelines",
+        "Reviewed reporting pipelines on a first-pass basis",
+        "Applied best practices to the reporting pipelines",
+        "Introduced caching to the reporting pipelines",
+        "Owned the sole reporting pipeline",
+    ],
+)
+def test_an_ordinary_use_of_a_rank_or_relationship_word_passes(bullet: str) -> None:
+    """Mutation: restore bare "met", "first", "best", "introduced" or "sole"
+    to the claim words -- each fails as an unsupported claim."""
+    assert check_bullet(bullet, [NORTHWIND]) == (Verdict.PASS, [])
+
+
+@pytest.mark.parametrize(
+    "bullet",
+    [
+        "Was the first to ship reporting pipelines",
+        "Won first place for the reporting pipelines",
+        "Sole developer of the reporting pipelines",
+        "Built best-in-class reporting pipelines",
+        "We met at the reporting pipelines review",
+        "Introduced me to the reporting pipelines",
+    ],
+)
+def test_a_rank_or_relationship_claim_still_needs_a_fact(bullet: str) -> None:
+    verdict, findings = check_bullet(bullet, [NORTHWIND])
+    assert verdict is Verdict.FAIL
+    assert FindingKind.UNSUPPORTED_CLAIM_WORD in [f.kind for f in findings], findings
+
+
 def test_a_claim_word_stated_in_the_fact_passes() -> None:
     promoted = fact("p", text="Promoted to Senior Analyst in 2024")
     assert check_bullet("Earned a promotion; promoted to Senior Analyst", [promoted])[0] is (
@@ -874,6 +940,33 @@ def test_a_name_after_an_opening_bracket_is_still_checked() -> None:
     f = fact("a", text="Led the partnership work")
     found = check_bullet("Spearheaded the (Google) partnership", [f])[1]
     assert any("Google" in x.detail for x in found), found
+
+
+@pytest.mark.parametrize(
+    ("bullet", "names"),
+    [
+        ("Built nightly ETL jobs in Python; Google adopted them company-wide", ["Google"]),
+        ("Built ETL jobs in Python - Meta partnership", ["Meta"]),
+        ("Built ETL jobs in Python for client: Goldman Sachs", ["Goldman", "Sachs"]),
+    ],
+)
+def test_a_clause_joiner_does_not_start_a_sentence(bullet: str, names: list[str]) -> None:
+    """A semicolon, colon or dash joins clauses inside one bullet, so the word
+    after it is mid-sentence and its capital marks a name. Mutation: add ";",
+    ":" or "-" back to the sentence breaks -- the name passes unchecked."""
+    f = fact(
+        "etl", text="Built nightly ETL jobs in Python and SQL", entities=["ETL", "Python", "SQL"]
+    )
+    verdict, findings = check_bullet(bullet, [f])
+    assert verdict is Verdict.FAIL
+    assert [x.detail for x in findings] == [f"{n!r} appears in no cited fact" for n in names]
+
+
+@pytest.mark.parametrize("marker", ["-", "*", "\u2022", "\u2013"])
+def test_a_leading_list_marker_still_exempts_the_first_word(marker: str) -> None:
+    """A bullet pasted with its marker still begins with a capitalised verb."""
+    f = fact("etl", text="Built nightly ETL jobs in Python", entities=["ETL", "Python"])
+    assert check_bullet(f"{marker} Built ETL jobs in Python", [f]) == (Verdict.PASS, [])
 
 
 def test_a_possessive_names_what_the_fact_states() -> None:

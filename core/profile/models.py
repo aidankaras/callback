@@ -134,6 +134,11 @@ class Fact(BaseModel):
     changed fact use `model_copy(update=...)`, which still works on a frozen
     model and is how `core.profile.store.add_fact` produces its
     canonicalised copy.
+
+    Freezing stops attribute assignment only. The containers `numbers`,
+    `derived` and `entities` are still mutable in place
+    (`fact.entities.append(...)` works), so code must not mutate a loaded
+    fact; trust itself cannot be changed that way.
     """
 
     model_config = {"extra": "forbid", "populate_by_name": True, "frozen": True}

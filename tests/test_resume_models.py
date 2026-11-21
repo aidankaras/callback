@@ -94,3 +94,31 @@ def test_a_blank_bullet_is_rejected_at_the_model_boundary(text: str) -> None:
 @pytest.mark.parametrize("text", ["15%", "Led ML", "\u00c9cole"])
 def test_a_short_bullet_with_real_content_is_accepted(text: str) -> None:
     assert Bullet(text=text, sources=["a"]).text == text
+
+
+def test_bullets_are_labelled_by_entry_and_counted_from_one() -> None:
+    """A finding must be findable: `bullet 3` across a whole document is not.
+    Entries count across sections; bullets count within their entry."""
+    doc = ResumeDoc(
+        identity=IDENTITY,
+        sections=[
+            Section(
+                title="Experience",
+                entries=[
+                    Entry(
+                        heading="Northwind",
+                        bullets=[Bullet(text="a", sources=["x"]), Bullet(text="b", sources=["x"])],
+                    ),
+                ],
+            ),
+            Section(
+                title="Projects",
+                entries=[Entry(heading="Ledger", bullets=[Bullet(text="c", sources=["x"])])],
+            ),
+        ],
+    )
+    assert [label for label, _ in doc.bullets()] == [
+        "entry 1 (Northwind), bullet 1",
+        "entry 1 (Northwind), bullet 2",
+        "entry 2 (Ledger), bullet 1",
+    ]

@@ -169,6 +169,29 @@ def test_a_failing_build_exits_2_and_leads_with_what_to_fix(tmp_path: Path) -> N
     assert any("999" in line for line in first_lines), first_lines
 
 
+def _first_page_text(pdf: Path) -> str:
+    import pdfplumber
+
+    with pdfplumber.open(pdf) as opened:
+        return opened.pages[0].extract_text() or ""
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize(("bullet", "stamped"), [("to 999 items", True), ("to 300 items", False)])
+def test_only_a_failed_draft_is_stamped(tmp_path: Path, bullet: str, stamped: bool) -> None:
+    """A failed draft is still delivered but must not pass for a finished one;
+    the report's hash names the stamped bytes actually delivered. Mutation:
+    stamp nothing -- the failed draft reads like a passing one."""
+    doc = _write(tmp_path, sample_doc(f"Cut the review queue {bullet} using Python"))
+    result = build(doc, "northwind-de")
+    assert (result.report.verdict == "fail") is stamped  # premise
+    pdf = result.out_dir / "resume.pdf"
+    assert _first_page_text(pdf).startswith("DRAFT: did not pass its gates") is stamped
+    record = json.loads((result.out_dir / "report.json").read_text())
+    assert record["pdf_sha256"] == hashlib.sha256(pdf.read_bytes()).hexdigest()
+    assert [p.name for p in result.out_dir.iterdir() if "stamp" in p.name] == []
+
+
 @pytest.mark.parametrize("job", ["", "../escape", "Upper", "a/b", "-lead", "x" * 65])
 def test_an_unsafe_job_id_is_refused_before_anything_is_written(
     tmp_path: Path, home: Path, job: str
@@ -321,7 +344,7 @@ def test_a_build_checks_against_the_brief_it_names(tmp_path: Path, home: Path) -
     result = build(_write(tmp_path, doc), "northwind-de")
     style = next(o for o in result.report.outcomes if o.gate == "style")
     assert style.findings == (
-        "bullet 0: copies an exemplar of the data-eng brief: "
+        "entry 1 (Northwind Analytics), bullet 1: copies an exemplar of the data-eng brief: "
         "'a dependable nightly batch scheduler for'",
     )
 

@@ -195,6 +195,21 @@ def test_private_dir_is_0700_even_under_a_umask_that_strips_owner_bits(
         assert stat.S_IMODE(directory.stat().st_mode) == 0o700, directory
 
 
+def test_private_dir_creates_a_home_that_does_not_exist_yet(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The first command on a new machine may be `build`, which calls
+    `private_dir` without `ensure_home`. Mutation: drop the home check --
+    this raises FileNotFoundError."""
+    from core.paths import private_dir
+
+    monkeypatch.setenv("CALLBACK_HOME", str(tmp_path / "new" / "cb"))
+    created = private_dir("outputs/job/draft")
+    assert created.is_dir()
+    for directory in (tmp_path / "new", tmp_path / "new" / "cb"):
+        assert stat.S_IMODE(directory.stat().st_mode) == 0o700, directory
+
+
 def test_private_dir_refuses_to_leave_the_home(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

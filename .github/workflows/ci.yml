@@ -75,29 +75,9 @@ jobs:
   secrets:
     runs-on: ubuntu-latest
     steps:
-      # fetch-depth: 0 pulls full history, and the step below runs gitleaks
-      # directly rather than through gitleaks/gitleaks-action, because that
-      # action scans only the pushed range (`<before>^..<after>`) and that
-      # range fails in two different ways.
-      #
-      # Observed here: on a branch's first push `<before>` resolves to a commit
-      # whose `^` does not exist, and the scan aborts --
-      #   ERR [git] fatal: ambiguous argument '60129f9^..a351070':
-      #       unknown revision or path not in the working tree
-      #   WRN scanned ~0 bytes (0)
-      #   WRN no leaks found in partial scan
-      # exiting non-zero regardless of content.
-      #
-      # The more dangerous mode is when the range *does* resolve: the scan then
-      # succeeds having read only the commits in that one push, reports clean,
-      # and exits 0. A secret committed before this job existed, or on any push
-      # whose range excluded it, stays green forever. That failure never
-      # announces itself, which is why the range is abandoned rather than
-      # repaired.
-      #
-      # This step's own green has been checked rather than assumed: the first
-      # run after the change reported `35 commits scanned` and `~235224 bytes`,
-      # which was the whole branch at that point.
+      # Full history, and gitleaks run directly: gitleaks/gitleaks-action scans
+      # only the pushed range, which fails on a branch's first push and, worse,
+      # reports clean on any push whose range excludes an older secret.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           fetch-depth: 0

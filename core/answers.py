@@ -92,10 +92,12 @@ def check_answers(
     ctx = context_for(
         doc.company, doc.role, doc.candidate_name, facts, posting, resume_bullets, brief
     )
-    for n, answer in enumerate(doc.answers):
+    for n, answer in enumerate(doc.answers, start=1):
         findings.extend(f"answer {n}: {f}" for f in question_findings(answer.question, ctx))
-        for s, sentence in enumerate(answer.sentences):
-            findings.extend(f"answer {n}: {f}" for f in check_sentence(f"{n}.{s}", sentence, ctx))
+        for s, sentence in enumerate(answer.sentences, start=1):
+            findings.extend(
+                f"answer {n}: {f}" for f in check_sentence(f"sentence {s}", sentence, ctx)
+            )
         text = answer.text
         if answer.max_chars is not None and len(text) > answer.max_chars:
             findings.append(

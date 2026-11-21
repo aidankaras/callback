@@ -194,7 +194,7 @@ def test_the_discovery_commands_end_to_end(
     assert main(["watch"]) == 0
     assert "NEW  greenhouse:acme:1" in capsys.readouterr().out
     assert main(["targets", "add", "Broken Co", "--ats", "greenhouse", "--board", "broken"]) == 0
-    assert main(["watch"]) == 1, "a board that could not be read must not exit clean"
+    assert main(["watch"]) == 4, "a board that could not be read must not exit clean"
     assert "could not read Broken Co" in capsys.readouterr().err
     assert main(["postings", "list"]) == 0
     assert "Data Science Intern" in capsys.readouterr().out

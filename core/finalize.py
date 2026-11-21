@@ -11,7 +11,10 @@ match is caught by its signature.
 
 Each seal is also appended to `ledger.log`, where every entry carries the
 hash of the one before it: an entry edited, removed or reordered breaks the
-chain from that point on, and `verify_ledger` says where.
+chain from that point on, and `verify_ledger` says where. A chain cut short
+is still a valid chain, so the entry count and last hash are also kept in a
+signed `ledger.head`, which catches entries removed from the end. Restoring
+an earlier copy of both files together is not caught.
 
 This is tamper-evidence, not tamper-proofing: anyone who can read the key
 can forge a signature. It proves that nothing callback did not write has
@@ -33,6 +36,7 @@ from core.paths import resolve_inside, write_private, write_private_bytes
 
 KEY_FILE = ".key"
 LEDGER_FILE = "ledger.log"
+HEAD_FILE = "ledger.head"
 SEALED_FILES = ("resume.pdf", "resume.yaml", "report.json")
 _GENESIS = "0" * 64
 
@@ -63,7 +67,8 @@ def _mac(key: bytes, body: dict[str, object]) -> str:
 
 def _sign(body: dict[str, object]) -> str:
     key = _key(create=True)
-    assert key is not None
+    if key is None:
+        raise FinalizeError("the signing key could not be created")
     return _mac(key, body)
 
 
@@ -92,6 +97,41 @@ def _append_ledger(event: dict[str, object]) -> None:
         path.chmod(0o600)
     write_private(path, "\n".join([*lines, json.dumps(entry, sort_keys=True)]) + "\n")
     path.chmod(0o400)
+    head_body: dict[str, object] = {"count": len(lines) + 1, "entry_sha256": entry["entry_sha256"]}
+    head = resolve_inside(HEAD_FILE)
+    if head.exists():
+        head.chmod(0o600)
+    write_private(head, json.dumps({**head_body, "mac": _sign(head_body)}, sort_keys=True) + "\n")
+    head.chmod(0o400)
+
+
+def _head_problems(key: bytes, entries: list[dict[str, object]]) -> list[str]:
+    """Whether the signed head still names the ledger's last entry."""
+    path = resolve_inside(HEAD_FILE)
+    if not path.exists():
+        if not entries:
+            return []
+        return [
+            "the ledger has no head record, so entries removed from its end would not show; "
+            "the next seal or application writes one"
+        ]
+    try:
+        head = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return ["the ledger head is not readable"]
+    if not isinstance(head, dict):
+        return ["the ledger head is not readable"]
+    body = dict(cast("dict[str, object]", head))
+    mac = body.pop("mac", None)
+    if not isinstance(mac, str) or not hmac.compare_digest(mac, _mac(key, body)):
+        return ["the ledger head was not written with this data home's key"]
+    last = entries[-1].get("entry_sha256") if entries else None
+    if body.get("count") != len(entries) or body.get("entry_sha256") != last:
+        return [
+            f"the ledger head records {body.get('count')} entries but the ledger holds "
+            f"{len(entries)}: entries were removed from its end"
+        ]
+    return []
 
 
 def _verdicts(report: object) -> dict[str, object]:
@@ -215,7 +255,7 @@ def _ledger_entries(key: bytes) -> tuple[list[dict[str, object]], list[str]]:
         if _sha256(json.dumps(entry, sort_keys=True).encode()) != claimed:
             return entries, [f"entry {n} was altered after it was written"]
         previous = str(claimed)
-        entries.append(entry)
+        entries.append({**entry, "entry_sha256": claimed})
     return entries, []
 
 
@@ -233,4 +273,7 @@ def verify_ledger() -> list[str]:
     if sealed and not entries:
         return [f"the ledger is missing or empty, but {len(sealed)} document(s) are sealed"]
     recorded = {str(e.get("job_id")) for e in entries if e.get("event") == "finalize"}
-    return [f"sealed document {job!r} has no ledger entry" for job in sealed if job not in recorded]
+    missing = [
+        f"sealed document {job!r} has no ledger entry" for job in sealed if job not in recorded
+    ]
+    return missing + _head_problems(key, entries)

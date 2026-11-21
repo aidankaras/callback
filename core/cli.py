@@ -6,9 +6,15 @@ import argparse
 import re
 import sys
 from pathlib import Path
-from typing import TextIO, cast
+from typing import TYPE_CHECKING, TextIO, cast
 
 from core import __version__
+
+if TYPE_CHECKING:
+    from core.discovery.fetch import Fetcher
+    from core.discovery.store import PageSource
+
+    Subparsers = argparse._SubParsersAction[argparse.ArgumentParser]  # pyright: ignore[reportPrivateUsage]
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -33,6 +39,17 @@ def build_parser() -> argparse.ArgumentParser:
     build.add_argument("--job", required=True, help="job id: lowercase letters, digits, hyphens")
     build.set_defaults(handler=_cmd_build)
 
+    _add_discovery_commands(sub)
+    _add_writing_commands(sub)
+    _add_application_commands(sub)
+    _add_document_commands(sub)
+    _add_fact_commands(sub)
+
+    return parser
+
+
+def _add_discovery_commands(sub: Subparsers) -> None:
+    """Register postings, profiles and triage: finding what to apply to."""
     targets = sub.add_parser("targets", help="the companies whose job boards to watch")
     targets_sub = targets.add_subparsers(dest="targets_command", required=True)
     t_add = targets_sub.add_parser("add", help="watch a company's Greenhouse, Lever or Ashby board")
@@ -140,6 +157,9 @@ def build_parser() -> argparse.ArgumentParser:
         help="what to do next: interviews to prepare, postings to take, quiet applications",
     ).set_defaults(handler=_cmd_agenda)
 
+
+def _add_writing_commands(sub: Subparsers) -> None:
+    """Register templates, briefs, answers and outreach notes."""
     templates = sub.add_parser(
         "template", help="reuse a document that passed as the starting point for the next one"
     )
@@ -178,6 +198,9 @@ def build_parser() -> argparse.ArgumentParser:
     outreach.add_argument("doc", type=Path, help="outreach note (YAML)")
     outreach.set_defaults(handler=_cmd_outreach)
 
+
+def _add_application_commands(sub: Subparsers) -> None:
+    """Register sealing, applying and recording outcomes."""
     fin = sub.add_parser(
         "finalize", help="seal a gated draft into final/ and record it in the ledger"
     )
@@ -238,6 +261,9 @@ def build_parser() -> argparse.ArgumentParser:
     applications = sub.add_parser("applications", help="list recorded applications")
     applications.set_defaults(handler=_cmd_applications)
 
+
+def _add_document_commands(sub: Subparsers) -> None:
+    """Register cover letters, export, import and the application funnel."""
     letter = sub.add_parser(
         "letter", help="render a cover letter and check it against your facts and the posting"
     )
@@ -264,6 +290,9 @@ def build_parser() -> argparse.ArgumentParser:
         help="what happened to what was sent, by template, role family and cited fact (counts)",
     ).set_defaults(handler=_cmd_insights)
 
+
+def _add_fact_commands(sub: Subparsers) -> None:
+    """Register facts and notes, which only the candidate confirms."""
     facts = sub.add_parser("facts", help="add, list and confirm the facts a resume may use")
     facts_sub = facts.add_subparsers(dest="facts_command", required=True)
     add = facts_sub.add_parser("add", help="add facts from a YAML list (they start unconfirmed)")
@@ -339,20 +368,18 @@ def build_parser() -> argparse.ArgumentParser:
     n_fam.add_argument("--set", dest="families", default=None, help="comma-separated names")
     n_fam.set_defaults(handler=_cmd_notes_families)
 
-    return parser
-
 
 _SAFE_STEM = re.compile(r"[^a-z0-9-]+")
 
 
-def _fetcher() -> object:
+def _fetcher() -> Fetcher:
     """The network fetcher; a single place tests replace."""
     from core.discovery.fetch import HttpFetcher
 
     return HttpFetcher()
 
 
-def _page_fetcher() -> object:
+def _page_fetcher() -> PageSource:
     """The careers-page fetcher; a single place tests replace."""
     from core.discovery.page import PageFetcher
 
@@ -419,11 +446,10 @@ def _cmd_criteria(args: argparse.Namespace) -> int:
 def _cmd_watch(_args: argparse.Namespace) -> int:
     from datetime import UTC, datetime
 
-    from core.discovery.fetch import Fetcher
     from core.discovery.store import watch
 
     try:
-        result = watch(cast("Fetcher", _fetcher()), now=datetime.now(tz=UTC))
+        result = watch(_fetcher(), now=datetime.now(tz=UTC))
     except _discovery_errors() as exc:
         print(f"callback watch: {exc}", file=sys.stderr)
         return 3
@@ -432,7 +458,8 @@ def _cmd_watch(_args: argparse.Namespace) -> int:
     for target, message in result.errors:
         print(f"callback watch: could not read {target.company}: {message}", file=sys.stderr)
     print(f"{len(result.new)} new posting(s)")
-    return 1 if result.errors else 0
+    # Its own code: 1 means "warn" for the gate commands.
+    return 4 if result.errors else 0
 
 
 def _cmd_postings_list(args: argparse.Namespace) -> int:
@@ -457,8 +484,7 @@ def _cmd_postings_list(args: argparse.Namespace) -> int:
 def _cmd_postings_resolve(args: argparse.Namespace) -> int:
     from datetime import UTC, datetime
 
-    from core.discovery.fetch import Fetcher
-    from core.discovery.store import PageSource, resolve
+    from core.discovery.store import resolve
     from core.paths import ensure_home
 
     ensure_home()
@@ -466,9 +492,9 @@ def _cmd_postings_resolve(args: argparse.Namespace) -> int:
         found = resolve(
             args.url,
             args.company,
-            cast("Fetcher", _fetcher()),
+            _fetcher(),
             now=datetime.now(tz=UTC),
-            pages=cast("PageSource", _page_fetcher()),
+            pages=_page_fetcher(),
         )
     except _discovery_errors() as exc:
         print(f"callback postings resolve: {exc}", file=sys.stderr)
@@ -1004,7 +1030,7 @@ def _cmd_export(args: argparse.Namespace) -> int:
     return 0 if verdict == "pass" else 2
 
 
-def _github_fetcher() -> object:
+def _github_fetcher() -> Fetcher:
     """The GitHub API fetcher; a single place tests replace."""
     from core.discovery.fetch import HttpFetcher
     from core.profile.github import GITHUB_API
@@ -1015,13 +1041,13 @@ def _github_fetcher() -> object:
 def _cmd_facts_github(args: argparse.Namespace) -> int:
     import yaml
 
-    from core.discovery.fetch import DiscoveryError, Fetcher
+    from core.discovery.fetch import DiscoveryError
     from core.paths import ensure_home, resolve_inside, write_private
     from core.profile.github import fetch_drafts
 
     ensure_home()
     try:
-        drafted = fetch_drafts(args.user, cast("Fetcher", _github_fetcher()))
+        drafted = fetch_drafts(args.user, _github_fetcher())
     except DiscoveryError as exc:
         print(f"callback facts github: {exc}", file=sys.stderr)
         return 3

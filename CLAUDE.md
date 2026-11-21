@@ -38,41 +38,30 @@ even if every test passes.
    relative name into a path; anything that builds a path by string concatenation instead
    is a bug, because it bypasses the traversal and symlink-escape checks that make the
    write guard meaningful.
-6. **No `Co-Authored-By` trailer, in any commit, ever.** Grep the log for it before
-   every push.
-7. **Audience: every docstring, comment, commit message and doc is written for a senior
-   engineer reading this repo cold.** Never reference a plan, a task number, a brief, a
-   report, "the controller," "the reviewer," or how a piece of code was produced. This
-   constraint has already been violated and caught twice — a docstring in
-   `core/checks/derive.py` once read "see the task report for a documented case", and an
-   earlier docstring in `core/paths.py` plus a commit message referenced a planning
-   document by number. Both required a history rewrite to remove. Before any
-   commit, grep the diff for `\bTask [0-9]+\b|superpowers|sdd/|task report|the brief|the
-   plan\b|the ruling|controller|reviewer|implementer` — this is the standing pattern,
-   widened after the leak recurred once with a narrower one.
-8. **Planning documents live outside the repo.** Design specifications and working plans
+6. **Write docstrings, comments and docs for an engineer reading the repo cold.** Explain
+   the code and the decision, not the process that produced it: no task numbers, plan
+   references or working-note names.
+7. **Planning documents live outside the repo.** Design specifications and working plans
    live outside this tree, so planning and personal context can never reach what will
    become a public repo. Do not add a planning or scratch-notes directory inside this
    tree, however convenient it seems mid-task — naming one here would also make this
    sentence assert a path that should never exist.
-9. **No PII in the repo, checked structurally, not by memory.** `.gitignore` already
+8. **No PII in the repo, checked structurally, not by memory.** `.gitignore` already
    covers `*.db`, `*.pdf`, `inbox/`, `outputs/`, `.callback/`. All fixtures are synthetic
    personas — a real resume, including the maintainer's own, must never produce a
    committed artifact, including a README screenshot.
-10. **A gate never returns a bare bool.** Verdicts are three-valued (`pass` / `warn` /
+9. **A gate never returns a bare bool.** Verdicts are three-valued (`pass` / `warn` /
     `fail`) wherever a check can be undecided, because collapsing "derived and verified" and
     "literally absent" into the same boolean is exactly the failure mode that made v1 of
     this project's grounding rule false-fail 6 of 7 legitimate bullets in an early
     design — the type signature is what prevents that regressing silently.
-11. **Never pipe a gating command into `tail`/`head` inside an `&&` chain.** The exit
+10. **Never pipe a gating command into `tail`/`head` inside an `&&` chain.** The exit
     status becomes the pager's, not the command's, and a red CI run can go green for the
     wrong reason.
-
-12. **Stage commits by filename, never `git add -A`.** More than one contributor can have
+11. **Stage commits by filename, never `git add -A`.** More than one contributor can have
     files in the working tree at once, and a blanket add commits someone else's
-    half-finished work. This is not hypothetical: it was caught here with three untracked
-    files belonging to unrelated work sitting in the tree at commit time.
-13. **A fixture that renders through Typst raises on a non-empty warnings list.** A warning
+    half-finished work.
+12. **A fixture that renders through Typst raises on a non-empty warnings list.** A warning
     during fixture construction means the fixture is not the document the test believes in,
     and an adversarial fixture that quietly failed to become adversarial is the most
     expensive kind of passing test. See the failure modes below.
@@ -89,12 +78,8 @@ if it hadn't happened?"** When the answer is the same thing it prints on success
 in this section. Every entry below was found the hard way, and each was invisible until
 someone asked that question of it.
 
-- **A claimed test count is verified independently, not trusted.** This repository has
-  already had one report that stated "28/28 full suite" passing when the real,
-  independently verified count was 39/39 — nothing was lost, but the report was wrong, and
-  the report is the only evidence a reviewer has unless they rerun the suite themselves.
-  Before treating any "N passed" claim as done, run `uv run pytest -q` and read the tail
-  line yourself.
+- **A claimed test count is verified, not trusted.** Before treating any "N passed" claim
+  as done, run `uv run pytest -q` and read the tail line yourself.
 
   When more than one contributor has files in the tree, the full-suite total is **not**
   attributable to any one change: uncommitted work from elsewhere is collected too. A suite
@@ -105,10 +90,8 @@ someone asked that question of it.
 - **A mutation's restore is verified, not assumed.** Copy the file aside, restore from the
   copy, and `cmp` to confirm the restore happened. `git checkout -- <path>` silently does
   nothing on an untracked file — it prints a pathspec error and returns non-zero, which a
-  script without `set -e` walks straight past. A sibling project stacked four mutations on
-  one file that way, and every result after the first measured a file nobody had read; the
-  output table looked entirely normal, because nothing in it could say "these rows are
-  garbage."
+  script without `set -e` walks straight past, and every later result then measures a file
+  nobody restored.
 - **A mutation is run with the bytecode cache cleared, or its result means nothing.**
   `find . -name __pycache__ -type d -exec rm -rf {} +` before each one, or
   `PYTHONDONTWRITEBYTECODE=1`. CPython invalidates a `.pyc` on the source's size and its
@@ -121,20 +104,10 @@ someone asked that question of it.
   whether it exists: notes kept only in a git-ignored scratch directory read as absent once
   that directory is removed, and absent is indistinguishable from never-written. Design
   decisions a future reader would question belong in `docs/lessons/`, not in a working file.
-- **The review comments once per pull request.** Having checked that it already commented,
-  it stops: "Claude has already left review comments on this PR... I stop here." So the
-  commits that fix a review's findings are never reviewed by CI on that same PR. Either
-  review the fix diff another way before merging, or keep the fix round small enough that
-  the mutation tests carry it. Sizing a batch so the first push contains everything is what
-  makes the single review worth most.
-- **A review that never ran leaves the same trace as a review that found nothing: an
-  empty comment list.** The review workflow's `concurrency` group has
-  `cancel-in-progress: true`, and a real review of this PR takes over twenty minutes, so
-  two pushes twenty minutes apart cancelled both reviews mid-run and neither posted
-  anything. The audit has failed the same way twice for different reasons: its turn budget
-  ran out before it wrote the report, and once the model's own usage limit ended the run.
-  Read the run's conclusion and `num_turns`/`result` in the log before believing a clean
-  review; batch commits and push once per review.
+- **A run that never finished leaves the same trace as a run that found nothing.** The
+  standards audit has ended without writing its report when its turn budget ran out and when
+  the model's usage limit ended the run. Read the run's conclusion before believing a clean
+  result; the workflow fails when no report was written.
 - **Pinned Action SHAs and dependency versions are verified against the source, not
   assumed correct because they appear in a plan.** `gh api repos/<org>/<repo>/git/ref/tags/<tag>
   --jq .object.sha` before any CI change lands; this caught a wrong pinned SHA before it
@@ -151,7 +124,7 @@ project's risks have a specialist whose whole subject they are:
 
 | Risk | Reviewer |
 |---|---|
-| A gate returning `pass` because something inside it declined to answer | `pr-review-toolkit:silent-failure-hunter` — its subject is exactly "Ways a check can pass without running" below |
+| A gate returning `pass` because something inside it declined to answer | `pr-review-toolkit:silent-failure-hunter` — its subject is exactly "Ways a check can pass without running" above |
 | A type that permits a state its invariants forbid | `pr-review-toolkit:type-design-analyzer` — relevant wherever a frozen model or a validator carries a correctness claim |
 | A docstring whose explanation is wrong while its conclusion is right | `pr-review-toolkit:comment-analyzer` — this has happened four times here, always in careful prose |
 | Whether a test suite's coverage is real or apparent | `pr-review-toolkit:pr-test-analyzer` |

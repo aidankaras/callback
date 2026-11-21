@@ -70,7 +70,7 @@ postings anyway.
 |---|---|---|
 | `callback targets add "<company>" --ats <ats> --board <name>` / `targets list` | Choose the companies to watch | 0, 3 |
 | `callback criteria --include "…" [--require "…"] --exclude "…"` | Title terms a watch keeps: an include term, a require term if given, no exclude term; whole words, with a trailing `*` for a prefix | 0, 3 |
-| `callback watch` | Polls every target and stores new matching postings with when they were first seen | 0, 1 if a board could not be read, 3 |
+| `callback watch` | Polls every target and stores new matching postings with when they were first seen | 0, 4 if a board could not be read, 3 |
 | `callback postings list [--days N]` | Stored postings, newest first | 0, 3 |
 | `callback postings resolve <url> --company "<company>"` | The canonical posting behind a Greenhouse, Lever or Ashby URL, or an employer careers page's `schema.org/JobPosting` data | 0, 3 |
 | `callback postings add --company "…" --title "…" --url <url> --text-file <path> [--deadline YYYY-MM-DD] [--location "…"]` | Stores a posting no watch can read, such as a research programme, from its text. A bare date is 23:59 in this machine's timezone on that day, and the stored deadline is printed with its offset; a deadline already past is stored, with a warning on stderr, since the agenda lists a deadline for only a week after it passes. `--location` is what a city tier reads: a hand-added posting has no other, and the city named in its text is not read. Adding the same page again (URLs are compared ignoring case in the scheme and host, a fragment and one trailing slash) updates the text, keeps the location unless a new one is given, keeps the deadline unless a new one is given or the old one has passed, and keeps its id and first-seen date. A watch never removes it, provided no watch is running at the same moment: a posting added while one runs is lost when the watch saves | 0, 3 |
@@ -412,7 +412,9 @@ can forge a signature.
 
 Each ledger entry also carries an HMAC under the same key, so a ledger
 rewritten from scratch fails even when every entry chains correctly, and
-`verify` reports a sealed document the ledger does not record.
+`verify` reports a sealed document the ledger does not record. The entry
+count and last hash are kept in a signed `ledger.head`, so entries removed
+from the end of the ledger are reported too.
 
 ## The MCP server
 
