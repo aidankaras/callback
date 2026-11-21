@@ -26,7 +26,7 @@ from core.letter.io import parse_letter
 from core.letter.render import render_letter
 from core.paths import private_dir, resolve_inside, write_private, write_private_bytes
 from core.profile.store import load_facts_judged
-from core.render.typst import RenderError
+from core.render.typst import RenderError, stamp_draft
 from core.resume.io import DocumentError, load_doc
 
 
@@ -77,11 +77,12 @@ def build_letter(path: Path) -> LetterBuild:
         except RenderError as exc:
             raise BuildError(f"could not render {path.name}: {exc}") from exc
         _, hidden = check_hidden(staged)
-        pdf_bytes = staged.read_bytes()
+        findings = result.findings + tuple(f"hidden: {f.kind}: {f.detail}" for f in hidden)
+        # Stamped after the checks, as a failed resume draft is.
+        pdf_bytes = stamp_draft(staged) if findings else staged.read_bytes()
     finally:
         shutil.rmtree(staging, ignore_errors=True)
 
-    findings = result.findings + tuple(f"hidden: {f.kind}: {f.detail}" for f in hidden)
     write_private_bytes(out_dir / "cover-letter.pdf", pdf_bytes)
     report = ["# FAIL" if findings else "# PASS", ""]
     report += [f"- {f}" for f in findings] or ["- no findings"]

@@ -33,12 +33,13 @@ line at the page margin is not itself a defect in the renderer.
 
 from __future__ import annotations
 
+import io
 import json
 from dataclasses import dataclass
 from pathlib import Path
 
 import typst
-from pypdf import PdfReader
+from pypdf import PdfReader, PdfWriter
 from pypdf.generic import ArrayObject, DictionaryObject, IndirectObject
 
 from core.resume.models import ResumeDoc
@@ -238,3 +239,39 @@ def _embedded_families(pdf_path: Path) -> list[str]:
                     if sub_base is not None:
                         names.add(str(sub_base).lstrip("/").split("+")[-1])
     return sorted(names)
+
+
+DRAFT_STAMP = "DRAFT: did not pass its gates (see the report beside this file)"
+
+
+def stamp_draft(pdf_path: Path, *, label: str = DRAFT_STAMP) -> bytes:
+    """Overlay `label` across the top edge of every page of `pdf_path`; return the bytes.
+
+    Applied only after the gates have judged the unstamped bytes, so the
+    hidden-content and round-trip gates never see the stamp, and a document
+    that failed them cannot be mistaken for one that passed. The stamp is
+    compiled through `compile_source`, so it gets the same vendored font and
+    fixed timestamp as the document itself.
+    """
+    reader = PdfReader(pdf_path)
+    first = reader.pages[0].mediabox
+    stamp_path = pdf_path.with_name(pdf_path.stem + ".stamp.pdf")
+    source = (
+        f"#set page(width: {float(first.width)}pt, height: {float(first.height)}pt, margin: 0pt)\n"
+        f'#set text(font: "{DEFAULT_FONT}", size: 9pt, fill: rgb("#b00020"))\n'
+        f"#place(top + center, dy: 8pt)[*{_typst_text(label)}*]\n"
+    )
+    compile_source(source, stamp_path)
+    stamp = PdfReader(stamp_path).pages[0]
+    writer = PdfWriter(clone_from=reader)
+    for page in writer.pages:
+        page.merge_page(stamp)
+    out = io.BytesIO()
+    writer.write(out)
+    stamp_path.unlink(missing_ok=True)
+    return out.getvalue()
+
+
+def _typst_text(text: str) -> str:
+    """Escape `text` for Typst markup mode."""
+    return "".join("\\" + c if c in '\\#*_`$<>@[]=-+/"~' else c for c in text)

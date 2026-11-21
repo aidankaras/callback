@@ -68,8 +68,9 @@ and the report it names opens with what to fix:
 - claims: skill 'Kubernetes' is backed by no confirmed fact
 ```
 
-The PDF still exists, watermarked, in `draft/`: a document is always delivered, and
-provenance decides where it lands. With the invented bullet and skill removed, the
+The PDF still exists in `draft/`, stamped across its top edge as a draft that did not pass
+its gates: a document is always delivered, and provenance decides where it lands. The gates
+judge the unstamped render; the stamp is added afterwards. With the invented bullet and skill removed, the
 same facts build to this, with every gate passing:
 
 ![A one-page resume for the synthetic candidate Dana Vex](docs/images/example-resume.png)

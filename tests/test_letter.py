@@ -275,6 +275,35 @@ def test_callback_letter_writes_a_private_pdf_and_report(
 
 
 @pytest.mark.slow
+def test_a_failed_letter_is_stamped_as_a_draft(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import pdfplumber
+
+    from core.cli import main
+    from core.letter.io import dump_letter
+    from core.paths import ensure_home
+    from core.profile.store import save_facts
+
+    monkeypatch.setenv("CALLBACK_HOME", str(tmp_path / "cb"))
+    home = ensure_home()
+    save_facts(FACTS)
+    (home / "inbox" / "acme-ml-intern.md").write_text(POSTING, encoding="utf-8")
+    source = tmp_path / "letter.yaml"
+    failing = letter([c("At Northwind Analytics I led a team of twelve.", "nw")])
+    source.write_text(dump_letter(failing), encoding="utf-8")
+
+    assert main(["letter", str(source)]) != 0  # premise: the letter fails
+    draft = home / "outputs" / "acme-ml-intern" / "draft"
+    with pdfplumber.open(draft / "cover-letter.pdf") as pdf:
+        text = pdf.pages[0].extract_text() or ""
+    assert text.startswith("DRAFT: did not pass its gates")
+    record = json.loads((draft / "letter-report.json").read_text())
+    pdf_bytes = (draft / "cover-letter.pdf").read_bytes()
+    assert record["pdf_sha256"] == hashlib.sha256(pdf_bytes).hexdigest()
+
+
+@pytest.mark.slow
 def test_callback_letter_refuses_without_a_saved_posting(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
