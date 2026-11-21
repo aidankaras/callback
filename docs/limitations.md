@@ -62,6 +62,11 @@ by design rather than merely unimplemented.
   CMYK conversion bias). Anything it cannot judge, such as a pattern fill or an unreadable
   background, fails rather than passes.
 
+- **The ledger proves order and completeness against its own head, not against time.** A
+  changed, removed or reordered entry breaks the chain, and entries removed from the end no longer
+  match the signed `ledger.head`. Restoring an earlier copy of both files together reads as an
+  intact, shorter ledger, and anyone who can read `.key` can write valid entries.
+
 ## Not built yet
 
 - **Watching boards other than Greenhouse, Lever and Ashby.** A careers page can be resolved one

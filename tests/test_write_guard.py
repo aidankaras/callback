@@ -184,6 +184,7 @@ def test_the_application_record_is_not_writable_by_a_tool(home: Path) -> None:
         "ls > ~/.callback/facts.yaml",
         "stat x >>~/.callback/.key",
         "du 2>~/.callback/ledger.log",
+        "rm ~/.callback/ledger.head",
         "cd /tmp > ~/.callback/facts.yaml",
     ],
 )

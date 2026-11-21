@@ -412,7 +412,9 @@ can forge a signature.
 
 Each ledger entry also carries an HMAC under the same key, so a ledger
 rewritten from scratch fails even when every entry chains correctly, and
-`verify` reports a sealed document the ledger does not record.
+`verify` reports a sealed document the ledger does not record. The entry
+count and last hash are kept in a signed `ledger.head`, so entries removed
+from the end of the ledger are reported too.
 
 ## The MCP server
 
