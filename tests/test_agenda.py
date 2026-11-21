@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import time
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
@@ -181,7 +182,20 @@ def test_an_empty_agenda_says_what_to_run(home: Path) -> None:
     assert "callback watch" in render(agenda([], [], PROFILE, FACTS, now=NOW))
 
 
-@pytest.mark.parametrize("damage", ["not-json", "a list", "no-hash", "edited", "unreadable"])
+_ROOT = hasattr(os, "geteuid") and os.geteuid() == 0
+
+
+@pytest.mark.parametrize(
+    "damage",
+    [
+        "not-json",
+        "a list",
+        "no-hash",
+        "edited",
+        # root reads a file whatever its mode, so chmod 000 damages nothing.
+        pytest.param("unreadable", marks=pytest.mark.skipif(_ROOT, reason="root ignores modes")),
+    ],
+)
 def test_a_draft_whose_gates_cannot_be_read_is_reported_not_forgotten(
     home: Path, damage: str
 ) -> None:
