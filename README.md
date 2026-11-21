@@ -127,7 +127,10 @@ format, the document format and every rule.
 ## Evaluating the skill
 
 The tests check `core`. `evals/` checks the half that runs in Claude: seven
-cases run with and without the plugin through `claude plugin eval`. Without
+cases run with and without the plugin through `claude plugin eval`, three runs
+per case per arm, which is a smoke test rather than a benchmark. The run
+transcripts are not committed, so the figures below are reported, not
+checkable from this repository; `evals/run.sh` reproduces them. Without
 it, Claude fetched a LinkedIn job page in 3 of 3 runs and told the user an
 unconfirmed fact was confirmed in 3 of 3; with it, neither happened. On
 fabrication both arms were clean when handed an explicit facts file, which is

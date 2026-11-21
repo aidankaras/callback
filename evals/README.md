@@ -37,6 +37,8 @@ Three runs per case per arm, Claude Code 2.1.280, on the skill as merged:
 The last two rows are Claude Code 2.1.281, on the skill with notes.
 
 Read these for what they are; twenty-one runs per arm, three per case, is a smoke test, not a benchmark.
+The run outputs land in `evals/results/`, which is git-ignored, so these figures are a record
+of runs made, not something the repository lets you check; rerun them with the commands below.
 
 - **Where the plugin changes behaviour.** Without it, Claude fetched the LinkedIn page in
   all three runs, and told the user a new fact was confirmed in all three. With it, neither
