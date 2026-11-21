@@ -608,9 +608,11 @@ def check_bullet(
         # A percentage's direction is carried by its verb ("cut churn by 15%"),
         # so it is compared by magnitude; a count's sign is part of its value.
         if number.is_percent:
-            if any(values_match(abs(number.value), abs(v)) for v in percent_values):
+            if any(
+                values_match(abs(number.value), abs(v), step=number.step) for v in percent_values
+            ):
                 continue
-        elif any(values_match(number.value, source) for source in count_values):
+        elif any(values_match(number.value, source, step=number.step) for source in count_values):
             continue
         # A percentage is compared against the *magnitude* of a derived
         # value: the sign of a `pct_change` derivation only reflects the
@@ -622,7 +624,7 @@ def check_bullet(
         derived_pool = (
             (abs(v) for v in derived_values) if number.is_percent else iter(derived_values)
         )
-        if any(values_match(claimed, source) for source in derived_pool):
+        if any(values_match(claimed, source, step=number.step) for source in derived_pool):
             used_derivation = True
             continue
         if (

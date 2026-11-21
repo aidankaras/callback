@@ -38,10 +38,12 @@ digits and "." from the lookbehind as well closes that gap, because it
 then blocks every position inside the run, not just the first one; see
 `_TOKEN`.
 
-`values_match` compares two already-parsed values with a relative
-tolerance rather than exact equality, because a generated claim is
-usually a rounded restatement of a stored figure (`0.8312` reported as
-"0.83"), not a copy of it.
+`values_match` compares two already-parsed values with a tolerance
+rather than exact equality, because a generated claim is usually a
+rounded restatement of a stored figure (`0.8312` reported as "0.83",
+`1_234_000` as "1.2M"), not a copy of it. Each parsed number carries the
+place value of its last printed digit (`step`), and a claim matches a
+source that rounds to it at that digit.
 """
 
 from __future__ import annotations
@@ -113,6 +115,9 @@ class ParsedNumber:
     unit: str | None
     is_percent: bool
     span: tuple[int, int]
+    # Place value of the last digit as written, scaled by any magnitude:
+    # 0.01 for "0.83", 1 for "44%", 100_000 for "1.2M".
+    step: float = 1.0
 
 
 def parse_numbers(text: str) -> list[ParsedNumber]:
@@ -132,7 +137,10 @@ def parse_numbers(text: str) -> list[ParsedNumber]:
     """
     out: list[ParsedNumber] = []
     for match in _TOKEN.finditer(text):
-        value = float(match.group("digits").replace(",", ""))
+        digits = match.group("digits")
+        value = float(digits.replace(",", ""))
+        _, dot, decimals = digits.partition(".")
+        step = 10.0 ** -len(decimals) if dot else 1.0
         alpha = match.group("alpha")
         gap = match.group("gap")  # always a string ("" or more) — the group is mandatory
         end = match.end("digits")
@@ -142,10 +150,12 @@ def parse_numbers(text: str) -> list[ParsedNumber]:
             alpha_lower = alpha.lower()
             if alpha_lower in WORD_MAGNITUDES:
                 value *= WORD_MAGNITUDES[alpha_lower]
+                step *= WORD_MAGNITUDES[alpha_lower]
                 end = match.end("alpha")
                 consumed_alpha = True
             elif gap == "" and len(alpha) == 1 and alpha_lower in ABBR_MAGNITUDES:
                 value *= ABBR_MAGNITUDES[alpha_lower]
+                step *= ABBR_MAGNITUDES[alpha_lower]
                 end = match.end("alpha")
                 consumed_alpha = True
             # Otherwise the letters are not a magnitude: leave them in the
@@ -183,22 +193,29 @@ def parse_numbers(text: str) -> list[ParsedNumber]:
                 unit=CURRENCY.get(currency) if currency else None,
                 is_percent=consumed_percent,
                 span=(start, end),
+                step=step,
             )
         )
     return out
 
 
-def values_match(claimed: float, source: float, *, tolerance: float = 0.005) -> bool:
-    """True when `claimed` is within a relative tolerance of `source`.
+def values_match(
+    claimed: float, source: float, *, tolerance: float = 0.005, step: float = 0.0
+) -> bool:
+    """True when `claimed` is a rounding of `source`.
 
-    The default (0.5%) admits ordinary rounding — `0.8312` reported as
-    "0.83" — and rejects anything that overstates the underlying figure
-    by more than that, so "40%" against a stored 44% still fails.
-    Tolerance is symmetric: it also rejects understatement, not only
-    inflation. Not intended for comparing magnitudes near zero: `source`
-    exactly `0` falls back to an absolute check, so the two branches
-    disagree right at that boundary.
+    Two ways to match. `step` is the place value of the claim's last printed
+    digit (`ParsedNumber.step`): the claim matches when `source` rounds to it
+    at that digit, so "1.2M" matches 1_234_000, "33%" matches 33.33 and "44%"
+    matches 43.7, while "40%" against 44 does not. Independently, a relative
+    tolerance (default 0.5%) admits a claim printed with more digits than the
+    source supports. Both are symmetric: understatement fails like inflation.
+    `source` exactly `0` falls back to an absolute check for the tolerance.
     """
+    # A hair over half a step, so a float such as 0.35 - 0.3 still counts as
+    # exactly half; a true tie rounds either way and both are accepted.
+    if step > 0 and abs(claimed - source) <= step / 2 * (1 + 1e-9):
+        return True
     if source == 0:
         return abs(claimed) <= tolerance
     return abs(claimed - source) / abs(source) <= tolerance

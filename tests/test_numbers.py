@@ -150,6 +150,24 @@ def test_number_after_a_letter_prefixed_identifier_is_still_parsed() -> None:
     assert [n.value for n in parse_numbers("on the H100, cut latency 40%")] == [40.0]
 
 
+@pytest.mark.parametrize(
+    ("text", "step"),
+    [("0.83", 0.01), ("44%", 1.0), ("1.2M", 100_000.0), ("1.25 million", 10_000.0), ("$12k", 1e3)],
+)
+def test_step_is_the_place_value_of_the_last_printed_digit(text: str, step: float) -> None:
+    [n] = parse_numbers(text)
+    assert n.step == pytest.approx(step)
+
+
+def test_a_claim_matches_a_source_that_rounds_to_it_at_its_last_digit() -> None:
+    """Half a step either side matches; past it does not. Mutation: drop the
+    step branch -- "1.2M" for 1_234_000 fails again."""
+    assert values_match(claimed=1_200_000, source=1_234_000, step=100_000)
+    assert values_match(claimed=1_200_000, source=1_250_000, step=100_000)
+    assert not values_match(claimed=1_200_000, source=1_251_000, step=100_000)
+    assert not values_match(claimed=40.0, source=44.0, step=1.0)
+
+
 def test_the_tolerance_is_half_a_percent_either_side() -> None:
     """Pinned at the boundary: 0.4% off matches, 0.6% off does not, in both
     directions. Mutation: loosen the default tenfold -- this fails."""

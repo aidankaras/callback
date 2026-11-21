@@ -20,7 +20,8 @@ by design rather than merely unimplemented.
   from a brief's exemplars, and a warning on a resume bullet with no digit and none of its cited
   facts' entities; it does not judge whether a sentence is good.
 - **Which occurrence of a value a claim means.** Numbers match by value against the cited facts,
-  not by position. A quantity recorded with a percent unit cannot back a plain count, but a quantity
+  not by position, and a number matches any cited value that rounds to it at its last printed
+  digit: "1.2M" matches 1,234,000, and "1M" would match 1,400,000. A quantity recorded with a percent unit cannot back a plain count, but a quantity
   recorded with no unit can back either.
 - **Whether a saved posting is the real one.** A cover letter's claims about the employer are held
   to the posting saved in `inbox/<job>.md`. `callback postings take` writes the text a board's API

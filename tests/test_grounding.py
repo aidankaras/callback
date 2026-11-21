@@ -40,6 +40,39 @@ def test_magnitude_form_of_a_literal_passes() -> None:
     assert findings == []
 
 
+@pytest.mark.parametrize(
+    ("bullet", "stored", "unit"),
+    [
+        ("Processed 1.2M records", 1_234_000, None),
+        ("Cut errors 33%", 33.33, "%"),
+        ("Cut errors 44%", 43.7, "%"),
+        ("Cut errors 98%", 97.6, "%"),
+    ],
+)
+def test_a_rounded_restatement_passes(bullet: str, stored: float, unit: str | None) -> None:
+    """Rounding at the claim's last printed digit is a true restatement.
+    Mutation: compare by relative tolerance alone -- the first three fail."""
+    f = fact("r", numbers={"n": Quantity(value=stored, unit=unit)})
+    assert check_bullet(bullet, [f]) == (Verdict.PASS, [])
+
+
+@pytest.mark.parametrize(
+    ("bullet", "stored", "unit"),
+    [
+        ("Processed 1.3M records", 1_234_000, None),
+        ("Cut errors 35%", 33.33, "%"),
+        ("Cut errors 45%", 43.7, "%"),
+    ],
+)
+def test_a_figure_the_source_does_not_round_to_fails(
+    bullet: str, stored: float, unit: str | None
+) -> None:
+    f = fact("r", numbers={"n": Quantity(value=stored, unit=unit)})
+    verdict, findings = check_bullet(bullet, [f])
+    assert verdict is Verdict.FAIL
+    assert [x.kind for x in findings] == [FindingKind.UNRESOLVED_NUMBER]
+
+
 def test_derived_percentage_is_verified_not_rejected() -> None:
     f = fact(
         "c",
