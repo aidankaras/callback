@@ -876,6 +876,33 @@ def test_a_name_after_an_opening_bracket_is_still_checked() -> None:
     assert any("Google" in x.detail for x in found), found
 
 
+@pytest.mark.parametrize(
+    ("bullet", "names"),
+    [
+        ("Built nightly ETL jobs in Python; Google adopted them company-wide", ["Google"]),
+        ("Built ETL jobs in Python - Meta partnership", ["Meta"]),
+        ("Built ETL jobs in Python for client: Goldman Sachs", ["Goldman", "Sachs"]),
+    ],
+)
+def test_a_clause_joiner_does_not_start_a_sentence(bullet: str, names: list[str]) -> None:
+    """A semicolon, colon or dash joins clauses inside one bullet, so the word
+    after it is mid-sentence and its capital marks a name. Mutation: add ";",
+    ":" or "-" back to the sentence breaks -- the name passes unchecked."""
+    f = fact(
+        "etl", text="Built nightly ETL jobs in Python and SQL", entities=["ETL", "Python", "SQL"]
+    )
+    verdict, findings = check_bullet(bullet, [f])
+    assert verdict is Verdict.FAIL
+    assert [x.detail for x in findings] == [f"{n!r} appears in no cited fact" for n in names]
+
+
+@pytest.mark.parametrize("marker", ["-", "*", "\u2022", "\u2013"])
+def test_a_leading_list_marker_still_exempts_the_first_word(marker: str) -> None:
+    """A bullet pasted with its marker still begins with a capitalised verb."""
+    f = fact("etl", text="Built nightly ETL jobs in Python", entities=["ETL", "Python"])
+    assert check_bullet(f"{marker} Built ETL jobs in Python", [f]) == (Verdict.PASS, [])
+
+
 def test_a_possessive_names_what_the_fact_states() -> None:
     """The bullet tokenizer stops at the apostrophe while the fact keeps it.
     Mutation: forbid an apostrophe after the match -- "Moody's" is rejected

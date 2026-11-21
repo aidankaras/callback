@@ -12,7 +12,10 @@ by design rather than merely unimplemented.
   technologies, mid-sentence capitalised names, a fixed list of claim words, and spelled-out
   numbers. A technology is recognised by the alias table or by its spelling; one written in
   lowercase letters only and absent from the table (`xgboost`, `dbt`, `pytest`) reads as an
-  ordinary word and is not checked, while `XGBoost` is. Ordinary verbs and nouns are not compared: "led the migration" and "helped with the
+  ordinary word and is not checked, while `XGBoost` is. A capitalised word straight after `.`,
+  `!` or `?` is taken as the start of a sentence and not checked as a name, so a bullet written
+  as two sentences ("... in Python. Google adopted it") hides the second one's first word; a
+  semicolon, colon or dash does not exempt the word after it. Ordinary verbs and nouns are not compared: "led the migration" and "helped with the
   migration" ground identically. The `style` gate adds only a fixed list of stock phrases, copying
   from a brief's exemplars, and a warning on a resume bullet with no digit and none of its cited
   facts' entities; it does not judge whether a sentence is good.

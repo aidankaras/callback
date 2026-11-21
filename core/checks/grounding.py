@@ -481,9 +481,13 @@ _MONTH_AND_DAY_NAMES = frozenset(
     ]
 )
 # Characters after which a capitalised word may be the first of a sentence, so
-# its capital says nothing about it being a name. An opening bracket or quote
-# is not one of them: "the (Google) partnership" names Google mid-sentence.
-_SENTENCE_BREAK = ".;:!?\u2013\u2014-\u2022"
+# its capital says nothing about it being a name. Only sentence-ending
+# punctuation counts: a semicolon, colon or dash joins clauses inside one
+# bullet, so "in Python; Google adopted it" names Google mid-sentence. An
+# opening bracket or quote is not a break either.
+_SENTENCE_BREAK = ".!?"
+# A list marker left at the start of a bullet: the word after it is the first.
+_LEADING_MARKERS = frozenset("-*\u2013\u2014\u2022")
 
 
 def _support_corpus(sources: Sequence[Fact]) -> str:
@@ -526,7 +530,7 @@ def _unsupported_names(text: str, corpus: str, cited_entities: set[str]) -> list
             # identifier, which the number and entity rules own.
             continue
         before = text[: match.start()].rstrip()
-        if not before or before[-1] in _SENTENCE_BREAK:
+        if not before or before[-1] in _SENTENCE_BREAK or set(before) <= _LEADING_MARKERS:
             continue
         for part in (p for p in word.split("-") if p and p[0].isupper()):
             if part.casefold() in _MONTH_AND_DAY_NAMES or part in {"I", "A"}:
