@@ -67,7 +67,8 @@ def _mac(key: bytes, body: dict[str, object]) -> str:
 
 def _sign(body: dict[str, object]) -> str:
     key = _key(create=True)
-    assert key is not None
+    if key is None:
+        raise FinalizeError("the signing key could not be created")
     return _mac(key, body)
 
 

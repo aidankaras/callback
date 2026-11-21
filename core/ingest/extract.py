@@ -84,10 +84,12 @@ MAX_GAPS = 20
 
 # Run in a child process: `pdfplumber.open` and `check_hidden` both parse a
 # file this project did not produce, and a file crafted to make that parsing
-# hang or exhaust memory should only ever take down a disposable child, not
-# the caller. `sys.executable` and `str(path)` are the only two values that
-# vary; there is no `-c` shell involved, no `shell=True`, and nothing from
-# `path`'s own bytes is ever interpreted as part of the command line.
+# hang is killed at the timeout without taking the caller with it. There is
+# no memory limit on the child, so a file that exhausts memory is bounded
+# only by the timeout and the machine. `sys.executable` and `str(path)` are
+# the only two values that vary; the code runs through `python -c`, never a
+# shell (`sh -c` or `shell=True`), and nothing from `path`'s own bytes is
+# interpreted as part of the command line.
 _WORKER = """
 import json
 import sys

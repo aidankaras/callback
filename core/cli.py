@@ -6,9 +6,13 @@ import argparse
 import re
 import sys
 from pathlib import Path
-from typing import TextIO, cast
+from typing import TYPE_CHECKING, TextIO, cast
 
 from core import __version__
+
+if TYPE_CHECKING:
+    from core.discovery.fetch import Fetcher
+    from core.discovery.store import PageSource
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -345,14 +349,14 @@ def build_parser() -> argparse.ArgumentParser:
 _SAFE_STEM = re.compile(r"[^a-z0-9-]+")
 
 
-def _fetcher() -> object:
+def _fetcher() -> Fetcher:
     """The network fetcher; a single place tests replace."""
     from core.discovery.fetch import HttpFetcher
 
     return HttpFetcher()
 
 
-def _page_fetcher() -> object:
+def _page_fetcher() -> PageSource:
     """The careers-page fetcher; a single place tests replace."""
     from core.discovery.page import PageFetcher
 
@@ -419,11 +423,10 @@ def _cmd_criteria(args: argparse.Namespace) -> int:
 def _cmd_watch(_args: argparse.Namespace) -> int:
     from datetime import UTC, datetime
 
-    from core.discovery.fetch import Fetcher
     from core.discovery.store import watch
 
     try:
-        result = watch(cast("Fetcher", _fetcher()), now=datetime.now(tz=UTC))
+        result = watch(_fetcher(), now=datetime.now(tz=UTC))
     except _discovery_errors() as exc:
         print(f"callback watch: {exc}", file=sys.stderr)
         return 3
@@ -458,8 +461,7 @@ def _cmd_postings_list(args: argparse.Namespace) -> int:
 def _cmd_postings_resolve(args: argparse.Namespace) -> int:
     from datetime import UTC, datetime
 
-    from core.discovery.fetch import Fetcher
-    from core.discovery.store import PageSource, resolve
+    from core.discovery.store import resolve
     from core.paths import ensure_home
 
     ensure_home()
@@ -467,9 +469,9 @@ def _cmd_postings_resolve(args: argparse.Namespace) -> int:
         found = resolve(
             args.url,
             args.company,
-            cast("Fetcher", _fetcher()),
+            _fetcher(),
             now=datetime.now(tz=UTC),
-            pages=cast("PageSource", _page_fetcher()),
+            pages=_page_fetcher(),
         )
     except _discovery_errors() as exc:
         print(f"callback postings resolve: {exc}", file=sys.stderr)
@@ -1005,7 +1007,7 @@ def _cmd_export(args: argparse.Namespace) -> int:
     return 0 if verdict == "pass" else 2
 
 
-def _github_fetcher() -> object:
+def _github_fetcher() -> Fetcher:
     """The GitHub API fetcher; a single place tests replace."""
     from core.discovery.fetch import HttpFetcher
     from core.profile.github import GITHUB_API
@@ -1016,13 +1018,13 @@ def _github_fetcher() -> object:
 def _cmd_facts_github(args: argparse.Namespace) -> int:
     import yaml
 
-    from core.discovery.fetch import DiscoveryError, Fetcher
+    from core.discovery.fetch import DiscoveryError
     from core.paths import ensure_home, resolve_inside, write_private
     from core.profile.github import fetch_drafts
 
     ensure_home()
     try:
-        drafted = fetch_drafts(args.user, cast("Fetcher", _github_fetcher()))
+        drafted = fetch_drafts(args.user, _github_fetcher())
     except DiscoveryError as exc:
         print(f"callback facts github: {exc}", file=sys.stderr)
         return 3
