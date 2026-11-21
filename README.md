@@ -63,8 +63,8 @@ and the report it names opens with what to fix:
 
 ```text
 ## Fix first
-- grounding: bullet 2: unresolved_number: '40%' is not derivable from the cited facts
-- grounding: bullet 2: unknown_entity: 'Kubernetes' (canonical form 'Kubernetes') appears in no cited fact
+- grounding: entry 1 (Northwind Analytics), bullet 3: unresolved_number: '40%' is not derivable from the cited facts
+- grounding: entry 1 (Northwind Analytics), bullet 3: unknown_entity: 'Kubernetes' (canonical form 'Kubernetes') appears in no cited fact
 - claims: skill 'Kubernetes' is backed by no confirmed fact
 ```
 

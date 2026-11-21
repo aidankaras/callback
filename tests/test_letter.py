@@ -113,7 +113,7 @@ def test_a_claim_about_the_candidate_can_never_cite_the_posting() -> None:
 
 def test_a_claim_absent_from_its_facts_fails() -> None:
     found = findings(letter([c("At Northwind Analytics I led a team of twelve.", "nw")]))
-    assert any("sentence 0.0" in f for f in found), found
+    assert any("paragraph 1, sentence 1" in f for f in found), found
 
 
 # A posting that carries the claims an employer sentence might try to borrow.
@@ -521,7 +521,7 @@ def test_callback_letter_checks_against_the_brief_it_names(
     source.write_text(dump_letter(letter(brief="ml-research")), encoding="utf-8")
     found = build_letter(source).findings
     assert found == (
-        "sentence 0.2: copies an exemplar of the ml-research brief: "
+        "paragraph 1, sentence 3: copies an exemplar of the ml-research brief: "
         "'i trained a scikit learn classifier'",
     )
 

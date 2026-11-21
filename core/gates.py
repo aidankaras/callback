@@ -120,12 +120,12 @@ def _grounding(doc: ResumeDoc, facts: Mapping[str, Fact]) -> tuple[GateOutcome, 
     by_fact: list[FactFinding] = []
     grounded: list[str] = []
     failed = False
-    bullets = [b for s in doc.sections for e in s.entries for b in e.bullets]
-    for i, bullet in enumerate(bullets):
+    bullets = doc.bullets()
+    for i, (label, bullet) in enumerate(bullets):
         cited = tuple(sorted(set(bullet.sources)))
         unknown = [s for s in bullet.sources if s not in facts]
         if unknown:
-            findings.append(f"bullet {i}: cites unknown fact(s) {unknown}")
+            findings.append(f"{label}: cites unknown fact(s) {unknown}")
             # Named per fact too, so a missing fact cited in job after job is
             # reported as recurring rather than lost beside a traced failure.
             by_fact.append(FactFinding("unknown_fact", cited, f"cites unknown fact(s) {unknown}"))
@@ -134,7 +134,7 @@ def _grounding(doc: ResumeDoc, facts: Mapping[str, Fact]) -> tuple[GateOutcome, 
         verdict, bullet_findings = check_bullet(
             bullet.text, [facts[s] for s in bullet.sources], index=i
         )
-        findings.extend(f"bullet {i}: {f.kind}: {f.detail}" for f in bullet_findings)
+        findings.extend(f"{label}: {f.kind}: {f.detail}" for f in bullet_findings)
         if verdict is Verdict.FAIL:
             failed = True
             by_fact.extend(FactFinding(str(f.kind), cited, f.detail) for f in bullet_findings)

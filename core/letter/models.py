@@ -53,9 +53,9 @@ class CoverLetter(BaseModel):
 
     @property
     def sentences(self) -> list[tuple[str, Sentence]]:
-        """Every sentence with its `paragraph.sentence` label."""
+        """Every sentence with its label, counted from 1: `paragraph 2, sentence 1`."""
         return [
-            (f"{p}.{s}", sentence)
-            for p, paragraph in enumerate(self.paragraphs)
-            for s, sentence in enumerate(paragraph)
+            (f"paragraph {p}, sentence {s}", sentence)
+            for p, paragraph in enumerate(self.paragraphs, start=1)
+            for s, sentence in enumerate(paragraph, start=1)
         ]

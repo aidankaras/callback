@@ -50,7 +50,7 @@ def test_an_answer_over_its_limit_fails(limits: dict[str, int], expected: str) -
     only the first sentence -- this fails."""
     doc = answers({"question": "Why Acme?", **limits, "sentences": [WHY, CLAIM]})
     found = check_answers(doc, FACTS, POSTING).findings
-    assert any(expected in f and "answer 0" in f for f in found), found
+    assert any(expected in f and "answer 1" in f for f in found), found
 
 
 def test_answer_sentences_are_held_to_the_letter_rules() -> None:
@@ -61,8 +61,8 @@ def test_answer_sentences_are_held_to_the_letter_rules() -> None:
         {"question": "Anything else?", "sentences": [salary]},
     )
     found = check_answers(doc, FACTS, POSTING).findings
-    assert any(f.startswith("answer 0") and "never the posting" in f for f in found), found
-    assert any(f.startswith("answer 1") and "commitment" in f for f in found), found
+    assert any(f.startswith("answer 1") and "never the posting" in f for f in found), found
+    assert any(f.startswith("answer 2") and "commitment" in f for f in found), found
 
 
 def test_the_company_and_role_are_checked_against_the_posting() -> None:
@@ -201,7 +201,7 @@ def test_callback_answers_checks_against_the_brief_it_names(
     store_brief(home, "ml-research", "I trained a scikit-learn classifier with care.")
     result, _ = build_answers(source, FACTS, None)
     assert result.findings == (
-        "answer 0: sentence 0.1: copies an exemplar of the ml-research brief: "
+        "answer 1: sentence 2: copies an exemplar of the ml-research brief: "
         "'i trained a scikit learn classifier'",
     )
 

@@ -344,7 +344,7 @@ def test_a_build_checks_against_the_brief_it_names(tmp_path: Path, home: Path) -
     result = build(_write(tmp_path, doc), "northwind-de")
     style = next(o for o in result.report.outcomes if o.gate == "style")
     assert style.findings == (
-        "bullet 0: copies an exemplar of the data-eng brief: "
+        "entry 1 (Northwind Analytics), bullet 1: copies an exemplar of the data-eng brief: "
         "'a dependable nightly batch scheduler for'",
     )
 

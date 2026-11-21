@@ -126,7 +126,9 @@ def test_one_failing_gate_does_not_hide_the_others(tmp_path: Path) -> None:
     by_gate = {o.gate: o for o in report.outcomes}
     assert tuple(by_gate) == GATES
     assert by_gate["grounding"].verdict == "fail"
-    assert by_gate["grounding"].findings == ("bullet 0: cites unknown fact(s) ['nope']",)
+    assert by_gate["grounding"].findings == (
+        "entry 1 (Northwind Analytics), bullet 1: cites unknown fact(s) ['nope']",
+    )
     assert report.verdict == "fail"
 
 

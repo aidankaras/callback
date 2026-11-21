@@ -215,3 +215,18 @@ class ResumeDoc(BaseModel):
     identity: Identity
     sections: list[Section] = Field(default_factory=list[Section])
     brief: str | None = Field(default=None, pattern=r"^[a-z0-9][a-z0-9-]{0,63}$")
+
+    def entries(self) -> list[tuple[str, Entry]]:
+        """Every entry in document order, with the label findings use for it:
+        `entry 2 (Northwind Analytics)`, counted from 1 across the document."""
+        flat = [e for s in self.sections for e in s.entries]
+        return [(f"entry {n} ({e.heading})", e) for n, e in enumerate(flat, start=1)]
+
+    def bullets(self) -> list[tuple[str, Bullet]]:
+        """Every bullet in document order, labelled by its entry and its
+        1-based position there: `entry 2 (Northwind Analytics), bullet 3`."""
+        return [
+            (f"{label}, bullet {n}", b)
+            for label, entry in self.entries()
+            for n, b in enumerate(entry.bullets, start=1)
+        ]

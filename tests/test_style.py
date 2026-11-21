@@ -275,8 +275,10 @@ def test_resume_findings_split_failures_from_warnings() -> None:
         Bullet(text="Shipped the loader", sources=["loader"]),
     )
     fails, warns = resume_findings(doc, {"role": ROLE, "loader": loader}, None)
-    assert fails == ["bullet 0: stock phrase 'Spearheaded'"]
-    assert len(warns) == 1 and warns[0].startswith("bullet 1: no number")
+    assert fails == ["entry 1 (Northwind Analytics), bullet 1: stock phrase 'Spearheaded'"]
+    assert len(warns) == 1 and warns[0].startswith(
+        "entry 1 (Northwind Analytics), bullet 2: no number"
+    )
 
 
 CNN_EXEMPLAR = "Trained a convolutional neural network in PyTorch to classify satellite images"
@@ -307,7 +309,7 @@ def test_wording_copied_beyond_the_cited_fact_is_copying() -> None:
     assert copied_run(bullet, [CNN_EXEMPLAR]) == "trained a convolutional neural network in"
     assert copied_run(bullet, [CNN_FACT]) == "trained a convolutional neural network in"
     assert _cnn_findings(bullet) == [
-        "bullet 0: copies an exemplar of the quant-research brief: "
+        "entry 1 (Northwind Analytics), bullet 1: copies an exemplar of the quant-research brief: "
         "'convolutional neural network in pytorch to'"
     ]
 

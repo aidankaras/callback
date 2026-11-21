@@ -75,19 +75,22 @@ def check_lints(
     blocks = bullet_blocks(extract_lines(pdf_path))
     fills = page_fill(pdf_path)
     lints: list[Lint] = []
+    # The page's bullets are named as the document names them when the counts
+    # agree; otherwise by their 1-based position on the page.
+    labels = [label for label, _ in doc.bullets()]
+    if len(labels) != len(blocks):
+        labels = [f"bullet {n}" for n in range(1, len(blocks) + 1)]
 
-    for index, block in enumerate(blocks):
+    for label, block in zip(labels, blocks, strict=True):
         if block.line_count > max_bullet_lines:
             lints.append(
                 Lint(
                     "bullet_too_long",
-                    f"bullet {index} occupies {block.line_count} lines: {block.text[:60]!r}",
+                    f"{label} occupies {block.line_count} lines: {block.text[:60]!r}",
                 )
             )
         if block.line_count > 1 and block.last_line_words <= 1:
-            lints.append(
-                Lint("widow_line", f"bullet {index} ends with one word on a line of its own")
-            )
+            lints.append(Lint("widow_line", f"{label} ends with one word on a line of its own"))
 
     for section in doc.sections:
         for entry in section.entries:

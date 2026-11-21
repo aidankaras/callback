@@ -74,11 +74,11 @@ def check_outreach(doc: Outreach, facts: Mapping[str, Fact], posting: str) -> Ou
     ctx = context_for(doc.company, doc.role, doc.candidate_name, facts, posting)
     findings.extend(name_findings(doc.candidate_name, facts))
     recipient_words = {w.casefold() for w in _WORD.findall(doc.recipient) if len(w) > 1}
-    for n, sentence in enumerate(doc.sentences):
-        findings.extend(check_sentence(f"0.{n}", sentence, ctx))
+    for n, sentence in enumerate(doc.sentences, start=1):
+        findings.extend(check_sentence(f"sentence {n}", sentence, ctx))
         # Word tokens, so a possessive ("Sam's") is still the name.
         if recipient_words & {w.casefold() for w in _WORD.findall(sentence.text)}:
-            findings.append(f"sentence 0.{n}: names the recipient; the greeting does that")
+            findings.append(f"sentence {n}: names the recipient; the greeting does that")
     text = render_outreach(doc)
     max_chars, max_words = LIMITS[doc.channel]
     if max_chars is not None and len(text) > max_chars:
