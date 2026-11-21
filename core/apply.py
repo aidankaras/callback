@@ -78,14 +78,19 @@ def _norm_name(value: str) -> str:
 
 
 def _url_key(url: str) -> str:
-    """`url` as two spellings of one page compare: no fragment, case-folded
-    throughout, every trailing slash and an http(s) scheme dropped, the query
-    kept, since a Greenhouse job is told apart only by its `?gh_jid=`.
+    """`url` as two spellings of one page compare: case-folded throughout,
+    every trailing slash and an http(s) scheme dropped, the query kept, since a
+    Greenhouse job is told apart only by its `?gh_jid=`. The fragment is
+    dropped unless it is a route (`#/job/123`), which a single-page board uses
+    to tell one posting from another.
 
     Looser than the form a hand-added posting is stored under: a variant
     spelling of a page already applied to must not read as another posting."""
-    page = url.strip().split("#", 1)[0].casefold().rstrip("/")
-    return page.removeprefix("https://").removeprefix("http://")
+    page, _, fragment = url.strip().partition("#")
+    page = page.casefold().rstrip("/").removeprefix("https://").removeprefix("http://")
+    if fragment.startswith("/"):
+        page += "#" + fragment.casefold().rstrip("/")
+    return page
 
 
 def same_url(a: str, b: str) -> bool:

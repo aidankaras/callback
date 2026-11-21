@@ -14,6 +14,7 @@ from core.apply import (
     apply,
     load_applications,
     record_outcome,
+    same_url,
     void_application,
 )
 from core.paths import ensure_home
@@ -489,3 +490,17 @@ def test_a_record_that_names_no_facts_is_refused_once_there_are_facts(home: Path
 
     with pytest.raises(ApplyError, match="the facts have changed since the resume was"):
         apply(_target(), now=NOW)
+
+
+@pytest.mark.parametrize(
+    ("a", "b", "same"),
+    [
+        ("https://jobs.example.com/#/job/123", "https://jobs.example.com/#/job/456", False),
+        ("https://jobs.example.com/#/job/123", "http://JOBS.example.com/#/job/123/", True),
+        ("https://example.com/jobs/1#apply", "https://example.com/jobs/1", True),
+    ],
+)
+def test_a_route_fragment_tells_postings_apart(a: str, b: str, same: bool) -> None:
+    """A single-page board routes by fragment, so `#/job/123` and `#/job/456`
+    are two postings, while an anchor (`#apply`) is still the same page."""
+    assert same_url(a, b) is same
