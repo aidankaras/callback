@@ -1,24 +1,15 @@
 name: Standards audit
 
-# Reads the whole repository against the properties this project claims for
-# itself (see the prompt below) and writes its findings to
-# reports/standards-audit.md, which leaves as a run artifact rather than a
-# commit. It changes nothing else: an unattended fix
-# to a design decision is exactly the confident, plausible, wrong change the
-# gates in this project exist to catch, so the audit is instructed to report
-# only, never to edit core/, tests/, docs/ or its own workflow.
+# Reads the repository against the properties it claims for itself (see the
+# prompt below) and writes reports/standards-audit.md as a run artifact. It is
+# told to report only, never to edit code, tests, docs or this workflow.
 #
-# Triggers are schedule and workflow_dispatch only -- never an event carrying
-# attacker-influenced content (issue_comment, pull_request_target, etc) -- and
-# nothing from github.event.* is interpolated into the prompt or any shell
-# command below. That is what keeps the injection surface at zero rather than
-# merely small.
+# Triggers are schedule and workflow_dispatch only, never an event carrying
+# outside content (issue_comment, pull_request_target), and nothing from
+# github.event.* reaches the prompt or a shell command.
 #
-# The day-of-week field is left as `*` deliberately. crontab(5) documents that
-# naming both day-of-month and day-of-week restricts the schedule to the
-# union (OR) of the two, not their intersection -- so day-of-month "1,15"
-# combined with a restricted day-of-week would fire far more often than the
-# 1st/15th intended.
+# Day-of-week stays `*`: crontab(5) ORs day-of-month with a restricted
+# day-of-week, which would fire far more often than the 1st and 15th.
 
 on:
   schedule:
@@ -58,10 +49,9 @@ jobs:
       - name: Run the audit
         uses: anthropics/claude-code-action@d535f5172dec02b204866b393d6b20b9b2aaf98d  # v1
         env:
-          # Keep subagents in the foreground. The review and audit both start
-          # agents in the background and end their turn to wait for them, and
-          # in an unattended run ending the turn ends the run: reviews finished
-          # in three turns with no comments, and one audit wrote no report.
+          # Keep subagents in the foreground: in an unattended run, ending the
+          # turn to wait for a background agent ends the run, and one audit
+          # wrote no report that way.
           CLAUDE_CODE_DISABLE_BACKGROUND_TASKS: "1"
         with:
           # The OAuth token, not an API key: this project runs on a subscription
