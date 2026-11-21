@@ -14,6 +14,8 @@ if TYPE_CHECKING:
     from core.discovery.fetch import Fetcher
     from core.discovery.store import PageSource
 
+    Subparsers = argparse._SubParsersAction[argparse.ArgumentParser]  # pyright: ignore[reportPrivateUsage]
+
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="callback")
@@ -37,6 +39,17 @@ def build_parser() -> argparse.ArgumentParser:
     build.add_argument("--job", required=True, help="job id: lowercase letters, digits, hyphens")
     build.set_defaults(handler=_cmd_build)
 
+    _add_discovery_commands(sub)
+    _add_writing_commands(sub)
+    _add_application_commands(sub)
+    _add_document_commands(sub)
+    _add_fact_commands(sub)
+
+    return parser
+
+
+def _add_discovery_commands(sub: Subparsers) -> None:
+    """Register postings, profiles and triage: finding what to apply to."""
     targets = sub.add_parser("targets", help="the companies whose job boards to watch")
     targets_sub = targets.add_subparsers(dest="targets_command", required=True)
     t_add = targets_sub.add_parser("add", help="watch a company's Greenhouse, Lever or Ashby board")
@@ -144,6 +157,9 @@ def build_parser() -> argparse.ArgumentParser:
         help="what to do next: interviews to prepare, postings to take, quiet applications",
     ).set_defaults(handler=_cmd_agenda)
 
+
+def _add_writing_commands(sub: Subparsers) -> None:
+    """Register templates, briefs, answers and outreach notes."""
     templates = sub.add_parser(
         "template", help="reuse a document that passed as the starting point for the next one"
     )
@@ -182,6 +198,9 @@ def build_parser() -> argparse.ArgumentParser:
     outreach.add_argument("doc", type=Path, help="outreach note (YAML)")
     outreach.set_defaults(handler=_cmd_outreach)
 
+
+def _add_application_commands(sub: Subparsers) -> None:
+    """Register sealing, applying and recording outcomes."""
     fin = sub.add_parser(
         "finalize", help="seal a gated draft into final/ and record it in the ledger"
     )
@@ -242,6 +261,9 @@ def build_parser() -> argparse.ArgumentParser:
     applications = sub.add_parser("applications", help="list recorded applications")
     applications.set_defaults(handler=_cmd_applications)
 
+
+def _add_document_commands(sub: Subparsers) -> None:
+    """Register cover letters, export, import and the application funnel."""
     letter = sub.add_parser(
         "letter", help="render a cover letter and check it against your facts and the posting"
     )
@@ -268,6 +290,9 @@ def build_parser() -> argparse.ArgumentParser:
         help="what happened to what was sent, by template, role family and cited fact (counts)",
     ).set_defaults(handler=_cmd_insights)
 
+
+def _add_fact_commands(sub: Subparsers) -> None:
+    """Register facts and notes, which only the candidate confirms."""
     facts = sub.add_parser("facts", help="add, list and confirm the facts a resume may use")
     facts_sub = facts.add_subparsers(dest="facts_command", required=True)
     add = facts_sub.add_parser("add", help="add facts from a YAML list (they start unconfirmed)")
@@ -342,8 +367,6 @@ def build_parser() -> argparse.ArgumentParser:
     )
     n_fam.add_argument("--set", dest="families", default=None, help="comma-separated names")
     n_fam.set_defaults(handler=_cmd_notes_families)
-
-    return parser
 
 
 _SAFE_STEM = re.compile(r"[^a-z0-9-]+")
