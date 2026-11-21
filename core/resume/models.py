@@ -62,9 +62,9 @@ class Entry(BaseModel):
     `sources` cites the facts that back the header fields (`heading`,
     `subheading`, `location`, `start`, `end`) — separately from each
     bullet's own `sources`, since a bullet can restate or derive a claim its
-    entry's header never makes. It defaults to empty because no gate reads
-    it yet; a header with no cited facts simply isn't checked, the same as
-    an old document that predates this field.
+    entry's header never makes. It defaults to empty so a document parses
+    without it, but the claims gate fails an entry whose header cites no
+    fact.
     """
 
     model_config = {"extra": "forbid"}
