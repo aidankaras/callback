@@ -432,7 +432,8 @@ def _cmd_watch(_args: argparse.Namespace) -> int:
     for target, message in result.errors:
         print(f"callback watch: could not read {target.company}: {message}", file=sys.stderr)
     print(f"{len(result.new)} new posting(s)")
-    return 1 if result.errors else 0
+    # Its own code: 1 means "warn" for the gate commands.
+    return 4 if result.errors else 0
 
 
 def _cmd_postings_list(args: argparse.Namespace) -> int:

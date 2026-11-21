@@ -109,7 +109,7 @@ likewise not a tool. Everything else is conversational:
 | `callback profile`, `eligibility`, `triage` | flag knockout requirements (sponsorship, citizenship, graduation window) quoted from the posting, and rank postings by evidence and freshness |
 | `callback import resume.pdf` | extract an existing resume's text, screening it for hidden content |
 | `callback facts add / list / check / confirm / retire` | store facts (unconfirmed), list them, check each against its own text, and confirm or retire them yourself |
-| `callback build resume.yaml --job <id>` | render the PDF and run every gate; exit 0 pass, 1 warn, 2 fail |
+| `callback build resume.yaml --job <id>` | render the PDF and run every gate; exit 0 pass, 1 warn, 2 fail, 3 could not run |
 | `callback letter letter.yaml` | render and check a cover letter |
 | `callback export resume.yaml` | the resume as plain text, for forms that want it pasted |
 | `callback answers answers.yaml` | check free-text application-form answers against their limits, ready to paste |
@@ -120,7 +120,9 @@ likewise not a tool. Everything else is conversational:
 | `callback finalize <id>` / `callback verify` | seal what you sent and prove later that nothing changed |
 | `callback interview <id>` | an interview pack built from exactly the documents that were sent |
 
-`docs/using-callback.md` has the fact format, the document format and every rule.
+Every command exits 3 when it could not run (an unreadable file, a refused path); `watch` exits 4
+when a board could not be read. `docs/using-callback.md` lists each command's codes, the fact
+format, the document format and every rule.
 
 ## Evaluating the skill
 
