@@ -549,38 +549,11 @@ def _unsupported_names(text: str, corpus: str, cited_entities: set[str]) -> list
     return unsupported
 
 
-def check_bullet(
-    text: str, sources: Sequence[Fact], *, index: int = 0
-) -> tuple[Verdict, list[Finding]]:
-    """Ground a single bullet's numbers, entities and dates against `sources`.
-
-    Returns `Verdict.FAIL` with at least one `Finding` for any unresolved
-    claim. Otherwise returns the strongest verdict that explains how the
-    bullet passed: `DERIVED_VERIFIED` if any number needed a recomputed
-    derivation, else `ALIAS_MATCH` if any entity needed alias resolution,
-    else plain `PASS`.
-    """
-    if not carries_content(text):
-        return Verdict.FAIL, [
-            Finding(index, FindingKind.EMPTY_BULLET, "bullet has no letter or digit to ground")
-        ]
-    if not sources:
-        return Verdict.FAIL, [Finding(index, FindingKind.MISSING_SOURCE, "bullet cites no fact")]
-
-    unselectable = [f.id for f in sources if not f.selectable()]
-    if unselectable:
-        return Verdict.FAIL, [
-            Finding(
-                index,
-                FindingKind.UNSELECTABLE_FACT,
-                f"facts not confirmed by the user: {unselectable}",
-            )
-        ]
-
+def _number_findings(text: str, sources: Sequence[Fact], index: int) -> tuple[list[Finding], bool]:
+    """Every number in `text` that no cited quantity, derivation or date backs,
+    and whether any number needed a recomputed derivation."""
     findings: list[Finding] = []
     used_derivation = False
-    used_alias = False
-
     quantities = [q for f in sources for q in f.numbers.values()]
     percent_values = {q.value for q in quantities if not _is_count(q.unit)}
     count_values = {q.value for q in quantities if not _is_percent(q.unit)}
@@ -646,7 +619,14 @@ def check_bullet(
                 f"{number.raw!r} is not derivable from the cited facts",
             )
         )
+    return findings, used_derivation
 
+
+def _entity_findings(text: str, sources: Sequence[Fact], index: int) -> tuple[list[Finding], bool]:
+    """Every technology or identifier-shaped token the cited facts' entities do
+    not list, and whether any needed alias resolution."""
+    findings: list[Finding] = []
+    used_alias = False
     cited_entities = {canonicalize(e) for f in sources for e in f.entities}
     # The facts' prose alone, not their structured fields: the fix a miss
     # message names is only right when the prose states the token.
@@ -705,7 +685,14 @@ def check_bullet(
                 _miss_detail(f"{token!r} (canonical form {canonical!r})", token, fact_text),
             )
         )
+    return findings, used_alias
 
+
+def _word_findings(text: str, sources: Sequence[Fact], index: int) -> list[Finding]:
+    """Names, claim words and spelled-out numbers the cited facts do not state."""
+    findings: list[Finding] = []
+    cited_entities = {canonicalize(e) for f in sources for e in f.entities}
+    all_values = {q.value for f in sources for q in f.numbers.values()}
     corpus = _support_corpus(sources)
     for word in _unsupported_names(text, corpus, cited_entities):
         findings.append(
@@ -720,7 +707,6 @@ def check_bullet(
                     f"claim {claim!r} is not stated in any cited fact",
                 )
             )
-    all_values = {q.value for q in quantities}
     # "1.2 million" is one number, not a number and the word one million:
     # `parse_numbers` folds the word into the value, and its span covers it.
     folded = [n.span for n in parse_numbers(text)]
@@ -737,7 +723,13 @@ def check_bullet(
                     f"{word!r} ({value:g}) is not derivable from the cited facts",
                 )
             )
+    return findings
 
+
+def _date_findings(text: str, sources: Sequence[Fact], index: int) -> list[Finding]:
+    """Every month-precision date in `text` outside the cited facts' span."""
+    findings: list[Finding] = []
+    start, end = date_hull(sources)
     # A year-precision bound covers the whole year: "2024" as an upper bound
     # is 2024-12, not 2024-01, and a plain string comparison makes every month
     # of that year fall outside it.
@@ -748,6 +740,42 @@ def check_bullet(
             findings.append(
                 Finding(index, FindingKind.UNRESOLVED_DATE, f"{iso} falls outside {low}..{high}")
             )
+    return findings
+
+
+def check_bullet(
+    text: str, sources: Sequence[Fact], *, index: int = 0
+) -> tuple[Verdict, list[Finding]]:
+    """Ground a single bullet's numbers, entities and dates against `sources`.
+
+    Returns `Verdict.FAIL` with at least one `Finding` for any unresolved
+    claim. Otherwise returns the strongest verdict that explains how the
+    bullet passed: `DERIVED_VERIFIED` if any number needed a recomputed
+    derivation, else `ALIAS_MATCH` if any entity needed alias resolution,
+    else plain `PASS`.
+    """
+    if not carries_content(text):
+        return Verdict.FAIL, [
+            Finding(index, FindingKind.EMPTY_BULLET, "bullet has no letter or digit to ground")
+        ]
+    if not sources:
+        return Verdict.FAIL, [Finding(index, FindingKind.MISSING_SOURCE, "bullet cites no fact")]
+
+    unselectable = [f.id for f in sources if not f.selectable()]
+    if unselectable:
+        return Verdict.FAIL, [
+            Finding(
+                index,
+                FindingKind.UNSELECTABLE_FACT,
+                f"facts not confirmed by the user: {unselectable}",
+            )
+        ]
+
+    findings, used_derivation = _number_findings(text, sources, index)
+    entity_findings, used_alias = _entity_findings(text, sources, index)
+    findings += entity_findings
+    findings += _word_findings(text, sources, index)
+    findings += _date_findings(text, sources, index)
 
     if findings:
         return Verdict.FAIL, findings
