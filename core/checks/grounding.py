@@ -378,19 +378,25 @@ _CLAIM_PHRASES = (
     r"thousands",
     r"millions",
     r"billions",
-    r"first",
-    r"sole",
-    r"best",
+    # Rank words only in the phrases that make them a rank: "first-pass" and
+    # "best practices" are ordinary wording.
+    r"first to",
+    r"first[- ]ever",
+    r"first[- ](?:place|prize|author)",
+    r"sole (?:owner|author|developer|engineer|maintainer|contributor)",
+    r"best[- ](?:paper|in[- ]class|performing|ranked)",
     r"head of",
     r"led a team",
     r"managed a team",
     # A relationship with the reader -- "we met", "Alex referred me" -- is a
     # claim about the candidate's history like any other.
-    r"met",
+    # "met every deadline" and "introduced caching" describe work, not people.
+    r"(?:we|i|you) met",
+    r"met (?:with|at|through)",
     r"suggested",
     r"referred",
     r"referral",
-    r"introduced",
+    r"introduced (?:me|us|by)",
     r"recommended",
     r"mutual",
     r"reach(?:ed)? out",

@@ -769,6 +769,39 @@ def test_a_percent_backs_a_percent_but_not_a_count() -> None:
     assert check_bullet("Onboarded 42 accounts", [NORTHWIND])[0] is Verdict.FAIL
 
 
+@pytest.mark.parametrize(
+    "bullet",
+    [
+        "Met every deadline on the reporting pipelines",
+        "Reviewed reporting pipelines on a first-pass basis",
+        "Applied best practices to the reporting pipelines",
+        "Introduced caching to the reporting pipelines",
+        "Owned the sole reporting pipeline",
+    ],
+)
+def test_an_ordinary_use_of_a_rank_or_relationship_word_passes(bullet: str) -> None:
+    """Mutation: restore bare "met", "first", "best", "introduced" or "sole"
+    to the claim words -- each fails as an unsupported claim."""
+    assert check_bullet(bullet, [NORTHWIND]) == (Verdict.PASS, [])
+
+
+@pytest.mark.parametrize(
+    "bullet",
+    [
+        "Was the first to ship reporting pipelines",
+        "Won first place for the reporting pipelines",
+        "Sole developer of the reporting pipelines",
+        "Built best-in-class reporting pipelines",
+        "We met at the reporting pipelines review",
+        "Introduced me to the reporting pipelines",
+    ],
+)
+def test_a_rank_or_relationship_claim_still_needs_a_fact(bullet: str) -> None:
+    verdict, findings = check_bullet(bullet, [NORTHWIND])
+    assert verdict is Verdict.FAIL
+    assert FindingKind.UNSUPPORTED_CLAIM_WORD in [f.kind for f in findings], findings
+
+
 def test_a_claim_word_stated_in_the_fact_passes() -> None:
     promoted = fact("p", text="Promoted to Senior Analyst in 2024")
     assert check_bullet("Earned a promotion; promoted to Senior Analyst", [promoted])[0] is (
